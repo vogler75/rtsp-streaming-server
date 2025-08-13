@@ -154,10 +154,69 @@
         function init() {
             canvas = document.getElementById('videoCanvas');
             ctx = canvas.getContext('2d');
-            updateStatus('disconnected', 'Disconnected');
+            
+            // Check if full mode is enabled
+            if (window.FULL_MODE) {
+                enableFullMode();
+            } else {
+                updateStatus('disconnected', 'Disconnected');
+            }
             
             // Auto-connect on page load
             setTimeout(connect, 1000);
+        }
+
+        function enableFullMode() {
+            // Hide all UI elements
+            document.querySelector('.container').style.display = 'none';
+            
+            // Create full-screen canvas container
+            const fullContainer = document.createElement('div');
+            fullContainer.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background: #000;
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+            `;
+            
+            // Move canvas to full container
+            canvas.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                object-fit: cover;
+                background-color: #000;
+            `;
+            
+            // Set body style for full mode
+            document.body.style.cssText = `
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                background: #000;
+            `;
+            
+            // Move canvas to full container and add to body
+            fullContainer.appendChild(canvas);
+            document.body.appendChild(fullContainer);
+            
+            // Resize canvas to full window
+            resizeCanvasForFullMode();
+            window.addEventListener('resize', resizeCanvasForFullMode);
+        }
+
+        function resizeCanvasForFullMode() {
+            if (window.FULL_MODE) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
         }
 
         function connect() {
@@ -271,13 +330,40 @@
             
             // Use createImageBitmap for better performance (non-blocking)
             createImageBitmap(blob).then(function(imageBitmap) {
-                // Resize canvas if needed
-                if (canvas.width !== imageBitmap.width || canvas.height !== imageBitmap.height) {
-                    canvas.width = imageBitmap.width;
-                    canvas.height = imageBitmap.height;
+                if (window.FULL_MODE) {
+                    // Full mode: scale to fill entire viewport while maintaining aspect ratio
+                    const canvasAspect = canvas.width / canvas.height;
+                    const imageAspect = imageBitmap.width / imageBitmap.height;
+                    
+                    let drawWidth, drawHeight, offsetX, offsetY;
+                    
+                    if (imageAspect > canvasAspect) {
+                        // Image is wider than canvas
+                        drawHeight = canvas.height;
+                        drawWidth = drawHeight * imageAspect;
+                        offsetX = (canvas.width - drawWidth) / 2;
+                        offsetY = 0;
+                    } else {
+                        // Image is taller than canvas
+                        drawWidth = canvas.width;
+                        drawHeight = drawWidth / imageAspect;
+                        offsetX = 0;
+                        offsetY = (canvas.height - drawHeight) / 2;
+                    }
+                    
+                    // Clear canvas and draw image to fill the entire view
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(imageBitmap, offsetX, offsetY, drawWidth, drawHeight);
+                } else {
+                    // Normal mode: resize canvas to match image dimensions
+                    if (canvas.width !== imageBitmap.width || canvas.height !== imageBitmap.height) {
+                        canvas.width = imageBitmap.width;
+                        canvas.height = imageBitmap.height;
+                    }
+                    
+                    ctx.drawImage(imageBitmap, 0, 0);
                 }
                 
-                ctx.drawImage(imageBitmap, 0, 0);
                 imageBitmap.close(); // Release memory
                 
                 // Process next frame if available

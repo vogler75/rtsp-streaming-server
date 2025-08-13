@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{sleep, Duration};
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn};
 use anyhow::Result;
 use bytes::Bytes;
 
@@ -254,6 +254,34 @@ impl RtspClient {
     async fn stream_rtsp_via_ffmpeg(&self) -> Result<()> {
         info!("🎥 Starting direct RTSP to MJPEG streaming via FFmpeg");
         
+        let mut retry_count = 0;
+        let max_retries = 10;
+        
+        loop {
+            match self.run_ffmpeg_process().await {
+                Ok(_) => {
+                    info!("FFmpeg process ended normally");
+                    retry_count = 0; // Reset on successful run
+                }
+                Err(e) => {
+                    retry_count += 1;
+                    error!("FFmpeg process failed (attempt {}): {}", retry_count, e);
+                    
+                    if retry_count >= max_retries {
+                        error!("FFmpeg failed {} times, giving up", max_retries);
+                        return Err(anyhow::anyhow!("FFmpeg process repeatedly failed"));
+                    }
+                    
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+                    let delay = std::cmp::min(1u64 << (retry_count - 1), 30);
+                    warn!("Waiting {} seconds before retrying FFmpeg...", delay);
+                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                }
+            }
+        }
+    }
+    
+    async fn run_ffmpeg_process(&self) -> Result<()> {
         // Use FFmpeg to directly read from RTSP and output MJPEG frames with low latency
         if self.capture_framerate > 0 {
             info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, self.quality);
@@ -327,42 +355,59 @@ impl RtspClient {
         let mut buffer = Vec::new();
         let mut last_log_time = tokio::time::Instant::now();
         
-        // Read MJPEG frames from FFmpeg stdout
+        // Read MJPEG frames from FFmpeg stdout with process monitoring
         loop {
-            match self.read_mjpeg_frame(&mut reader, &mut buffer).await {
-                Ok(jpeg_data) => {
-                    frame_count += 1;
-                    
-                    // Store the frame in the latest frame store
-                    {
-                        let mut guard = self.latest_frame.write().await;
-                        *guard = Some(Bytes::from(jpeg_data));
-                    }
-                    
-                    // Log capture statistics every second if enabled
-                    let now = tokio::time::Instant::now();
-                    if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                        if self.capture_framerate > 0 {
-                            debug!("CAPTURE: {:2}/s Target: {:2}/s", 
-                                   frame_count, self.capture_framerate);
-                        } else {
-                            debug!("CAPTURE: {:2}/s Natural Rate", frame_count);
+            tokio::select! {
+                // Monitor FFmpeg process status
+                exit_status = ffmpeg_cmd.wait() => {
+                    match exit_status {
+                        Ok(status) => {
+                            if status.success() {
+                                info!("FFmpeg process exited normally");
+                            } else {
+                                error!("FFmpeg process exited with error: {}", status);
+                            }
                         }
-                        frame_count = 0;
-                        last_log_time = now;
+                        Err(e) => {
+                            error!("Failed to wait for FFmpeg process: {}", e);
+                        }
                     }
+                    return Err(anyhow::anyhow!("FFmpeg process died"));
                 }
-                Err(e) => {
-                    error!("Error reading MJPEG frame: {}", e);
-                    break;
+                
+                // Read frames from stdout
+                frame_result = self.read_mjpeg_frame(&mut reader, &mut buffer) => {
+                    match frame_result {
+                        Ok(jpeg_data) => {
+                            frame_count += 1;
+                            
+                            // Store the frame in the latest frame store
+                            {
+                                let mut guard = self.latest_frame.write().await;
+                                *guard = Some(Bytes::from(jpeg_data));
+                            }
+                            
+                            // Log capture statistics every second if enabled
+                            let now = tokio::time::Instant::now();
+                            if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                                if self.capture_framerate > 0 {
+                                    debug!("CAPTURE: {:2}/s Target: {:2}/s", 
+                                           frame_count, self.capture_framerate);
+                                } else {
+                                    debug!("CAPTURE: {:2}/s Natural Rate", frame_count);
+                                }
+                                frame_count = 0;
+                                last_log_time = now;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading MJPEG frame: {}", e);
+                            return Err(e);
+                        }
+                    }
                 }
             }
         }
-        
-        // Wait for FFmpeg process to finish
-        let _ = ffmpeg_cmd.wait().await;
-        
-        Err(anyhow::anyhow!("FFmpeg process ended"))
     }
 
     async fn read_mjpeg_frame(&self, reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>, buffer: &mut Vec<u8>) -> Result<Vec<u8>> {

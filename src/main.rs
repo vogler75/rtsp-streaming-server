@@ -98,17 +98,37 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn serve_index() -> axum::response::Html<&'static str> {
-    axum::response::Html(include_str!("../static/index.html"))
+async fn serve_index_with_mode(is_full_mode: bool) -> axum::response::Html<String> {
+    let mut html = include_str!("../static/index.html").to_string();
+    
+    if is_full_mode {
+        // Inject JavaScript to enable full mode
+        let full_mode_script = r#"
+        <script>
+            // Enable full mode by setting a flag before the main script runs
+            window.FULL_MODE = true;
+        </script>"#;
+        
+        // Insert the script before the closing </head> tag
+        html = html.replace("</head>", &format!("{}</head>", full_mode_script));
+    }
+    
+    axum::response::Html(html)
 }
+
 
 async fn root_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
     State(frame_sender): axum::extract::State<Arc<broadcast::Sender<bytes::Bytes>>>,
 ) -> axum::response::Response {
     match ws {
         Some(ws_upgrade) => websocket_handler(ws_upgrade, State(frame_sender)).await,
-        None => serve_index().await.into_response(),
+        None => {
+            // Check if 'full' parameter is present
+            let is_full_mode = query.contains_key("full");
+            serve_index_with_mode(is_full_mode).await.into_response()
+        }
     }
 }
 
