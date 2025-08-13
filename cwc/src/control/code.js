@@ -2,303 +2,300 @@
 //
 // SPDX-License-Identifier: MIT
 
+////////////////////////////////////////////
+// VideoPlayer internal properties
+
+let websocket = null;
+let videoElement = null;
+let statusElement = null;
+let isConnected = false;
+let currentURL = '';
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+let maxReconnectAttempts = 5;
+let reconnectInterval = 3000;
 
 ////////////////////////////////////////////
-// Helper functions
+// VideoPlayer functions
 
-// Convert a WinCC Unified color number to a standard HTML5 color string, 
-// e.g. "0xFF00FF00" (#Alpha-Red-Green-Blue) to "rgba(0,255,0,255)" (rgba(Red,Green,Blue,Alpha))
-function toColor(num) {
-  num >>>= 0;
-  var b = num & 0xFF,
-    g = (num & 0xFF00) >>> 8,
-    r = (num & 0xFF0000) >>> 16,
-    a = ((num & 0xFF000000) >>> 24) / 255;
-
-  return 'rgba(' + [r, g, b, a].join(',') + ')';
-}
-
-////////////////////////////////////////////
-// Gauge internal properties
-
-// access all properties of the shown gauge with this property "gauge". It will be initialized by the function "initializeGauge()"
-let gauge;
-// get or set the index of the zone the value is currently in
-let currentZoneIndex = -1;
-
-
-////////////////////////////////////////////
-// Gauge functions
-
-// Paints the gauge with default values when the control is initialized. This function should only be called ones in the beginning.
-function initializeGauge() {
-  const options = {
-    pointer: {
-      length: 0.6, // // Relative to gauge radius
-      strokeWidth: 0.035, // The thickness
-      color: '#000000' // Fill color
-    },
-    limitMax: true,
-    limitMin: true,
-    generateGradient: true,
-    highDpiSupport: true,     // High resolution support
-    // renderTicks is Optional
-    renderTicks: {
-      divisions: 5,
-      divWidth: 1.1,
-      divLength: 0.7,
-      divColor: '#333333',
-      subDivisions: 3,
-      subLength: 0.5,
-      subWidth: 0.6,
-      subColor: '#666666'
-    },
-    staticZones: []
+function initializeVideoPlayer() {
+  videoElement = document.getElementById('videoPlayer');
+  statusElement = document.getElementById('status');
+  
+  videoElement.onerror = function(e) {
+    // Only log video errors if we're actually using the video element
+    if (videoElement.style.display !== 'none') {
+      console.error('Video error:', e);
+      updateConnectionStatus(false);
+    }
   };
-  gauge = new Gauge(document.getElementById('gauge')).setOptions(options);
-  gauge.animationSpeed = 11;
-}
-
-// Updates the value shown by the gauge whenever it is changed, e.g. by a WinCC Unified tag or script.
-// This function will be called by "setProperty" whenever the contract property GaugeValue is changed.
-// - value: number that contains the new value to be shown in the gauge meter.
-function updateValue(value) {
-  gauge.set(value);
-  const newZoneIndex = gauge.options.staticZones.indexOf(
-    gauge.options.staticZones.
-      filter(zone => zone.min <= gauge.value && gauge.value <= zone.max).pop()
-  );
-  if (newZoneIndex != currentZoneIndex) {
-    currentZoneIndex = newZoneIndex;
-    WebCC.Events.fire('ZoneChanged', newZoneIndex);
-  }
-}
-
-// Updates the alignment of the whole gauge inside the control. You can place it at the top, middle or bottom.
-// This function will be called by "setProperty" whenever the user changes the alignment.
-// - alignment: object that contains an enum property "Vertical" that can be either "Top", "Center" or "Bottom".
-function updateAlignment(alignment) {
-  const item = document.getElementById('gauge');
-  let vertVal = '0';
-  let topVal = '0';
-  switch (alignment.Vertical) {
-    case 'Top':
-      break;
-    case 'Center':
-      topVal = '50%';
-      vertVal = '-50%';
-      break;
-    case 'Bottom':
-      topVal = 'inherit';
-      break;
-  }
-  item.style.top = topVal;
-  item.style.transform = 'translate(0,' + vertVal + ')';
-}
-
-// Updates the labels of the gauge. All labels have to be updated whenever the DivisionCount, MaxValue, MinValue or FontSize is changed. 
-// This function will be called by "setProperty" whenever one of those contract properties change.
-function updateLabels() {
-  const labels = new Array(WebCC.Properties.DivisionCount).fill(0).map(
-    (x, i) => (i + 1) * (WebCC.Properties.MaxValue - WebCC.Properties.MinValue) / WebCC.Properties.DivisionCount + WebCC.Properties.MinValue
-  );
-  labels.unshift(WebCC.Properties.MinValue);
-  gauge.setOptions({
-    staticLabels: {
-      font: WebCC.Properties.FontSize + 'px "Siemens Sans"',
-      labels: labels
+  
+  videoElement.onloadstart = function() {
+    if (videoElement.style.display !== 'none') {
+      console.log('Video loading started');
     }
-  });
+  };
+  
+  videoElement.oncanplay = function() {
+    if (videoElement.style.display !== 'none') {
+      console.log('Video can start playing');
+    }
+  };
 }
 
-// Paints the given zones inside the gauge. This function will be called by "setProperty" whenever a zone is changed or 
-// zones will be added or removed.
-// - zones: array of new zones to be painted
-function updateZones(zones) {
-  gauge.setOptions({
-    staticZones: zones.map(item => {
-      return { strokeStyle: toColor(item.StrokeColor), min: item.Min, max: item.Max };
-    })
-  });
+function updateConnectionStatus(connected) {
+  isConnected = connected;
+  WebCC.Properties.connected = connected;
+  
+  if (statusElement) {
+    if (connected) {
+      statusElement.textContent = 'Connected';
+      statusElement.style.backgroundColor = 'rgba(0,128,0,0.7)';
+      reconnectAttempts = 0;
+    } else {
+      const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts}/${maxReconnectAttempts})` : '';
+      statusElement.textContent = 'Disconnected' + reconnectText;
+      statusElement.style.backgroundColor = 'rgba(128,0,0,0.7)';
+    }
+  }
+  
+  console.log('Connection status:', connected);
 }
 
-// This is a callback function that is called every time a contract property changes. The function forwards the change to 
-// other functions so you can see the new value in the control.
-// - data: object containing a key and a value property. The "key" contains the name of the changed contract property and 
-//         the "value" contains the new value.
-function setProperty(data) {
-  // console.log('onPropertyChanged ' + data.key);  // uncomment this line to check whether data is incoming in the browser console from WinCC Unified
-  switch (data.key) {
-    case 'GaugeValue':
-      updateValue(data.value);
-      break;
-    case 'GaugeBackColor':
-      document.body.style.backgroundColor = toColor(data.value);
-      break;
-    case 'Alignment':
-      updateAlignment(data.value);
-      break;
-    case 'LineThickness':
-      gauge.setOptions({ lineWidth: data.value / 100 });
-      break;
-    case 'FontSize':
-      updateLabels();
-      break;
-    case 'MinValue':
-      gauge.setMinValue(data.value);
-      updateLabels();
-      break;
-    case 'MaxValue':
-      gauge.maxValue = data.value;
-      updateLabels();
-      break;
-    case 'DivisionCount':
-      updateLabels();
-      break;
-    case 'Zones':
-      updateZones(data.value);
-      break;
+function scheduleReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+  
+  if (reconnectAttempts < maxReconnectAttempts && currentURL) {
+    reconnectAttempts++;
+    console.log(`Scheduling reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${reconnectInterval}ms`);
+    updateConnectionStatus(false);
+    
+    reconnectTimer = setTimeout(() => {
+      console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})`);
+      connectToWebSocket(currentURL);
+    }, reconnectInterval);
+  } else {
+    console.log('Max reconnection attempts reached or no URL available');
   }
 }
 
-// Let the given zone blink by descreasing and increasing the alpha value of the zone color from 0% zu 100% and 
-// back to orininal value 2 times.
-// - zoneIndex: integer as index of the zone that will blink.
-function blinkZone(zoneIndex) {
-  const currentZone = gauge.options.staticZones[zoneIndex];
-  const rgba = currentZone.strokeStyle.split(',');
-  const originalRgba = Number(rgba[3].replace(')', ''));
-  let currentRgba = originalRgba;
-  let state = 0; // 0: falling, 1: raising, 2: falling again
-  let currentRound = 0;
-  const timerId = setInterval(() => {
-    switch (state) {
-      case 0:
-        currentRgba -= 0.2;
-        if (currentRgba <= 0) {
-          currentRgba = 0;
-          state = 1;
+function connectToWebSocket(url) {
+  if (!url || url.trim() === '') {
+    console.log('No URL provided');
+    updateConnectionStatus(false);
+    return;
+  }
+  
+  if (websocket) {
+    websocket.close();
+    websocket = null;
+  }
+  
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  try {
+    console.log('Attempting WebSocket connection...');
+    console.log('URL:', url);
+    console.log('Protocol:', url.startsWith('wss://') ? 'Secure WebSocket (WSS)' : 'WebSocket (WS)');
+    
+    // For WSS with self-signed certificates, try different approaches
+    if (url.startsWith('wss://')) {
+      console.log('Attempting WSS connection (ignoring certificate errors where possible)');
+      
+      // Try to create WebSocket with additional error handling for certificate issues
+      try {
+        websocket = new WebSocket(url);
+      } catch (certError) {
+        console.warn('WSS connection failed, possibly due to certificate issues:', certError);
+        
+        // Fallback: try converting WSS to WS for testing
+        const wsUrl = url.replace('wss://', 'ws://');
+        console.log('Attempting fallback to WS:', wsUrl);
+        websocket = new WebSocket(wsUrl);
+      }
+    } else {
+      websocket = new WebSocket(url);
+    }
+    
+    websocket.onopen = function() {
+      console.log('WebSocket connected');
+      updateConnectionStatus(true);
+    };
+    
+    websocket.onmessage = function(event) {
+      if (event.data instanceof Blob) {
+        // Check if this is an empty frame (ping) - same as server HTML
+        if (event.data.size === 0) {
+          return;
         }
-        break;
-      case 1:
-        currentRgba += 0.2;
-        if (currentRgba >= 1) {
-          currentRgba = 1;
-          state = 2;
+        
+        // Handle MJPEG frame from WebSocket
+        // Create or update an img element to display the MJPEG frame
+        let imgElement = document.getElementById('mjpegFrame');
+        if (!imgElement) {
+          imgElement = document.createElement('img');
+          imgElement.id = 'mjpegFrame';
+          imgElement.style.width = '100%';
+          imgElement.style.height = '100%';
+          imgElement.style.objectFit = 'contain';
+          
+          // Replace video element with img element
+          videoElement.style.display = 'none';
+          videoElement.parentNode.insertBefore(imgElement, videoElement.nextSibling);
         }
-        break;
-      case 2:
-        currentRgba -= 0.2;
-        if (currentRgba < originalRgba) {
-          currentRound++;
-          if (currentRound >= 2) {
-            clearInterval(timerId);
-            return;
-          } else {
-            currentRgba = originalRgba;
-            state = 0;
+        
+        // Create blob URL and clean up previous one
+        const previousSrc = imgElement.src;
+        if (previousSrc && previousSrc.startsWith('blob:')) {
+          URL.revokeObjectURL(previousSrc);
+        }
+        
+        // Set new blob URL
+        const blobUrl = URL.createObjectURL(event.data);
+        imgElement.src = blobUrl;
+        
+        // Clean up blob URL after image loads
+        imgElement.onload = function() {
+          // Small delay before cleanup to ensure image is displayed
+          setTimeout(() => {
+            URL.revokeObjectURL(blobUrl);
+          }, 100);
+        };
+        
+      } else if (typeof event.data === 'string') {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'stream_url' && data.url) {
+            // Handle video URL (show video element, hide img)
+            videoElement.style.display = 'block';
+            videoElement.src = data.url;
+            
+            const imgElement = document.getElementById('mjpegFrame');
+            if (imgElement) {
+              imgElement.style.display = 'none';
+              // Clean up any remaining blob URL
+              if (imgElement.src && imgElement.src.startsWith('blob:')) {
+                URL.revokeObjectURL(imgElement.src);
+              }
+            }
           }
+        } catch (e) {
+          console.log('Received text data:', event.data);
         }
-        break;
-    }
-    rgba[3] = currentRgba.toFixed(1);
-    currentZone.strokeStyle = rgba.join(',') + ')';
-    gauge.setOptions(gauge.options.staticZones);
-  }, 50);
+      }
+    };
+    
+    websocket.onerror = function(error) {
+      console.error('WebSocket error occurred');
+      console.error('URL:', websocket.url);
+      console.error('ReadyState:', websocket.readyState);
+      console.error('Error event:', error);
+      
+      // Provide specific guidance for WSS certificate issues
+      if (websocket.url.startsWith('wss://')) {
+        console.error('====== WSS CONNECTION TROUBLESHOOTING ======');
+        console.error('If this is a self-signed certificate error:');
+        console.error('1. Open the server URL in a browser: ' + websocket.url.replace('wss://', 'https://'));
+        console.error('2. Accept the security warning to trust the certificate');
+        console.error('3. Or disable TLS in server config.toml and use ws:// instead');
+        console.error('4. Or add the certificate to the system trust store');
+        console.error('============================================');
+      }
+      
+      updateConnectionStatus(false);
+      scheduleReconnect();
+    };
+    
+    websocket.onclose = function(event) {
+      console.log('WebSocket closed');
+      console.log('Code:', event.code);
+      console.log('Reason:', event.reason || 'No reason provided');
+      console.log('Was clean:', event.wasClean);
+      console.log('URL was:', websocket.url);
+      
+      // Common WebSocket close codes
+      const closeReasons = {
+        1000: 'Normal Closure',
+        1001: 'Going Away',
+        1002: 'Protocol Error',
+        1003: 'Unsupported Data',
+        1006: 'Abnormal Closure',
+        1007: 'Invalid frame payload data',
+        1008: 'Policy Violation',
+        1009: 'Message too big',
+        1010: 'Missing Extension',
+        1011: 'Internal Error',
+        1015: 'TLS Handshake'
+      };
+      
+      const closeDescription = closeReasons[event.code] || 'Unknown';
+      console.log('Close description:', closeDescription);
+      
+      updateConnectionStatus(false);
+      websocket = null;
+      
+      if (event.code !== 1000) {
+        scheduleReconnect();
+      }
+    };
+    
+  } catch (error) {
+    console.error('Failed to create WebSocket:', error);
+    updateConnectionStatus(false);
+    scheduleReconnect();
+  }
 }
 
-//override setOptions in order to prevent black dot in top left corner: https://github.com/bernii/gauge.js/issues/192
-Gauge.prototype.setOptions = function (options) {
-  var gauge, j, len, phi, ref;
-
-  if (options == null) {
-    options = null;
+function setProperty(data) {
+  console.log('Property changed:', data.key, '=', data.value);
+  
+  switch (data.key) {
+    case 'URL':
+      if (data.value !== currentURL) {
+        currentURL = data.value;
+        reconnectAttempts = 0;
+        connectToWebSocket(data.value);
+      }
+      break;
   }
+}
 
-  Gauge.__super__.setOptions.call(this, options);
-
-  this.configPercentColors();
-  this.extraPadding = 0;
-
-  if (this.options.angle < 0) {
-    phi = Math.PI * (1 + this.options.angle);
-    this.extraPadding = Math.sin(phi);
-  }
-
-  this.availableHeight = this.canvas.height * (1 - this.paddingTop - this.paddingBottom);
-  this.lineWidth = this.availableHeight * this.options.lineWidth;
-  this.radius = (this.availableHeight - this.lineWidth / 2) / (1.0 + this.extraPadding);
-  this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-  ref = this.gp;
-
-  for (j = 0, len = ref.length; j < len; j++) {
-    gauge = ref[j];
-    gauge.setOptions(this.options.pointer);
-    // gauge.render(); Line deleted which will fix your problem !!!!
-  }
-
-  this.render();
-  return this;
-};
 ////////////////////////////////////////////
 // Initialize the custom control
 WebCC.start(
-  // callback function; occurs when the connection is done or failed. 
-  // "result" is a boolean defining if the connection was successfull or not.
   function (result) {
     if (result) {
-      console.log('connected successfully');
-      initializeGauge();
-      // Set current values
-      setProperty({ key: 'GaugeBackColor', value: WebCC.Properties.GaugeBackColor });
-      setProperty({ key: 'Alignment', value: WebCC.Properties.Alignment });
-      setProperty({ key: 'LineThickness', value: WebCC.Properties.LineThickness });
-      setProperty({ key: 'DivisionCount', value: WebCC.Properties.DivisionCount });
-      setProperty({ key: 'FontSize', value: WebCC.Properties.FontSize });
-      setProperty({ key: 'Zones', value: WebCC.Properties.Zones });
-      setProperty({ key: 'MaxValue', value: WebCC.Properties.MaxValue });
-      setProperty({ key: 'MinValue', value: WebCC.Properties.MinValue });
-      setProperty({ key: 'GaugeValue', value: WebCC.Properties.GaugeValue });
-      // Subscribe for value changes
+      console.log('WebCC connected successfully');
+      initializeVideoPlayer();
+      
+      // Set initial URL if provided
+      if (WebCC.Properties.URL) {
+        currentURL = WebCC.Properties.URL;
+        connectToWebSocket(WebCC.Properties.URL);
+      }
+      
+      // Subscribe for property changes
       WebCC.onPropertyChanged.subscribe(setProperty);
-    }
-    else {
-      console.log('connection failed');
+    } else {
+      console.log('WebCC connection failed');
+      updateConnectionStatus(false);
     }
   },
   // contract (see also manifest.json)
   {
-    // Methods
-    methods: {
-      BlinkZone: function (zoneIndex) {
-        if (currentZoneIndex >= 0 && zoneIndex < gauge.options.staticZones.length) {
-          blinkZone(zoneIndex);
-        }
-      }
-    },
-    // Events
-    events: ['ZoneChanged'],
-    // Properties
+    methods: {},
+    events: [],
     properties: {
-      GaugeValue: 20,
-      GaugeBackColor: 4294967295,
-      Alignment:
-      {
-        Vertical: 'Center'
-      },
-      LineThickness: 20,
-      FontSize: 16,
-      MinValue: 0,
-      MaxValue: 50,
-      DivisionCount: 5,
-      Zones: [
-        { Min: 0, Max: 30, StrokeColor: 4281381677 },
-        { Min: 30, Max: 40, StrokeColor: 4294958336 },
-        { Min: 40, Max: 50, StrokeColor: 4293934654 }
-      ]
+      URL: '',
+      connected: false
     }
   },
-  // placeholder to include additional Unified dependencies (not used in this example)
+  // placeholder to include additional Unified dependencies
   [],
   // connection timeout
   10000

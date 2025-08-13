@@ -3,125 +3,39 @@
 	"mver": "1.2.0",
 	"control": {
 		"identity": {
-			"name": "GaugeMeter",
+			"name": "VideoPlayer",
 			"version": "1.0",
-			"displayname": "GaugeMeter",
+			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
-			"type": "guid://551BF148-2F0D-4293-99C2-C9C3A1A6A073",
+			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
 			"start": "./control/index.html"
 		},
 		"metadata": {
 			"author": "Siemens",
 			"keywords": [
-				"Gauge",
-				"GaugeMeter"
+				"Video",
+				"VideoPlayer",
+				"Stream"
 			]
 		},
 		"contracts": {
 			"api": {
-				"methods": {
-					"BlinkZone": {
-						"parameters": {
-							"zoneIndex": {
-								"type": "number"
-							}
-						},
-						"description": "Let the given zone blink."
-					}
-				},
-				"events": {
-					"ZoneChanged": {
-						"arguments": {
-							"zoneIndex": {
-								"type": "number"
-							}
-						},
-						"description": "Whenever the zone is changed, this event is raised and gives you the new zone index."
-					}
-				},
+				"methods": {},
+				"events": {},
 				"properties": {
-					"GaugeValue": {
-						"type": "number",
-						"default": 20
+					"URL": {
+						"type": "string",
+						"default": "",
+						"description": "WebSocket connection URL for the video stream"
 					},
-					"GaugeBackColor": {
-						"$ref": "#/control/types/Color",
-						"default": 4294967295
-					},
-					"Alignment": {
-						"$ref": "#/control/types/AlignmentPart"
-					},
-					"LineThickness": {
-						"type": "number",
-						"default": 20
-					},
-					"FontSize": {
-						"type": "number",
-						"default": 16
-					},
-					"MinValue": {
-						"type": "number",
-						"default": 0
-					},
-					"MaxValue": {
-						"type": "number",
-						"default": 50
-					},
-					"DivisionCount": {
-						"type": "number",
-						"default": 5
-					},
-					"Zones": {
-						"$ref": "#/control/types/Zones"
+					"connected": {
+						"type": "boolean",
+						"default": false,
+						"description": "Indicates the connection state"
 					}
 				}
 			}
 		},
-		"types": {
-			"Color": {
-				"$id": "http://tia.siemens.com/wincc-unified/types/s/color",
-				"type": "number"
-			},
-			"AlignmentPart": {
-				"type": "object",
-				"properties": {
-					"Vertical": {
-						"$ref": "#/control/types/VerticalAlignment"
-					}
-				}
-			},
-			"VerticalAlignment": {
-				"type": "string",
-				"enum": [
-					"Top",
-					"Center",
-					"Bottom"
-				],
-				"default": "Center"
-			},
-			"Zones": {
-				"type": "array",
-				"items": {
-					"$ref": "#/control/types/Zone"
-				}
-			},
-			"Zone": {
-				"type": "object",
-				"properties": {
-					"StrokeColor": {
-						"$ref": "#/control/types/Color",
-						"default": 4281381677
-					},
-					"Min": {
-						"type": "number",
-						"default": 0
-					},
-					"Max": {
-						"type": "number",
-						"default": 10
-					}
-				}
-			}
-		}
+		"types": {}
 	}
 }
