@@ -35,7 +35,6 @@ A high-performance, low-latency video streaming server built in Rust that connec
    url = "rtsp://admin:password@192.168.1.100:554/stream"
    transport = "tcp"
    reconnect_interval = 5
-   buffer_size = 1024000
    ```
 
 ## Configuration
@@ -56,7 +55,6 @@ key_path = "certs/server.key"
 url = "rtsp://admin:password@192.168.1.100:554/stream"
 transport = "tcp"
 reconnect_interval = 5
-buffer_size = 1024000
 
 [transcoding]
 output_format = "mjpeg"

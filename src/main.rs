@@ -19,7 +19,7 @@ use websocket::websocket_handler;
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter("debug")
+        .with_env_filter("rtsp_streaming_server=debug,info")
         .init();
 
     let config = Config::load("config.toml").unwrap_or_else(|_| {
@@ -29,7 +29,10 @@ async fn main() -> Result<()> {
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
 
-    let (frame_tx, _) = broadcast::channel(100);
+    // Use configured channel buffer size or default to 10 for low latency
+    let channel_buffer_size = config.rtsp.channel_buffer_size.unwrap_or(10);
+    info!("Using channel buffer size: {} frames", channel_buffer_size);
+    let (frame_tx, _) = broadcast::channel(channel_buffer_size);
     let frame_tx = Arc::new(frame_tx);
 
     let rtsp_client = RtspClient::new(

@@ -178,7 +178,6 @@ websocket_port = 8081
 url = "rtsp://admin:password@192.168.1.100:554/stream"
 transport = "tcp"  # or "udp"
 reconnect_interval = 5  # seconds
-buffer_size = 1024000  # bytes
 
 [transcoding]
 output_format = "mjpeg"  # or "h264", "raw"

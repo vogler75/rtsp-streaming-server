@@ -12,10 +12,11 @@ key_path = "certs/server.key"
 url = "rtsp://admin007:admin007@192.168.1.171:554/stream2"
 transport = "tcp"
 reconnect_interval = 5
-buffer_size = 1024000
+channel_buffer_size = 100  # Number of frames to buffer in broadcast channel (lower = less latency)
+chunk_read_size = 1024   # Bytes to read at once from FFmpeg (8KB default)
+ffmpeg_buffer_size = 1024  # FFmpeg RTSP buffer size in bytes (32KB for low latency)
 
 [transcoding]
 output_format = "mjpeg"
-quality = 85
-framerate = 5
-max_latency_ms = 200
+quality = 50
+framerate = 10

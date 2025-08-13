@@ -152,6 +152,8 @@
         let lastFrameTime = Date.now();
         let fpsCounter = 0;
         let lastFpsTime = Date.now();
+        let isProcessingFrame = false;
+        let latestFrameBlob = null;
 
         function init() {
             canvas = document.getElementById('videoCanvas');
@@ -199,7 +201,13 @@
             
             ws.onmessage = function(event) {
                 if (event.data instanceof Blob) {
-                    handleFrame(event.data);
+                    // Always keep only the latest frame to avoid backlog
+                    latestFrameBlob = event.data;
+                    
+                    // Process frame if not already processing
+                    if (!isProcessingFrame) {
+                        processNextFrame();
+                    }
                 }
             };
         }
@@ -211,7 +219,16 @@
             }
         }
 
-        function handleFrame(blob) {
+        function processNextFrame() {
+            if (!latestFrameBlob) {
+                isProcessingFrame = false;
+                return;
+            }
+            
+            isProcessingFrame = true;
+            const blob = latestFrameBlob;
+            latestFrameBlob = null; // Clear it so we only process the latest
+            
             const now = Date.now();
             frameCount++;
             fpsCounter++;
@@ -227,26 +244,32 @@
             // Update frame count
             document.getElementById('framesValue').textContent = frameCount;
             
-            // Calculate rough latency (this is just processing time, not actual latency)
-            const processingLatency = Date.now() - now;
-            document.getElementById('latencyValue').textContent = processingLatency;
+            // Calculate frame latency
+            const frameLatency = now - lastFrameTime;
+            lastFrameTime = now;
+            document.getElementById('latencyValue').textContent = Math.round(frameLatency);
             
-            // Create image from blob and draw on canvas
-            const img = new Image();
-            const url = URL.createObjectURL(blob);
-            
-            img.onload = function() {
+            // Use createImageBitmap for better performance (non-blocking)
+            createImageBitmap(blob).then(function(imageBitmap) {
                 // Resize canvas if needed
-                if (canvas.width !== img.width || canvas.height !== img.height) {
-                    canvas.width = img.width;
-                    canvas.height = img.height;
+                if (canvas.width !== imageBitmap.width || canvas.height !== imageBitmap.height) {
+                    canvas.width = imageBitmap.width;
+                    canvas.height = imageBitmap.height;
                 }
                 
-                ctx.drawImage(img, 0, 0);
-                URL.revokeObjectURL(url);
-            };
-            
-            img.src = url;
+                ctx.drawImage(imageBitmap, 0, 0);
+                imageBitmap.close(); // Release memory
+                
+                // Process next frame if available
+                isProcessingFrame = false;
+                if (latestFrameBlob) {
+                    // Use requestAnimationFrame for smooth rendering
+                    requestAnimationFrame(processNextFrame);
+                }
+            }).catch(function(error) {
+                console.error('Error decoding frame:', error);
+                isProcessingFrame = false;
+            });
         }
 
         function updateStatus(status, text) {

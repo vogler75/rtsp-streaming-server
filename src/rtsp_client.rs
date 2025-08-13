@@ -13,6 +13,7 @@ pub struct RtspClient {
     frame_sender: Arc<broadcast::Sender<Bytes>>,
     transcoder: FrameTranscoder,
     framerate: u32,
+    quality: u8,
 }
 
 impl RtspClient {
@@ -22,6 +23,7 @@ impl RtspClient {
             frame_sender,
             transcoder: FrameTranscoder::new(quality).await,
             framerate,
+            quality,
         }
     }
 
@@ -165,17 +167,42 @@ impl RtspClient {
     async fn stream_rtsp_via_ffmpeg(&self) -> Result<()> {
         info!("🎥 Starting direct RTSP to MJPEG streaming via FFmpeg");
         
-        // Use FFmpeg to directly read from RTSP and output MJPEG frames
+        // Use FFmpeg to directly read from RTSP and output MJPEG frames with low latency
+        info!("Starting FFmpeg with framerate: {} FPS, quality: {}", self.framerate, self.quality);
+        
+        // Create owned strings that will live long enough
+        let quality_str = self.quality.to_string();
+        let fps_str = format!("fps={}", self.framerate);
+        
+        // Build FFmpeg arguments with optional buffer size
+        let mut ffmpeg_args = vec![
+            "-fflags", "+nobuffer+discardcorrupt",  // Disable buffering, discard corrupt frames
+            "-flags", "low_delay",                  // Low delay mode
+            "-avioflags", "direct",                 // Direct I/O to avoid buffering
+        ];
+        
+        // Add buffer size if configured (in KB)
+        let buffer_size_str;
+        if let Some(buffer_size) = self.config.ffmpeg_buffer_size {
+            buffer_size_str = format!("{}k", buffer_size / 1024);
+            ffmpeg_args.extend_from_slice(&["-rtbufsize", &buffer_size_str]);
+            info!("FFmpeg buffer size set to: {}", buffer_size_str);
+        }
+        
+        ffmpeg_args.extend_from_slice(&[
+            "-rtsp_transport", &self.config.transport,
+            "-i", &self.config.url,
+            "-f", "mjpeg",
+            "-q:v", &quality_str,                   // JPEG quality from config
+            "-vf", &fps_str,                        // Force exact framerate
+            "-vsync", "cfr",                        // Constant frame rate output
+            "-flush_packets", "1",                  // Flush packets immediately
+            "-an",                                  // No audio
+            "-"                                     // Output to stdout
+        ]);
+        
         let mut ffmpeg_cmd = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-rtsp_transport", &self.config.transport,
-                "-i", &self.config.url,
-                "-f", "mjpeg",
-                "-q:v", "5", // High quality JPEG
-                "-vf", &format!("fps={}", self.framerate), // Ensure consistent framerate
-                "-an", // No audio
-                "-"  // Output to stdout
-            ])
+            .args(&ffmpeg_args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -220,35 +247,54 @@ impl RtspClient {
         use tokio::io::AsyncReadExt;
         
         buffer.clear();
+        buffer.reserve(100_000); // Pre-allocate for typical JPEG size
+        
+        // Use configured chunk size or default to 8KB for efficiency
+        let chunk_size = self.config.chunk_read_size.unwrap_or(8192);
+        let mut chunk = vec![0u8; chunk_size];
+        let mut found_start = false;
         
         // Look for JPEG start marker (0xFF, 0xD8)
-        let mut byte = [0u8; 1];
-        loop {
-            reader.read_exact(&mut byte).await?;
-            if byte[0] == 0xFF {
-                reader.read_exact(&mut byte).await?;
-                if byte[0] == 0xD8 {
-                    // Found JPEG start
-                    buffer.push(0xFF);
-                    buffer.push(0xD8);
+        while !found_start {
+            let n = reader.read(&mut chunk).await?;
+            if n == 0 {
+                return Err(anyhow::anyhow!("EOF while looking for JPEG start"));
+            }
+            
+            for i in 0..n-1 {
+                if chunk[i] == 0xFF && chunk[i+1] == 0xD8 {
+                    // Found JPEG start, add everything from this point
+                    buffer.extend_from_slice(&chunk[i..n]);
+                    found_start = true;
                     break;
                 }
             }
         }
         
         // Read until JPEG end marker (0xFF, 0xD9)
-        let mut prev_byte = 0u8;
         loop {
-            reader.read_exact(&mut byte).await?;
-            buffer.push(byte[0]);
-            
-            if prev_byte == 0xFF && byte[0] == 0xD9 {
-                // Found JPEG end
-                break;
+            let n = reader.read(&mut chunk).await?;
+            if n == 0 {
+                return Err(anyhow::anyhow!("EOF while looking for JPEG end"));
             }
-            prev_byte = byte[0];
+            
+            // Check if we have the end marker
+            for i in 0..n-1 {
+                if chunk[i] == 0xFF && chunk[i+1] == 0xD9 {
+                    // Found JPEG end, add everything up to and including the marker
+                    buffer.extend_from_slice(&chunk[0..=i+1]);
+                    return Ok(std::mem::take(buffer)); // Move buffer content, not clone
+                }
+            }
+            
+            // Check boundary case: 0xFF at end of previous chunk, 0xD9 at start of this chunk
+            if buffer.len() > 0 && buffer[buffer.len()-1] == 0xFF && chunk[0] == 0xD9 {
+                buffer.push(0xD9);
+                return Ok(std::mem::take(buffer)); // Move buffer content, not clone
+            }
+            
+            // Add entire chunk to buffer
+            buffer.extend_from_slice(&chunk[0..n]);
         }
-        
-        Ok(buffer.clone())
     }
 }
