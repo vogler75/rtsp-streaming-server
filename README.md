@@ -7,6 +7,7 @@ A high-performance, low-latency video streaming server built in Rust that connec
 - **RTSP Camera Support**: Connect to RTSP cameras and streams
 - **WebSocket Streaming**: Low-latency video streaming via WebSockets  
 - **MJPEG Output**: Converts video to JPEG frames for browser compatibility
+- **HTTPS/TLS Support**: Secure connections with configurable certificates
 - **Web Interface**: Simple HTML client for viewing streams
 - **Real-time Stats**: FPS, frame count, and latency monitoring
 - **Auto-reconnection**: Automatic reconnection for both RTSP and WebSocket connections
@@ -21,6 +22,11 @@ A high-performance, low-latency video streaming server built in Rust that connec
 2. **Open your web browser** and navigate to:
    ```
    http://localhost:8080
+   ```
+   
+   For HTTPS (if TLS is enabled):
+   ```
+   https://localhost:8080
    ```
 
 3. **Configure RTSP source** by editing `config.toml`:
@@ -41,6 +47,11 @@ The server can be configured via the `config.toml` file:
 host = "0.0.0.0"
 port = 8080
 
+[server.tls]
+enabled = false
+cert_path = "certs/server.crt"
+key_path = "certs/server.key"
+
 [rtsp]
 url = "rtsp://admin:password@192.168.1.100:554/stream"
 transport = "tcp"
@@ -58,6 +69,9 @@ max_latency_ms = 200
 
 - **server.host**: Server bind address (default: "0.0.0.0")
 - **server.port**: Server port (default: 8080)
+- **server.tls.enabled**: Enable HTTPS/TLS (default: false)
+- **server.tls.cert_path**: Path to SSL certificate file (default: "certs/server.crt")
+- **server.tls.key_path**: Path to SSL private key file (default: "certs/server.key")
 - **rtsp.url**: RTSP camera URL with credentials
 - **rtsp.transport**: Transport protocol - "tcp" or "udp"
 - **rtsp.reconnect_interval**: Seconds between reconnection attempts
@@ -66,6 +80,112 @@ max_latency_ms = 200
 - **transcoding.quality**: JPEG quality (1-100)
 - **transcoding.framerate**: Target framerate
 - **transcoding.max_latency_ms**: Maximum acceptable latency
+
+## HTTPS/TLS Setup
+
+For secure connections, you can enable HTTPS by generating SSL certificates and configuring the server.
+
+### Generate Self-Signed Certificates (Development)
+
+For development and testing, you can create self-signed certificates:
+
+```bash
+# Create certificates directory
+mkdir -p certs
+
+# Generate private key
+openssl genrsa -out certs/server.key 2048
+
+# Generate certificate signing request
+openssl req -new -key certs/server.key -out certs/server.csr \
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+
+# Generate self-signed certificate (valid for 365 days)
+openssl x509 -req -days 365 -in certs/server.csr -signkey certs/server.key \
+    -out certs/server.crt -extensions v3_req \
+    -extfile <(echo -e "subjectAltName=DNS:localhost,IP:127.0.0.1")
+
+# Clean up CSR file
+rm certs/server.csr
+
+# Set appropriate permissions
+chmod 600 certs/server.key
+chmod 644 certs/server.crt
+```
+
+### Generate Production Certificates
+
+For production use, obtain certificates from a Certificate Authority (CA) like Let's Encrypt:
+
+#### Using Certbot (Let's Encrypt)
+
+```bash
+# Install certbot (Ubuntu/Debian)
+sudo apt install certbot
+
+# Generate certificate for your domain
+sudo certbot certonly --standalone -d yourdomain.com
+
+# Copy certificates to project directory
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem certs/server.crt
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem certs/server.key
+sudo chown $USER:$USER certs/server.*
+```
+
+#### Using Custom CA Certificates
+
+If you have certificates from another CA, copy them to the certs directory:
+
+```bash
+mkdir -p certs
+cp your-certificate.pem certs/server.crt
+cp your-private-key.pem certs/server.key
+chmod 600 certs/server.key
+chmod 644 certs/server.crt
+```
+
+### Enable HTTPS
+
+Once you have certificates, enable HTTPS in your `config.toml`:
+
+```toml
+[server.tls]
+enabled = true
+cert_path = "certs/server.crt"
+key_path = "certs/server.key"
+```
+
+The server will automatically:
+- Load and validate the certificates on startup
+- Start an HTTPS server instead of HTTP
+- Support secure WebSocket connections (WSS)
+- Display certificate information in the logs
+
+### Browser Certificate Warnings
+
+For self-signed certificates, browsers will show security warnings. To proceed:
+
+1. **Chrome/Edge**: Click "Advanced" → "Proceed to localhost (unsafe)"
+2. **Firefox**: Click "Advanced" → "Accept the Risk and Continue"
+3. **Safari**: Click "Show Details" → "visit this website"
+
+For production, use certificates from a trusted CA to avoid these warnings.
+
+### Certificate Formats
+
+The server supports PEM-encoded certificates and keys:
+- **Certificate**: `.crt`, `.pem`, `.cert` files containing the public certificate
+- **Private Key**: `.key`, `.pem` files containing the private key (unencrypted)
+
+If you have PKCS#12 (.p12/.pfx) files, convert them:
+
+```bash
+# Extract certificate
+openssl pkcs12 -in certificate.p12 -clcerts -nokeys -out server.crt
+
+# Extract private key (will prompt for passwords)
+openssl pkcs12 -in certificate.p12 -nocerts -nodes -out server.key
+```
 
 ## Architecture
 

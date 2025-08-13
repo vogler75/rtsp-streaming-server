@@ -1,6 +1,12 @@
 [server]
 host = "0.0.0.0"
 port = 8080
+cors_allow_origin = "null"
+
+[server.tls]
+enabled = false
+cert_path = "certs/server.crt"
+key_path = "certs/server.key"
 
 [rtsp]
 url = "rtsp://admin007:admin007@192.168.1.171:554/stream2"

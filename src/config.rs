@@ -13,6 +13,15 @@ pub struct Config {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    pub tls: Option<TlsConfig>,
+    pub cors_allow_origin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsConfig {
+    pub enabled: bool,
+    pub cert_path: String,
+    pub key_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +46,12 @@ impl Default for Config {
             server: ServerConfig {
                 host: "0.0.0.0".to_string(),
                 port: 8080,
+                tls: Some(TlsConfig {
+                    enabled: false,
+                    cert_path: "certs/server.crt".to_string(),
+                    key_path: "certs/server.key".to_string(),
+                }),
+                cors_allow_origin: Some("*".to_string()),
             },
             rtsp: RtspConfig {
                 url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),

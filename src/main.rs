@@ -2,6 +2,8 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{info, warn, error};
 use anyhow::Result;
+use std::fs::File;
+use std::io::BufReader;
 
 mod config;
 mod rtsp_client;
@@ -40,21 +42,111 @@ async fn main() -> Result<()> {
         }
     });
 
+    let cors_layer = if let Some(origin) = &config.server.cors_allow_origin {
+        if origin == "*" {
+            tower_http::cors::CorsLayer::permissive()
+        } else {
+            match origin.parse::<axum::http::HeaderValue>() {
+                Ok(origin_header) => {
+                    tower_http::cors::CorsLayer::new()
+                        .allow_origin(origin_header)
+                        .allow_methods(tower_http::cors::Any)
+                        .allow_headers(tower_http::cors::Any)
+                }
+                Err(_) => {
+                    warn!("Invalid CORS origin '{}', falling back to permissive", origin);
+                    tower_http::cors::CorsLayer::permissive()
+                }
+            }
+        }
+    } else {
+        tower_http::cors::CorsLayer::permissive()
+    };
+
     let app = axum::Router::new()
         .route("/ws", axum::routing::get(websocket_handler))
         .route("/", axum::routing::get(serve_index))
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
-        .layer(tower_http::cors::CorsLayer::permissive())
+        .layer(cors_layer)
         .with_state(frame_tx);
 
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", config.server.host, config.server.port)).await?;
+    let addr = format!("{}:{}", config.server.host, config.server.port);
     
-    info!("Server listening on http://{}:{}", config.server.host, config.server.port);
-    axum::serve(listener, app).await?;
+    // Check if TLS is enabled
+    if let Some(tls_config) = &config.server.tls {
+        if tls_config.enabled {
+            info!("Starting HTTPS server on {}", addr);
+            start_https_server(app, &addr, tls_config).await?;
+        } else {
+            info!("Starting HTTP server on {}", addr);
+            start_http_server(app, &addr).await?;
+        }
+    } else {
+        info!("Starting HTTP server on {}", addr);
+        start_http_server(app, &addr).await?;
+    }
 
     Ok(())
 }
 
 async fn serve_index() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../static/index.html"))
+}
+
+async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!("HTTP server listening on http://{}", addr);
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::TlsConfig) -> Result<()> {
+    // Load TLS certificates
+    let cert_file = File::open(&tls_cfg.cert_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open certificate file '{}': {}", tls_cfg.cert_path, e))?;
+    let key_file = File::open(&tls_cfg.key_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open private key file '{}': {}", tls_cfg.key_path, e))?;
+
+    let mut cert_reader = BufReader::new(cert_file);
+    let mut key_reader = BufReader::new(key_file);
+
+    // Parse certificate and key
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .map_err(|e| anyhow::anyhow!("Failed to parse certificate: {}", e))?
+        .into_iter()
+        .map(rustls::Certificate)
+        .collect();
+    
+    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+        .map_err(|e| anyhow::anyhow!("Failed to parse private key: {}", e))?;
+    
+    if keys.is_empty() {
+        // Try RSA private keys if PKCS8 fails
+        let mut key_reader = BufReader::new(File::open(&tls_cfg.key_path)?);
+        keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
+            .map_err(|e| anyhow::anyhow!("Failed to parse RSA private key: {}", e))?;
+    }
+    
+    let private_key = keys.into_iter().next()
+        .ok_or_else(|| anyhow::anyhow!("No private key found in key file"))?;
+
+    // Create TLS configuration
+    let rustls_config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(certs, rustls::PrivateKey(private_key))
+        .map_err(|e| anyhow::anyhow!("Failed to create TLS config: {}", e))?;
+
+    info!("HTTPS server listening on https://{}", addr);
+    info!("Certificate: {}", tls_cfg.cert_path);
+    info!("Private key: {}", tls_cfg.key_path);
+
+    // Start HTTPS server
+    let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(rustls_config));
+    axum_server::bind_rustls(addr.parse()?, tls_config)
+        .serve(app.into_make_service())
+        .await
+        .map_err(|e| anyhow::anyhow!("HTTPS server error: {}", e))?;
+
+    Ok(())
 }
