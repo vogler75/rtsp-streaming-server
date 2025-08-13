@@ -10,9 +10,9 @@ let videoElement = null;
 let statusElement = null;
 let isConnected = false;
 let currentURL = '';
+let shouldConnect = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
-let maxReconnectAttempts = 5;
 let reconnectInterval = 3000;
 
 ////////////////////////////////////////////
@@ -52,10 +52,13 @@ function updateConnectionStatus(connected) {
       statusElement.textContent = 'Connected';
       statusElement.style.backgroundColor = 'rgba(0,128,0,0.7)';
       reconnectAttempts = 0;
-    } else {
-      const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts}/${maxReconnectAttempts})` : '';
+    } else if (shouldConnect) {
+      const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts})` : '';
       statusElement.textContent = 'Disconnected' + reconnectText;
       statusElement.style.backgroundColor = 'rgba(128,0,0,0.7)';
+    } else {
+      statusElement.textContent = 'Stopped';
+      statusElement.style.backgroundColor = 'rgba(64,64,64,0.7)';
     }
   }
   
@@ -67,23 +70,39 @@ function scheduleReconnect() {
     clearTimeout(reconnectTimer);
   }
   
-  if (reconnectAttempts < maxReconnectAttempts && currentURL) {
+  // Only reconnect if shouldConnect is true (endless reconnection)
+  if (shouldConnect && currentURL) {
     reconnectAttempts++;
-    console.log(`Scheduling reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${reconnectInterval}ms`);
+    console.log(`Scheduling reconnect attempt ${reconnectAttempts} in ${reconnectInterval}ms`);
     updateConnectionStatus(false);
     
     reconnectTimer = setTimeout(() => {
-      console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})`);
-      connectToWebSocket(currentURL);
+      if (shouldConnect) { // Check again in case it changed during timeout
+        console.log(`Attempting to reconnect (${reconnectAttempts})`);
+        connectToWebSocket(currentURL);
+      }
     }, reconnectInterval);
   } else {
-    console.log('Max reconnection attempts reached or no URL available');
+    console.log('Not reconnecting: shouldConnect =', shouldConnect, 'currentURL =', currentURL);
+  }
+}
+
+function showBlankScreen() {
+  // Hide video/image elements
+  videoElement.style.display = 'none';
+  const imgElement = document.getElementById('mjpegFrame');
+  if (imgElement) {
+    imgElement.style.display = 'none';
+    // Clean up any blob URL
+    if (imgElement.src && imgElement.src.startsWith('blob:')) {
+      URL.revokeObjectURL(imgElement.src);
+    }
   }
 }
 
 function connectToWebSocket(url) {
-  if (!url || url.trim() === '') {
-    console.log('No URL provided');
+  if (!url || url.trim() === '' || !shouldConnect) {
+    console.log('No URL provided or connection disabled');
     updateConnectionStatus(false);
     return;
   }
@@ -259,7 +278,31 @@ function setProperty(data) {
       if (data.value !== currentURL) {
         currentURL = data.value;
         reconnectAttempts = 0;
-        connectToWebSocket(data.value);
+        if (shouldConnect) {
+          connectToWebSocket(data.value);
+        }
+      }
+      break;
+    case 'connect':
+      shouldConnect = data.value;
+      if (shouldConnect) {
+        // Start connecting
+        reconnectAttempts = 0;
+        if (currentURL) {
+          connectToWebSocket(currentURL);
+        }
+      } else {
+        // Disconnect and show blank screen
+        if (websocket) {
+          websocket.close();
+          websocket = null;
+        }
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        updateConnectionStatus(false);
+        showBlankScreen();
       }
       break;
   }
@@ -273,10 +316,16 @@ WebCC.start(
       console.log('WebCC connected successfully');
       initializeVideoPlayer();
       
-      // Set initial URL if provided
-      if (WebCC.Properties.URL) {
-        currentURL = WebCC.Properties.URL;
-        connectToWebSocket(WebCC.Properties.URL);
+      // Set initial properties
+      currentURL = WebCC.Properties.URL || '';
+      shouldConnect = WebCC.Properties.connect || false;
+      
+      // Connect if both URL and connect are set
+      if (shouldConnect && currentURL) {
+        connectToWebSocket(currentURL);
+      } else {
+        showBlankScreen();
+        updateConnectionStatus(false);
       }
       
       // Subscribe for property changes
@@ -292,6 +341,7 @@ WebCC.start(
     events: [],
     properties: {
       URL: '',
+      connect: false,
       connected: false
     }
   },

@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0",
+			"version": "1.0.1",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -27,6 +27,11 @@
 						"type": "string",
 						"default": "",
 						"description": "WebSocket connection URL for the video stream"
+					},
+					"connect": {
+						"type": "boolean",
+						"default": false,
+						"description": "Enable/disable video connection"
 					},
 					"connected": {
 						"type": "boolean",
