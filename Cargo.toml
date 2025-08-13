@@ -1,0 +1,39 @@
+[package]
+name = "rtsp-streaming-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web server and WebSocket
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+url = "2.5"
+
+# RTSP handling
+retina = "0.4"
+
+# Image processing
+image = { version = "0.24", features = ["jpeg"] }
+bytes = "1"
+
+# Configuration
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Async channels
+tokio-stream = "0.1"
