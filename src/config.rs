@@ -29,7 +29,6 @@ pub struct RtspConfig {
     pub url: String,
     pub transport: String,
     pub reconnect_interval: u64,
-    pub channel_buffer_size: Option<usize>,
     pub chunk_read_size: Option<usize>,
     pub ffmpeg_buffer_size: Option<usize>,
 }
@@ -38,7 +37,10 @@ pub struct RtspConfig {
 pub struct TranscodingConfig {
     pub output_format: String,
     pub quality: u8,
-    pub framerate: u32,
+    pub capture_framerate: u32,  // FFmpeg capture rate from camera
+    pub send_framerate: u32,     // Rate at which we send frames to clients
+    pub channel_buffer_size: Option<usize>, // Number of frames to buffer (1 = only latest)
+    pub allow_duplicate_frames: Option<bool>, // Whether to send same frame multiple times
 }
 
 impl Default for Config {
@@ -58,14 +60,16 @@ impl Default for Config {
                 url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
                 transport: "tcp".to_string(),
                 reconnect_interval: 5,
-                channel_buffer_size: None,
                 chunk_read_size: None,
                 ffmpeg_buffer_size: None,
             },
             transcoding: TranscodingConfig {
                 output_format: "mjpeg".to_string(),
                 quality: 85,
-                framerate: 30,
+                capture_framerate: 30,
+                send_framerate: 10,
+                channel_buffer_size: Some(1),
+                allow_duplicate_frames: Some(false),
             },
         }
     }

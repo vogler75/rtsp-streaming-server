@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::{sleep, Duration};
 use tracing::{info, error, debug};
 use anyhow::Result;
@@ -12,22 +12,39 @@ pub struct RtspClient {
     config: RtspConfig,
     frame_sender: Arc<broadcast::Sender<Bytes>>,
     transcoder: FrameTranscoder,
-    framerate: u32,
+    capture_framerate: u32,
+    send_framerate: u32,
     quality: u8,
+    latest_frame: Arc<RwLock<Option<Bytes>>>,
+    allow_duplicate_frames: bool,
 }
 
 impl RtspClient {
-    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, framerate: u32) -> Self {
+    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool) -> Self {
         Self {
             config,
             frame_sender,
             transcoder: FrameTranscoder::new(quality).await,
-            framerate,
+            capture_framerate,
+            send_framerate,
             quality,
+            latest_frame: Arc::new(RwLock::new(None)),
+            allow_duplicate_frames,
         }
     }
 
     pub async fn start(&self) -> Result<()> {
+        // Spawn the frame sender thread
+        let frame_sender = self.frame_sender.clone();
+        let latest_frame = self.latest_frame.clone();
+        let send_framerate = self.send_framerate;
+        let allow_duplicate_frames = self.allow_duplicate_frames;
+        
+        tokio::spawn(async move {
+            Self::frame_sender_task(frame_sender, latest_frame, send_framerate, allow_duplicate_frames).await;
+        });
+        
+        // Main capture loop
         loop {
             match self.connect_and_stream().await {
                 Ok(_) => {
@@ -38,6 +55,54 @@ impl RtspClient {
                     info!("Reconnecting in {} seconds...", self.config.reconnect_interval);
                     sleep(Duration::from_secs(self.config.reconnect_interval)).await;
                 }
+            }
+        }
+    }
+    
+    async fn frame_sender_task(
+        frame_sender: Arc<broadcast::Sender<Bytes>>,
+        latest_frame: Arc<RwLock<Option<Bytes>>>,
+        send_framerate: u32,
+        allow_duplicate_frames: bool,
+    ) {
+        info!("Starting frame sender task at {} FPS (duplicates: {})", send_framerate, allow_duplicate_frames);
+        let frame_duration = Duration::from_millis(1000 / send_framerate as u64);
+        let mut last_send_time = tokio::time::Instant::now();
+        let mut sent_count = 0u64;
+        let mut skipped_count = 0u64;
+        
+        loop {
+            // Wait for the next frame time
+            let next_frame_time = last_send_time + frame_duration;
+            tokio::time::sleep_until(next_frame_time).await;
+            last_send_time = next_frame_time;
+            
+            // Get the latest frame (and optionally clear it)
+            let frame = if allow_duplicate_frames {
+                // Just read the frame, allow sending duplicates
+                let guard = latest_frame.read().await;
+                guard.clone()
+            } else {
+                // Take the frame and clear it (no duplicates)
+                let mut guard = latest_frame.write().await;
+                guard.take()  // This removes and returns the frame
+            };
+            
+            // Send the frame if we have one, otherwise send empty ping
+            if let Some(frame_data) = frame {
+                // Send real frame data
+                let _ = frame_sender.send(frame_data);
+                sent_count += 1;
+            } else {
+                // No new frame available (when allow_duplicate_frames = false)
+                // Send empty frame as ping to maintain connection and timing
+                let _ = frame_sender.send(Bytes::new()); // Empty frame
+                skipped_count += 1;
+            }
+            
+            if (sent_count + skipped_count) % 100 == 0 {
+                debug!("Frame sender: sent {} frames, {} pings (no new frame) at {} FPS", 
+                       sent_count, skipped_count, send_framerate);
             }
         }
     }
@@ -154,12 +219,15 @@ impl RtspClient {
             }
 
             let jpeg_data = self.transcoder.create_test_frame().await?;
-            if let Err(_) = self.frame_sender.send(jpeg_data) {
-                debug!("No active WebSocket connections to send frame to");
+            
+            // Store the frame in the latest frame store
+            {
+                let mut guard = self.latest_frame.write().await;
+                *guard = Some(jpeg_data);
             }
             
-            // Generate frames at configured FPS
-            let frame_duration_ms = 1000 / self.framerate as u64;
+            // Generate frames at configured capture FPS
+            let frame_duration_ms = 1000 / self.capture_framerate as u64;
             tokio::time::sleep(Duration::from_millis(frame_duration_ms)).await;
         }
     }
@@ -168,11 +236,11 @@ impl RtspClient {
         info!("🎥 Starting direct RTSP to MJPEG streaming via FFmpeg");
         
         // Use FFmpeg to directly read from RTSP and output MJPEG frames with low latency
-        info!("Starting FFmpeg with framerate: {} FPS, quality: {}", self.framerate, self.quality);
+        info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, self.quality);
         
         // Create owned strings that will live long enough
         let quality_str = self.quality.to_string();
-        let fps_str = format!("fps={}", self.framerate);
+        let fps_str = format!("fps={}", self.capture_framerate);
         
         // Build FFmpeg arguments with optional buffer size
         let mut ffmpeg_args = vec![
@@ -225,10 +293,14 @@ impl RtspClient {
                     frame_count += 1;
                     
                     if frame_count % 100 == 0 {
-                        info!("📷 Streamed {} real frames from camera via FFmpeg", frame_count);
+                        info!("📷 Captured {} frames from camera at {} FPS", frame_count, self.capture_framerate);
                     }
                     
-                    let _ = self.frame_sender.send(Bytes::from(jpeg_data));
+                    // Store the frame in the latest frame store
+                    {
+                        let mut guard = self.latest_frame.write().await;
+                        *guard = Some(Bytes::from(jpeg_data));
+                    }
                 }
                 Err(e) => {
                     error!("Error reading MJPEG frame: {}", e);

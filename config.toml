@@ -9,14 +9,16 @@ cert_path = "certs/server.crt"
 key_path = "certs/server.key"
 
 [rtsp]
-url = "rtsp://admin007:admin007@192.168.1.171:554/stream2"
+url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
-channel_buffer_size = 100  # Number of frames to buffer in broadcast channel (lower = less latency)
-chunk_read_size = 1024   # Bytes to read at once from FFmpeg (8KB default)
-ffmpeg_buffer_size = 1024  # FFmpeg RTSP buffer size in bytes (32KB for low latency)
+chunk_read_size = 8192   # Bytes to read at once from FFmpeg (8KB default)
+ffmpeg_buffer_size = 32768  # FFmpeg RTSP buffer size in bytes (32KB for low latency)
 
 [transcoding]
 output_format = "mjpeg"
 quality = 50
-framerate = 10
+capture_framerate = 10  # FPS to capture from camera (higher = smoother motion capture)
+send_framerate = 20     # FPS to send to clients (lower = less bandwidth)
+channel_buffer_size = 1 # Number of frames to buffer (1 = only latest frame)
+allow_duplicate_frames = false # If false, each frame is sent only once (no duplicates)

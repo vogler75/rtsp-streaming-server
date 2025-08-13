@@ -29,39 +29,53 @@ async fn handle_socket(socket: WebSocket, frame_sender: Arc<broadcast::Sender<By
         let start_time = std::time::Instant::now();
         let mut last_log_time = std::time::Instant::now();
         
-        while let Ok(frame_data) = frame_receiver.recv().await {
-            frame_count += 1;
-            
-            // Use timeout for non-blocking send - drop frame if it takes too long
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(10), // 10ms timeout for sending
-                sender.send(Message::Binary(frame_data.to_vec()))
-            ).await {
-                Ok(Ok(())) => {
-                    if frame_count % 30 == 0 {
-                        let now = std::time::Instant::now();
-                        let elapsed = now.duration_since(last_log_time).as_secs_f32();
-                        let total_elapsed = now.duration_since(start_time).as_secs_f32();
-                        let actual_fps = 30.0 / elapsed;
-                        let avg_fps = frame_count as f32 / total_elapsed;
-                        debug!("Sent {} frames (dropped: {}) | Last 30 frames: {:.1} FPS | Avg: {:.1} FPS", 
-                               frame_count, dropped_frames, actual_fps, avg_fps);
-                        last_log_time = now;
+        loop {
+            match frame_receiver.recv().await {
+                Ok(frame_data) => {
+                    frame_count += 1;
+                    
+                    // Use timeout for non-blocking send - drop frame if it takes too long
+                    match tokio::time::timeout(
+                        std::time::Duration::from_millis(10), // 10ms timeout for sending
+                        sender.send(Message::Binary(frame_data.to_vec()))
+                    ).await {
+                        Ok(Ok(())) => {
+                            if frame_count % 30 == 0 {
+                                let now = std::time::Instant::now();
+                                let elapsed = now.duration_since(last_log_time).as_secs_f32();
+                                let total_elapsed = now.duration_since(start_time).as_secs_f32();
+                                let actual_fps = 30.0 / elapsed;
+                                let avg_fps = frame_count as f32 / total_elapsed;
+                                debug!("Sent {} frames (dropped: {}) | Last 30 frames: {:.1} FPS | Avg: {:.1} FPS", 
+                                       frame_count, dropped_frames, actual_fps, avg_fps);
+                                last_log_time = now;
+                            }
+                        }
+                        Ok(Err(_)) => {
+                            // Connection error
+                            error!("WebSocket connection error");
+                            break;
+                        }
+                        Err(_) => {
+                            // Timeout - client is too slow, drop this frame
+                            dropped_frames += 1;
+                            if dropped_frames % 10 == 0 {
+                                debug!("Dropped {} frames due to slow client", dropped_frames);
+                            }
+                            // Flush the sender to clear any pending data
+                            let _ = sender.flush().await;
+                        }
                     }
                 }
-                Ok(Err(_)) => {
-                    // Connection error
-                    error!("WebSocket connection error");
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    // We're too slow and frames were dropped to keep up
+                    // This is expected behavior with channel_buffer_size=1
+                    dropped_frames += skipped as u64;
+                    debug!("WebSocket lagged, dropped {} old frames", skipped);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // Channel closed, exit
                     break;
-                }
-                Err(_) => {
-                    // Timeout - client is too slow, drop this frame
-                    dropped_frames += 1;
-                    if dropped_frames % 10 == 0 {
-                        debug!("Dropped {} frames due to slow client", dropped_frames);
-                    }
-                    // Flush the sender to clear any pending data
-                    let _ = sender.flush().await;
                 }
             }
         }

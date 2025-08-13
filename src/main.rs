@@ -29,8 +29,8 @@ async fn main() -> Result<()> {
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
 
-    // Use configured channel buffer size or default to 10 for low latency
-    let channel_buffer_size = config.rtsp.channel_buffer_size.unwrap_or(10);
+    // Use configured channel buffer size or default to 1 for only latest frame
+    let channel_buffer_size = config.transcoding.channel_buffer_size.unwrap_or(1);
     info!("Using channel buffer size: {} frames", channel_buffer_size);
     let (frame_tx, _) = broadcast::channel(channel_buffer_size);
     let frame_tx = Arc::new(frame_tx);
@@ -39,7 +39,9 @@ async fn main() -> Result<()> {
         config.rtsp.clone(), 
         frame_tx.clone(),
         config.transcoding.quality,
-        config.transcoding.framerate
+        config.transcoding.capture_framerate,
+        config.transcoding.send_framerate,
+        config.transcoding.allow_duplicate_frames.unwrap_or(false)
     ).await;
     
     tokio::spawn(async move {

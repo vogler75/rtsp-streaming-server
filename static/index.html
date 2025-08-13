@@ -132,10 +132,6 @@
                 <div class="stat-value" id="latencyValue">0</div>
                 <div>Latency (ms)</div>
             </div>
-            <div class="stat-item">
-                <div class="stat-value" id="framesValue">0</div>
-                <div>Frames</div>
-            </div>
         </div>
         
         <div class="video-container">
@@ -201,6 +197,13 @@
             
             ws.onmessage = function(event) {
                 if (event.data instanceof Blob) {
+                    // Check if this is an empty frame (ping)
+                    if (event.data.size === 0) {
+                        // Empty frame - treat as ping for FPS/latency metrics but don't render
+                        handlePingFrame();
+                        return;
+                    }
+                    
                     // Always keep only the latest frame to avoid backlog
                     latestFrameBlob = event.data;
                     
@@ -217,6 +220,25 @@
                 ws.close();
                 ws = null;
             }
+        }
+        
+        function handlePingFrame() {
+            const now = Date.now();
+            frameCount++;
+            fpsCounter++;
+            
+            // Update FPS every second
+            if (now - lastFpsTime >= 1000) {
+                const fps = Math.round(fpsCounter * 1000 / (now - lastFpsTime));
+                document.getElementById('fpsValue').textContent = fps;
+                fpsCounter = 0;
+                lastFpsTime = now;
+            }
+            
+            // Calculate frame latency
+            const frameLatency = now - lastFrameTime;
+            lastFrameTime = now;
+            document.getElementById('latencyValue').textContent = Math.round(frameLatency);
         }
 
         function processNextFrame() {
@@ -241,8 +263,6 @@
                 lastFpsTime = now;
             }
             
-            // Update frame count
-            document.getElementById('framesValue').textContent = frameCount;
             
             // Calculate frame latency
             const frameLatency = now - lastFrameTime;
