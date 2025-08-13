@@ -13,7 +13,11 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraConfig {
     pub path: String,
-    pub rtsp: RtspConfig,
+    pub url: String,
+    pub transport: String,
+    pub reconnect_interval: u64,
+    pub chunk_read_size: Option<usize>,
+    pub ffmpeg_buffer_size: Option<usize>,
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
@@ -61,13 +65,11 @@ impl Default for Config {
             "default".to_string(),
             CameraConfig {
                 path: "/camera1".to_string(),
-                rtsp: RtspConfig {
-                    url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
-                    transport: "tcp".to_string(),
-                    reconnect_interval: 5,
-                    chunk_read_size: None,
-                    ffmpeg_buffer_size: None,
-                },
+                url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
+                transport: "tcp".to_string(),
+                reconnect_interval: 5,
+                chunk_read_size: None,
+                ffmpeg_buffer_size: None,
                 transcoding_override: None,
             },
         );

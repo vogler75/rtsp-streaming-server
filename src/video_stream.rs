@@ -29,8 +29,18 @@ impl VideoStream {
         let (frame_tx, _) = broadcast::channel(channel_buffer_size);
         let frame_tx = Arc::new(frame_tx);
         
+        // Create RtspConfig from camera config
+        let rtsp_config = crate::config::RtspConfig {
+            url: camera_config.url.clone(),
+            transport: camera_config.transport.clone(),
+            reconnect_interval: camera_config.reconnect_interval,
+            chunk_read_size: camera_config.chunk_read_size,
+            ffmpeg_buffer_size: camera_config.ffmpeg_buffer_size,
+        };
+        
         let rtsp_client = RtspClient::new(
-            camera_config.rtsp.clone(),
+            camera_id.clone(),
+            rtsp_config,
             frame_tx.clone(),
             transcoding.quality,
             transcoding.capture_framerate,

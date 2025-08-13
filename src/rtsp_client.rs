@@ -9,6 +9,7 @@ use crate::config::RtspConfig;
 use crate::transcoder::FrameTranscoder;
 
 pub struct RtspClient {
+    camera_id: String,
     config: RtspConfig,
     frame_sender: Arc<broadcast::Sender<Bytes>>,
     transcoder: FrameTranscoder,
@@ -22,8 +23,9 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool) -> Self {
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool) -> Self {
         Self {
+            camera_id,
             config,
             frame_sender,
             transcoder: FrameTranscoder::new(quality).await,
@@ -44,20 +46,21 @@ impl RtspClient {
         let send_framerate = self.send_framerate;
         let allow_duplicate_frames = self.allow_duplicate_frames;
         let debug_sending = self.debug_sending;
+        let camera_id = self.camera_id.clone();
         
         tokio::spawn(async move {
-            Self::frame_sender_task(frame_sender, latest_frame, send_framerate, allow_duplicate_frames, debug_sending).await;
+            Self::frame_sender_task(camera_id, frame_sender, latest_frame, send_framerate, allow_duplicate_frames, debug_sending).await;
         });
         
         // Main capture loop
         loop {
             match self.connect_and_stream().await {
                 Ok(_) => {
-                    info!("RTSP stream ended normally");
+                    info!("[{}] RTSP stream ended normally", self.camera_id);
                 }
                 Err(e) => {
-                    error!("RTSP connection error: {}", e);
-                    info!("Reconnecting in {} seconds...", self.config.reconnect_interval);
+                    error!("[{}] RTSP connection error: {}", self.camera_id, e);
+                    info!("[{}] Reconnecting in {} seconds...", self.camera_id, self.config.reconnect_interval);
                     sleep(Duration::from_secs(self.config.reconnect_interval)).await;
                 }
             }
@@ -65,13 +68,14 @@ impl RtspClient {
     }
     
     async fn frame_sender_task(
+        camera_id: String,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
         latest_frame: Arc<RwLock<Option<Bytes>>>,
         send_framerate: u32,
         allow_duplicate_frames: bool,
         debug_sending: bool,
     ) {
-        info!("Starting frame sender task at {} FPS (duplicates: {})", send_framerate, allow_duplicate_frames);
+        info!("[{}] Starting frame sender task at {} FPS (duplicates: {})", camera_id, send_framerate, allow_duplicate_frames);
         let frame_duration = Duration::from_millis(1000 / send_framerate as u64);
         let mut last_send_time = tokio::time::Instant::now();
         let mut sent_count = 0u64;
@@ -110,8 +114,8 @@ impl RtspClient {
             // Log statistics every second if enabled
             let now = tokio::time::Instant::now();
             if debug_sending && now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                debug!("SENDING: {:2}/s Pings : {:2}/s", 
-                       sent_count, skipped_count);
+                debug!("[{}] SENDING: {:2}/s Pings : {:2}/s", 
+                       camera_id, sent_count, skipped_count);
                 sent_count = 0;
                 skipped_count = 0;
                 last_log_time = now;
@@ -120,16 +124,16 @@ impl RtspClient {
     }
 
     async fn connect_and_stream(&self) -> Result<()> {
-        info!("Connecting to RTSP stream: {}", self.config.url);
+        info!("[{}] Connecting to RTSP stream: {}", self.camera_id, self.config.url);
         
         // Try to connect to real RTSP stream first
         match self.connect_real_rtsp().await {
             Ok(_) => {
-                info!("RTSP connection ended");
+                info!("[{}] RTSP connection ended", self.camera_id);
             }
             Err(e) => {
-                error!("Failed to connect to RTSP stream: {}", e);
-                info!("Falling back to test frame generation");
+                error!("[{}] Failed to connect to RTSP stream: {}", self.camera_id, e);
+                info!("[{}] Falling back to test frame generation", self.camera_id);
                 self.generate_test_frames().await?;
             }
         }
@@ -138,11 +142,11 @@ impl RtspClient {
     }
 
     async fn connect_real_rtsp(&self) -> Result<()> {
-        info!("Attempting to connect to RTSP camera: {}", self.config.url);
+        info!("[{}] Attempting to connect to RTSP camera: {}", self.camera_id, self.config.url);
         debug!("Parsing RTSP URL");
         
         let original_url = url::Url::parse(&self.config.url).map_err(|e| {
-            error!("Invalid RTSP URL format: {}", e);
+            error!("[{}] Invalid RTSP URL format: {}", self.camera_id, e);
             e
         })?;
         
@@ -150,10 +154,10 @@ impl RtspClient {
         let creds = if !original_url.username().is_empty() {
             let username = original_url.username().to_string();
             let password = original_url.password().unwrap_or("").to_string();
-            info!("Using credentials - username: {}, password: [{}] chars", username, password.len());
+            info!("[{}] Using credentials - username: {}, password: [{}] chars", self.camera_id, username, password.len());
             Some(retina::client::Credentials { username, password })
         } else {
-            info!("No authentication credentials found in URL");
+            info!("[{}] No authentication credentials found in URL", self.camera_id);
             None
         };
 
@@ -161,13 +165,13 @@ impl RtspClient {
         let mut url = original_url.clone();
         url.set_username("").unwrap();
         url.set_password(None).unwrap();
-        info!("Cleaned URL for retina: {}", url);
+        info!("[{}] Cleaned URL for retina: {}", self.camera_id, url);
 
-        info!("Creating RTSP session...");
+        info!("[{}] Creating RTSP session...", self.camera_id);
         let session_group = Arc::new(retina::client::SessionGroup::default());
         
         // Try to connect to RTSP stream
-        info!("Connecting to RTSP server at {}:{}", 
+        info!("[{}] Connecting to RTSP server at {}:{}", self.camera_id, 
             url.host_str().unwrap_or("unknown"), 
             url.port().unwrap_or(554));
             
@@ -182,11 +186,11 @@ impl RtspClient {
             )
         ).await {
             Ok(Ok(session)) => {
-                info!("✅ Successfully connected to RTSP server!");
-                info!("Available streams: {}", session.streams().len());
+                info!("[{}] ✅ Successfully connected to RTSP server!", self.camera_id);
+                info!("[{}] Available streams: {}", self.camera_id, session.streams().len());
                 
                 for (i, stream) in session.streams().iter().enumerate() {
-                    info!("Stream {}: media={}, codec={:?}", 
+                    info!("[{}] Stream {}: media={}, codec={:?}", self.camera_id, 
                         i, stream.media(), stream.encoding_name());
                 }
 
@@ -195,10 +199,10 @@ impl RtspClient {
                     .position(|s| s.media() == "video")
                     .ok_or_else(|| anyhow::anyhow!("❌ No video stream found in RTSP response"))?;
 
-                info!("✅ Found video stream at index {} with codec {:?}", 
+                info!("[{}] ✅ Found video stream at index {} with codec {:?}", self.camera_id, 
                     video_stream_i, session.streams()[video_stream_i].encoding_name());
 
-                info!("🎬 Starting real H.264 packet reception from camera");
+                info!("[{}] 🎬 Starting real H.264 packet reception from camera", self.camera_id);
                 
                 // Now we need to properly setup and receive packets from the session
                 // The retina library requires proper session setup for packet reception
@@ -210,7 +214,7 @@ impl RtspClient {
                 return self.stream_rtsp_via_ffmpeg().await;
             }
             Ok(Err(e)) => {
-                error!("❌ Failed to connect to RTSP server: {}", e);
+                error!("[{}] ❌ Failed to connect to RTSP server: {}", self.camera_id, e);
                 return Err(e.into());
             }
             Err(_) => {
@@ -239,8 +243,8 @@ impl RtspClient {
             // Log test frame generation every second if enabled
             let now = tokio::time::Instant::now();
             if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                debug!("CAPTURE: {:2}/s Target: {:2}/s (test)", 
-                       frame_count, self.capture_framerate);
+                debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s (test)", 
+                       self.camera_id, frame_count, self.capture_framerate);
                 frame_count = 0;
                 last_log_time = now;
             }
@@ -274,7 +278,7 @@ impl RtspClient {
                     
                     // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
                     let delay = std::cmp::min(1u64 << (retry_count - 1), 30);
-                    warn!("Waiting {} seconds before retrying FFmpeg...", delay);
+                    warn!("[{}] Waiting {} seconds before retrying FFmpeg...", self.camera_id, delay);
                     tokio::time::sleep(Duration::from_secs(delay)).await;
                 }
             }
@@ -369,7 +373,7 @@ impl RtspClient {
                             }
                         }
                         Err(e) => {
-                            error!("Failed to wait for FFmpeg process: {}", e);
+                            error!("[{}] Failed to wait for FFmpeg process: {}", self.camera_id, e);
                         }
                     }
                     return Err(anyhow::anyhow!("FFmpeg process died"));
@@ -391,17 +395,17 @@ impl RtspClient {
                             let now = tokio::time::Instant::now();
                             if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
                                 if self.capture_framerate > 0 {
-                                    debug!("CAPTURE: {:2}/s Target: {:2}/s", 
-                                           frame_count, self.capture_framerate);
+                                    debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s", 
+                                           self.camera_id, frame_count, self.capture_framerate);
                                 } else {
-                                    debug!("CAPTURE: {:2}/s Natural Rate", frame_count);
+                                    debug!("[{}] CAPTURE: {:2}/s Natural Rate", self.camera_id, frame_count);
                                 }
                                 frame_count = 0;
                                 last_log_time = now;
                             }
                         }
                         Err(e) => {
-                            error!("Error reading MJPEG frame: {}", e);
+                            error!("[{}] Error reading MJPEG frame: {}", self.camera_id, e);
                             return Err(e);
                         }
                     }

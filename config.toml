@@ -24,7 +24,6 @@ debug_sending = false   # Enable debug output for sending rate
 
 [cameras.cam1]
 path = "/cam1"
-[cameras.cam1.rtsp]
 url = "rtsp://admin007:admin007@192.168.1.182:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
@@ -33,7 +32,6 @@ ffmpeg_buffer_size = 65536
 
 [cameras.cam2]
 path = "/cam2"
-[cameras.cam2.rtsp]
 url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
@@ -42,7 +40,6 @@ ffmpeg_buffer_size = 65536
 
 [cameras.cam3]
 path = "/cam3"
-[cameras.cam3.rtsp]
 url = "rtsp://admin007:admin007@192.168.1.188:554/stream2"
 transport = "tcp"
 reconnect_interval = 5
