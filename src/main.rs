@@ -4,6 +4,8 @@ use tracing::{info, warn, error};
 use anyhow::Result;
 use std::fs::File;
 use std::io::BufReader;
+use axum::response::IntoResponse;
+use axum::extract::State;
 
 mod config;
 mod rtsp_client;
@@ -64,8 +66,7 @@ async fn main() -> Result<()> {
     };
 
     let app = axum::Router::new()
-        .route("/ws", axum::routing::get(websocket_handler))
-        .route("/", axum::routing::get(serve_index))
+        .route("/", axum::routing::get(root_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
         .layer(cors_layer)
         .with_state(frame_tx);
@@ -91,6 +92,16 @@ async fn main() -> Result<()> {
 
 async fn serve_index() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../static/index.html"))
+}
+
+async fn root_handler(
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    State(frame_sender): axum::extract::State<Arc<broadcast::Sender<bytes::Bytes>>>,
+) -> axum::response::Response {
+    match ws {
+        Some(ws_upgrade) => websocket_handler(ws_upgrade, State(frame_sender)).await,
+        None => serve_index().await.into_response(),
+    }
 }
 
 async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {

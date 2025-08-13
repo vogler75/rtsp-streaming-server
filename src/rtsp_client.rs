@@ -198,9 +198,7 @@ impl RtspClient {
                         info!("📷 Streamed {} real frames from camera via FFmpeg", frame_count);
                     }
                     
-                    if let Err(_) = self.frame_sender.send(Bytes::from(jpeg_data)) {
-                        debug!("No WebSocket clients connected");
-                    }
+                    let _ = self.frame_sender.send(Bytes::from(jpeg_data));
                 }
                 Err(e) => {
                     error!("Error reading MJPEG frame: {}", e);

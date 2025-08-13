@@ -170,7 +170,7 @@
             updateStatus('connecting', 'Connecting...');
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
             
             ws = new WebSocket(wsUrl);
             
