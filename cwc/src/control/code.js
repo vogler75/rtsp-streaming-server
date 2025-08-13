@@ -211,15 +211,15 @@ function connectToWebSocket(url) {
     
     websocket.onerror = function(error) {
       console.error('WebSocket error occurred');
-      console.error('URL:', websocket.url);
-      console.error('ReadyState:', websocket.readyState);
+      console.error('URL:', currentURL);
+      console.error('ReadyState:', websocket ? websocket.readyState : 'null');
       console.error('Error event:', error);
       
       // Provide specific guidance for WSS certificate issues
-      if (websocket.url.startsWith('wss://')) {
+      if (currentURL.startsWith('wss://')) {
         console.error('====== WSS CONNECTION TROUBLESHOOTING ======');
         console.error('If this is a self-signed certificate error:');
-        console.error('1. Open the server URL in a browser: ' + websocket.url.replace('wss://', 'https://'));
+        console.error('1. Open the server URL in a browser: ' + currentURL.replace('wss://', 'https://'));
         console.error('2. Accept the security warning to trust the certificate');
         console.error('3. Or disable TLS in server config.toml and use ws:// instead');
         console.error('4. Or add the certificate to the system trust store');
@@ -235,7 +235,7 @@ function connectToWebSocket(url) {
       console.log('Code:', event.code);
       console.log('Reason:', event.reason || 'No reason provided');
       console.log('Was clean:', event.wasClean);
-      console.log('URL was:', websocket.url);
+      console.log('URL was:', currentURL);
       
       // Common WebSocket close codes
       const closeReasons = {
