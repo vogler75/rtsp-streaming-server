@@ -166,6 +166,10 @@ function connectToWebSocket(url) {
           // Replace video element with img element
           videoElement.style.display = 'none';
           videoElement.parentNode.insertBefore(imgElement, videoElement.nextSibling);
+        } else {
+          // Make sure img element is visible (might have been hidden by showBlankScreen)
+          imgElement.style.display = 'block';
+          videoElement.style.display = 'none';
         }
         
         // Create blob URL and clean up previous one
@@ -276,10 +280,33 @@ function setProperty(data) {
   switch (data.key) {
     case 'URL':
       if (data.value !== currentURL) {
+        const oldURL = currentURL;
         currentURL = data.value;
         reconnectAttempts = 0;
+        
+        // If we're connected or trying to connect, disconnect first then reconnect
         if (shouldConnect) {
-          connectToWebSocket(data.value);
+          // Disconnect from old URL if connected
+          if (websocket) {
+            console.log('URL changed from', oldURL, 'to', currentURL, '- reconnecting...');
+            websocket.close();
+            websocket = null;
+          }
+          
+          // Clear any pending reconnection timers
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          
+          // Connect to new URL
+          if (currentURL) {
+            connectToWebSocket(currentURL);
+          } else {
+            // No URL provided, just update status
+            updateConnectionStatus(false);
+            showBlankScreen();
+          }
         }
       }
       break;
