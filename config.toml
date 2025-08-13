@@ -17,5 +17,5 @@ buffer_size = 1024000
 [transcoding]
 output_format = "mjpeg"
 quality = 85
-framerate = 10
+framerate = 5
 max_latency_ms = 200
