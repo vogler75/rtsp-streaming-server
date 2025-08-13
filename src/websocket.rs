@@ -26,8 +26,6 @@ async fn handle_socket(socket: WebSocket, frame_sender: Arc<broadcast::Sender<By
     let send_task = tokio::spawn(async move {
         let mut frame_count = 0u64;
         let mut dropped_frames = 0u64;
-        let start_time = std::time::Instant::now();
-        let mut last_log_time = std::time::Instant::now();
         
         loop {
             match frame_receiver.recv().await {
@@ -40,16 +38,7 @@ async fn handle_socket(socket: WebSocket, frame_sender: Arc<broadcast::Sender<By
                         sender.send(Message::Binary(frame_data.to_vec()))
                     ).await {
                         Ok(Ok(())) => {
-                            if frame_count % 30 == 0 {
-                                let now = std::time::Instant::now();
-                                let elapsed = now.duration_since(last_log_time).as_secs_f32();
-                                let total_elapsed = now.duration_since(start_time).as_secs_f32();
-                                let actual_fps = 30.0 / elapsed;
-                                let avg_fps = frame_count as f32 / total_elapsed;
-                                debug!("Sent {} frames (dropped: {}) | Last 30 frames: {:.1} FPS | Avg: {:.1} FPS", 
-                                       frame_count, dropped_frames, actual_fps, avg_fps);
-                                last_log_time = now;
-                            }
+                            // Frame sent successfully
                         }
                         Ok(Err(_)) => {
                             // Connection error

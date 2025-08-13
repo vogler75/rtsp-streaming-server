@@ -41,7 +41,9 @@ async fn main() -> Result<()> {
         config.transcoding.quality,
         config.transcoding.capture_framerate,
         config.transcoding.send_framerate,
-        config.transcoding.allow_duplicate_frames.unwrap_or(false)
+        config.transcoding.allow_duplicate_frames.unwrap_or(false),
+        config.transcoding.debug_capture.unwrap_or(true),
+        config.transcoding.debug_sending.unwrap_or(true)
     ).await;
     
     tokio::spawn(async move {

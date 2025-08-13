@@ -41,6 +41,8 @@ pub struct TranscodingConfig {
     pub send_framerate: u32,     // Rate at which we send frames to clients
     pub channel_buffer_size: Option<usize>, // Number of frames to buffer (1 = only latest)
     pub allow_duplicate_frames: Option<bool>, // Whether to send same frame multiple times
+    pub debug_capture: Option<bool>, // Enable/disable capture rate debug output
+    pub debug_sending: Option<bool>, // Enable/disable sending rate debug output
 }
 
 impl Default for Config {
@@ -70,6 +72,8 @@ impl Default for Config {
                 send_framerate: 10,
                 channel_buffer_size: Some(1),
                 allow_duplicate_frames: Some(false),
+                debug_capture: Some(true),
+                debug_sending: Some(true),
             },
         }
     }

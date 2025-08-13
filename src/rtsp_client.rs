@@ -17,10 +17,12 @@ pub struct RtspClient {
     quality: u8,
     latest_frame: Arc<RwLock<Option<Bytes>>>,
     allow_duplicate_frames: bool,
+    debug_capture: bool,
+    debug_sending: bool,
 }
 
 impl RtspClient {
-    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool) -> Self {
+    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool) -> Self {
         Self {
             config,
             frame_sender,
@@ -30,6 +32,8 @@ impl RtspClient {
             quality,
             latest_frame: Arc::new(RwLock::new(None)),
             allow_duplicate_frames,
+            debug_capture,
+            debug_sending,
         }
     }
 
@@ -39,9 +43,10 @@ impl RtspClient {
         let latest_frame = self.latest_frame.clone();
         let send_framerate = self.send_framerate;
         let allow_duplicate_frames = self.allow_duplicate_frames;
+        let debug_sending = self.debug_sending;
         
         tokio::spawn(async move {
-            Self::frame_sender_task(frame_sender, latest_frame, send_framerate, allow_duplicate_frames).await;
+            Self::frame_sender_task(frame_sender, latest_frame, send_framerate, allow_duplicate_frames, debug_sending).await;
         });
         
         // Main capture loop
@@ -64,12 +69,14 @@ impl RtspClient {
         latest_frame: Arc<RwLock<Option<Bytes>>>,
         send_framerate: u32,
         allow_duplicate_frames: bool,
+        debug_sending: bool,
     ) {
         info!("Starting frame sender task at {} FPS (duplicates: {})", send_framerate, allow_duplicate_frames);
         let frame_duration = Duration::from_millis(1000 / send_framerate as u64);
         let mut last_send_time = tokio::time::Instant::now();
         let mut sent_count = 0u64;
         let mut skipped_count = 0u64;
+        let mut last_log_time = tokio::time::Instant::now();
         
         loop {
             // Wait for the next frame time
@@ -100,9 +107,14 @@ impl RtspClient {
                 skipped_count += 1;
             }
             
-            if (sent_count + skipped_count) % 100 == 0 {
-                debug!("Frame sender: sent {} frames, {} pings (no new frame) at {} FPS", 
-                       sent_count, skipped_count, send_framerate);
+            // Log statistics every second if enabled
+            let now = tokio::time::Instant::now();
+            if debug_sending && now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                debug!("SENDING: {:2}/s Pings : {:2}/s", 
+                       sent_count, skipped_count);
+                sent_count = 0;
+                skipped_count = 0;
+                last_log_time = now;
             }
         }
     }
@@ -211,12 +223,10 @@ impl RtspClient {
     async fn generate_test_frames(&self) -> Result<()> {
         info!("Starting test frame generation");
         let mut frame_count = 0u64;
+        let mut last_log_time = tokio::time::Instant::now();
         
         loop {
             frame_count += 1;
-            if frame_count % 100 == 0 {
-                debug!("Generated {} test frames", frame_count);
-            }
 
             let jpeg_data = self.transcoder.create_test_frame().await?;
             
@@ -224,6 +234,15 @@ impl RtspClient {
             {
                 let mut guard = self.latest_frame.write().await;
                 *guard = Some(jpeg_data);
+            }
+            
+            // Log test frame generation every second if enabled
+            let now = tokio::time::Instant::now();
+            if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                debug!("CAPTURE: {:2}/s Target: {:2}/s (test)", 
+                       frame_count, self.capture_framerate);
+                frame_count = 0;
+                last_log_time = now;
             }
             
             // Generate frames at configured capture FPS
@@ -236,11 +255,19 @@ impl RtspClient {
         info!("🎥 Starting direct RTSP to MJPEG streaming via FFmpeg");
         
         // Use FFmpeg to directly read from RTSP and output MJPEG frames with low latency
-        info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, self.quality);
+        if self.capture_framerate > 0 {
+            info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, self.quality);
+        } else {
+            info!("Starting FFmpeg with natural camera framerate, quality: {}", self.quality);
+        }
         
         // Create owned strings that will live long enough
         let quality_str = self.quality.to_string();
-        let fps_str = format!("fps={}", self.capture_framerate);
+        let fps_str = if self.capture_framerate > 0 {
+            Some(format!("fps={}", self.capture_framerate))
+        } else {
+            None
+        };
         
         // Build FFmpeg arguments with optional buffer size
         let mut ffmpeg_args = vec![
@@ -257,13 +284,26 @@ impl RtspClient {
             info!("FFmpeg buffer size set to: {}", buffer_size_str);
         }
         
+        // Add basic arguments
         ffmpeg_args.extend_from_slice(&[
             "-rtsp_transport", &self.config.transport,
             "-i", &self.config.url,
             "-f", "mjpeg",
             "-q:v", &quality_str,                   // JPEG quality from config
-            "-vf", &fps_str,                        // Force exact framerate
-            "-vsync", "cfr",                        // Constant frame rate output
+        ]);
+        
+        // Add fps filter only if capture_framerate > 0
+        if let Some(ref fps_filter) = fps_str {
+            ffmpeg_args.extend_from_slice(&[
+                "-vf", fps_filter,                  // Force exact framerate
+                "-vsync", "cfr",                    // Constant frame rate output
+            ]);
+            info!("FFmpeg: Using fps filter: {}", fps_filter);
+        } else {
+            info!("FFmpeg: No fps filter - using camera's natural frame rate");
+        }
+        
+        ffmpeg_args.extend_from_slice(&[
             "-flush_packets", "1",                  // Flush packets immediately
             "-an",                                  // No audio
             "-"                                     // Output to stdout
@@ -285,6 +325,7 @@ impl RtspClient {
         let mut reader = tokio::io::BufReader::new(stdout);
         let mut frame_count = 0u64;
         let mut buffer = Vec::new();
+        let mut last_log_time = tokio::time::Instant::now();
         
         // Read MJPEG frames from FFmpeg stdout
         loop {
@@ -292,14 +333,23 @@ impl RtspClient {
                 Ok(jpeg_data) => {
                     frame_count += 1;
                     
-                    if frame_count % 100 == 0 {
-                        info!("📷 Captured {} frames from camera at {} FPS", frame_count, self.capture_framerate);
-                    }
-                    
                     // Store the frame in the latest frame store
                     {
                         let mut guard = self.latest_frame.write().await;
                         *guard = Some(Bytes::from(jpeg_data));
+                    }
+                    
+                    // Log capture statistics every second if enabled
+                    let now = tokio::time::Instant::now();
+                    if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                        if self.capture_framerate > 0 {
+                            debug!("CAPTURE: {:2}/s Target: {:2}/s", 
+                                   frame_count, self.capture_framerate);
+                        } else {
+                            debug!("CAPTURE: {:2}/s Natural Rate", frame_count);
+                        }
+                        frame_count = 0;
+                        last_log_time = now;
                     }
                 }
                 Err(e) => {
