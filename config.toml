@@ -1,6 +1,6 @@
 [server]
 host = "0.0.0.0"
-port = 8082
+port = 8080
 
 [rtsp]
 url = "rtsp://admin007:admin007@192.168.1.171:554/stream2"

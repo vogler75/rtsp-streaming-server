@@ -28,7 +28,11 @@ async fn main() -> Result<()> {
     let (frame_tx, _) = broadcast::channel(100);
     let frame_tx = Arc::new(frame_tx);
 
-    let rtsp_client = RtspClient::new(config.rtsp.clone(), frame_tx.clone());
+    let rtsp_client = RtspClient::new(
+        config.rtsp.clone(), 
+        frame_tx.clone(),
+        config.transcoding.quality
+    ).await;
     
     tokio::spawn(async move {
         if let Err(e) = rtsp_client.start().await {

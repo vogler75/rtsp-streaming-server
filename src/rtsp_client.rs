@@ -15,11 +15,11 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>) -> Self {
+    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8) -> Self {
         Self {
             config,
             frame_sender,
-            transcoder: FrameTranscoder::new(),
+            transcoder: FrameTranscoder::new(quality).await,
         }
     }
 
@@ -117,26 +117,16 @@ impl RtspClient {
                 info!("✅ Found video stream at index {} with codec {:?}", 
                     video_stream_i, session.streams()[video_stream_i].encoding_name());
 
-                // For now, we'll simulate receiving frames since the retina API is complex
-                info!("🎬 Starting to simulate frame reception (TODO: implement real decoding)");
-                let mut frame_count = 0u64;
+                info!("🎬 Starting real H.264 packet reception from camera");
                 
-                loop {
-                    frame_count += 1;
-                    
-                    if frame_count % 100 == 0 {
-                        info!("📺 Simulating frame {} from RTSP camera", frame_count);
-                    }
-
-                    // Generate test frame that indicates we're connected to RTSP
-                    let jpeg_data = self.transcoder.create_test_frame_rtsp_connected().await?;
-                    if let Err(_) = self.frame_sender.send(jpeg_data) {
-                        debug!("No WebSocket clients connected");
-                    }
-                    
-                    // Simulate 30 FPS
-                    tokio::time::sleep(Duration::from_millis(33)).await;
-                }
+                // Now we need to properly setup and receive packets from the session
+                // The retina library requires proper session setup for packet reception
+                
+                // For now, let's implement a more realistic approach:
+                // We'll use direct RTSP streaming via FFmpeg instead of individual packet processing
+                info!("🔄 Switching to direct RTSP to MJPEG transcoding via FFmpeg");
+                
+                return self.stream_rtsp_via_ffmpeg().await;
             }
             Ok(Err(e)) => {
                 error!("❌ Failed to connect to RTSP server: {}", e);
@@ -167,5 +157,97 @@ impl RtspClient {
             // Generate frames at ~30 FPS
             tokio::time::sleep(Duration::from_millis(33)).await;
         }
+    }
+
+    async fn stream_rtsp_via_ffmpeg(&self) -> Result<()> {
+        info!("🎥 Starting direct RTSP to MJPEG streaming via FFmpeg");
+        
+        // Use FFmpeg to directly read from RTSP and output MJPEG frames
+        let mut ffmpeg_cmd = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-rtsp_transport", &self.config.transport,
+                "-i", &self.config.url,
+                "-f", "mjpeg",
+                "-q:v", "5", // High quality JPEG
+                "-vf", "fps=30", // Ensure consistent framerate
+                "-an", // No audio
+                "-"  // Output to stdout
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        info!("📡 FFmpeg process started, reading MJPEG stream from camera");
+        
+        let stdout = ffmpeg_cmd.stdout.take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stdout"))?;
+            
+        let mut reader = tokio::io::BufReader::new(stdout);
+        let mut frame_count = 0u64;
+        let mut buffer = Vec::new();
+        
+        // Read MJPEG frames from FFmpeg stdout
+        loop {
+            match self.read_mjpeg_frame(&mut reader, &mut buffer).await {
+                Ok(jpeg_data) => {
+                    frame_count += 1;
+                    
+                    if frame_count % 100 == 0 {
+                        info!("📷 Streamed {} real frames from camera via FFmpeg", frame_count);
+                    }
+                    
+                    if let Err(_) = self.frame_sender.send(Bytes::from(jpeg_data)) {
+                        debug!("No WebSocket clients connected");
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading MJPEG frame: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        // Wait for FFmpeg process to finish
+        let _ = ffmpeg_cmd.wait().await;
+        
+        Err(anyhow::anyhow!("FFmpeg process ended"))
+    }
+
+    async fn read_mjpeg_frame(&self, reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>, buffer: &mut Vec<u8>) -> Result<Vec<u8>> {
+        use tokio::io::AsyncReadExt;
+        
+        buffer.clear();
+        
+        // Look for JPEG start marker (0xFF, 0xD8)
+        let mut byte = [0u8; 1];
+        loop {
+            reader.read_exact(&mut byte).await?;
+            if byte[0] == 0xFF {
+                reader.read_exact(&mut byte).await?;
+                if byte[0] == 0xD8 {
+                    // Found JPEG start
+                    buffer.push(0xFF);
+                    buffer.push(0xD8);
+                    break;
+                }
+            }
+        }
+        
+        // Read until JPEG end marker (0xFF, 0xD9)
+        let mut prev_byte = 0u8;
+        loop {
+            reader.read_exact(&mut byte).await?;
+            buffer.push(byte[0]);
+            
+            if prev_byte == 0xFF && byte[0] == 0xD9 {
+                // Found JPEG end
+                break;
+            }
+            prev_byte = byte[0];
+        }
+        
+        Ok(buffer.clone())
     }
 }
