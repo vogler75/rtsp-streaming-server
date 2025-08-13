@@ -35,7 +35,8 @@ async fn main() -> Result<()> {
     let rtsp_client = RtspClient::new(
         config.rtsp.clone(), 
         frame_tx.clone(),
-        config.transcoding.quality
+        config.transcoding.quality,
+        config.transcoding.framerate
     ).await;
     
     tokio::spawn(async move {

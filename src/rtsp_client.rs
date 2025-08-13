@@ -12,14 +12,16 @@ pub struct RtspClient {
     config: RtspConfig,
     frame_sender: Arc<broadcast::Sender<Bytes>>,
     transcoder: FrameTranscoder,
+    framerate: u32,
 }
 
 impl RtspClient {
-    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8) -> Self {
+    pub async fn new(config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, framerate: u32) -> Self {
         Self {
             config,
             frame_sender,
             transcoder: FrameTranscoder::new(quality).await,
+            framerate,
         }
     }
 
@@ -154,8 +156,9 @@ impl RtspClient {
                 debug!("No active WebSocket connections to send frame to");
             }
             
-            // Generate frames at ~30 FPS
-            tokio::time::sleep(Duration::from_millis(33)).await;
+            // Generate frames at configured FPS
+            let frame_duration_ms = 1000 / self.framerate as u64;
+            tokio::time::sleep(Duration::from_millis(frame_duration_ms)).await;
         }
     }
 
@@ -169,7 +172,7 @@ impl RtspClient {
                 "-i", &self.config.url,
                 "-f", "mjpeg",
                 "-q:v", "5", // High quality JPEG
-                "-vf", "fps=30", // Ensure consistent framerate
+                "-vf", &format!("fps={}", self.framerate), // Ensure consistent framerate
                 "-an", // No audio
                 "-"  // Output to stdout
             ])
