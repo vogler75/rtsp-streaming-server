@@ -224,10 +224,13 @@
                 return;
             }
 
-            updateStatus('connecting', 'Connecting...');
+            // Use the current URL path for the WebSocket connection
+            const currentPath = window.location.pathname;
+            
+            updateStatus('connecting', `Connecting...`);
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
+            const wsUrl = `${protocol}//${window.location.host}${currentPath}`;
             
             ws = new WebSocket(wsUrl);
             

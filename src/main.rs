@@ -11,10 +11,13 @@ mod config;
 mod rtsp_client;
 mod websocket;
 mod transcoder;
+mod video_stream;
 
 use config::Config;
-use rtsp_client::RtspClient;
+use video_stream::VideoStream;
 use websocket::websocket_handler;
+use std::collections::HashMap;
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,28 +32,35 @@ async fn main() -> Result<()> {
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
 
-    // Use configured channel buffer size or default to 1 for only latest frame
-    let channel_buffer_size = config.transcoding.channel_buffer_size.unwrap_or(1);
-    info!("Using channel buffer size: {} frames", channel_buffer_size);
-    let (frame_tx, _) = broadcast::channel(channel_buffer_size);
-    let frame_tx = Arc::new(frame_tx);
-
-    let rtsp_client = RtspClient::new(
-        config.rtsp.clone(), 
-        frame_tx.clone(),
-        config.transcoding.quality,
-        config.transcoding.capture_framerate,
-        config.transcoding.send_framerate,
-        config.transcoding.allow_duplicate_frames.unwrap_or(false),
-        config.transcoding.debug_capture.unwrap_or(true),
-        config.transcoding.debug_sending.unwrap_or(true)
-    ).await;
+    // Create video streams for each camera
+    let mut camera_streams: HashMap<String, Arc<broadcast::Sender<bytes::Bytes>>> = HashMap::new();
     
-    tokio::spawn(async move {
-        if let Err(e) = rtsp_client.start().await {
-            error!("RTSP client error: {}", e);
+    for (camera_id, camera_config) in config.cameras.clone() {
+        info!("Configuring camera '{}' on path '{}'...", camera_id, camera_config.path);
+        
+        match VideoStream::new(
+            camera_id.clone(),
+            camera_config.clone(),
+            &config.transcoding,
+        ).await {
+            Ok(video_stream) => {
+                // Store the frame sender for this camera's path
+                camera_streams.insert(camera_config.path.clone(), video_stream.frame_sender.clone());
+                
+                // Start the video stream
+                video_stream.start().await;
+                info!("Started camera '{}' on path '{}'" , camera_id, camera_config.path);
+            }
+            Err(e) => {
+                error!("Failed to create video stream for camera '{}': {}", camera_id, e);
+            }
         }
-    });
+    }
+    
+    if camera_streams.is_empty() {
+        error!("No cameras configured or all failed to initialize");
+        return Err(anyhow::anyhow!("No cameras available"));
+    }
 
     let cors_layer = if let Some(origin) = &config.server.cors_allow_origin {
         if origin == "*" {
@@ -73,11 +83,21 @@ async fn main() -> Result<()> {
         tower_http::cors::CorsLayer::permissive()
     };
 
-    let app = axum::Router::new()
-        .route("/", axum::routing::get(root_handler))
-        .nest_service("/static", tower_http::services::ServeDir::new("static"))
-        .layer(cors_layer)
-        .with_state(frame_tx);
+    // Build router with camera paths
+    let mut app = axum::Router::new()
+        .route("/", axum::routing::get(index_handler))
+        .nest_service("/static", tower_http::services::ServeDir::new("static"));
+    
+    // Add a route for each camera
+    for (path, frame_sender) in camera_streams {
+        info!("Adding route for camera at path: {}", path);
+        let sender = frame_sender.clone();
+        app = app.route(&path, axum::routing::get(
+            move |ws, query| camera_handler(ws, query, sender.clone())
+        ));
+    }
+    
+    app = app.layer(cors_layer);
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     
@@ -117,10 +137,18 @@ async fn serve_index_with_mode(is_full_mode: bool) -> axum::response::Html<Strin
 }
 
 
-async fn root_handler(
+async fn index_handler(
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    // Check if 'full' parameter is present
+    let is_full_mode = query.contains_key("full");
+    serve_index_with_mode(is_full_mode).await.into_response()
+}
+
+async fn camera_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
-    State(frame_sender): axum::extract::State<Arc<broadcast::Sender<bytes::Bytes>>>,
+    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
 ) -> axum::response::Response {
     match ws {
         Some(ws_upgrade) => websocket_handler(ws_upgrade, State(frame_sender)).await,

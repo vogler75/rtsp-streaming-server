@@ -1,0 +1,59 @@
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use tracing::{info, error};
+use anyhow::Result;
+use bytes::Bytes;
+
+use crate::config::{CameraConfig, TranscodingConfig};
+use crate::rtsp_client::RtspClient;
+
+pub struct VideoStream {
+    pub camera_id: String,
+    pub frame_sender: Arc<broadcast::Sender<Bytes>>,
+    rtsp_client: RtspClient,
+}
+
+impl VideoStream {
+    pub async fn new(
+        camera_id: String,
+        camera_config: CameraConfig,
+        default_transcoding: &TranscodingConfig,
+    ) -> Result<Self> {
+        // Use camera-specific transcoding config if available, otherwise use default
+        let transcoding = camera_config.transcoding_override.as_ref().unwrap_or(default_transcoding);
+        
+        let channel_buffer_size = transcoding.channel_buffer_size.unwrap_or(1);
+        info!("Creating video stream for camera '{}' on path '{}' with buffer size: {} frames", 
+              camera_id, camera_config.path, channel_buffer_size);
+        
+        let (frame_tx, _) = broadcast::channel(channel_buffer_size);
+        let frame_tx = Arc::new(frame_tx);
+        
+        let rtsp_client = RtspClient::new(
+            camera_config.rtsp.clone(),
+            frame_tx.clone(),
+            transcoding.quality,
+            transcoding.capture_framerate,
+            transcoding.send_framerate,
+            transcoding.allow_duplicate_frames.unwrap_or(false),
+            transcoding.debug_capture.unwrap_or(true),
+            transcoding.debug_sending.unwrap_or(true),
+        ).await;
+        
+        Ok(Self {
+            camera_id,
+            frame_sender: frame_tx,
+            rtsp_client,
+        })
+    }
+    
+    pub async fn start(self) {
+        let camera_id = self.camera_id.clone();
+        tokio::spawn(async move {
+            info!("Starting video stream for camera '{}'", camera_id);
+            if let Err(e) = self.rtsp_client.start().await {
+                error!("RTSP client error for camera '{}': {}", camera_id, e);
+            }
+        });
+    }
+}

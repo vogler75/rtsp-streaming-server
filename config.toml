@@ -8,21 +8,46 @@ enabled = false
 cert_path = "certs/server.crt"
 key_path = "certs/server.key"
 
-[rtsp]
-#url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
-url = "rtsp://admin007:admin007@192.168.1.182:554/stream1"
-#url = "rtsp://admin007:admin007@192.168.1.188:554/stream2"
-transport = "tcp"
-reconnect_interval = 5
-chunk_read_size = 32768   # Bytes to read at once from FFmpeg (8KB default)
-ffmpeg_buffer_size = 65536  # FFmpeg RTSP buffer size in bytes (32KB for low latency)
-
+# Global transcoding settings (can be overridden per camera)
 [transcoding]
 output_format = "mjpeg"
 quality = 50
-capture_framerate = 0  # FPS to capture from camera (higher = smoother motion capture)
-send_framerate = 10     # FPS to send to clients (lower = less bandwidth)
+capture_framerate = 0  # FPS to capture from camera (0 = max available)
+send_framerate = 10    # FPS to send to clients
 channel_buffer_size = 1 # Number of frames to buffer (1 = only latest frame)
-allow_duplicate_frames = false # If false, each frame is sent only once (no duplicates)
+allow_duplicate_frames = false # If false, each frame is sent only once
 debug_capture = true    # Enable debug output for capture rate
-debug_sending = false    # Enable debug output for sending rate
+debug_sending = false   # Enable debug output for sending rate
+
+# Camera configurations
+# Each camera has a unique ID and configurable path
+
+[cameras.cam1]
+path = "/cam1"
+[cameras.cam1.rtsp]
+url = "rtsp://admin007:admin007@192.168.1.182:554/stream1"
+transport = "tcp"
+reconnect_interval = 5
+chunk_read_size = 32768
+ffmpeg_buffer_size = 65536
+
+[cameras.cam2]
+path = "/cam2"
+[cameras.cam2.rtsp]
+url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
+transport = "tcp"
+reconnect_interval = 5
+chunk_read_size = 32768
+ffmpeg_buffer_size = 65536
+
+[cameras.cam3]
+path = "/cam3"
+[cameras.cam3.rtsp]
+url = "rtsp://admin007:admin007@192.168.1.188:554/stream2"
+transport = "tcp"
+reconnect_interval = 5
+chunk_read_size = 32768
+ffmpeg_buffer_size = 65536
+# Camera-specific transcoding override (optional)
+# quality = 30
+# send_framerate = 5

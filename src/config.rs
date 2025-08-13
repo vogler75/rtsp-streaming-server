@@ -1,12 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use anyhow::Result;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
-    pub rtsp: RtspConfig,
+    pub cameras: HashMap<String, CameraConfig>,
     pub transcoding: TranscodingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraConfig {
+    pub path: String,
+    pub rtsp: RtspConfig,
+    #[serde(flatten)]
+    pub transcoding_override: Option<TranscodingConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +56,22 @@ pub struct TranscodingConfig {
 
 impl Default for Config {
     fn default() -> Self {
+        let mut cameras = HashMap::new();
+        cameras.insert(
+            "default".to_string(),
+            CameraConfig {
+                path: "/camera1".to_string(),
+                rtsp: RtspConfig {
+                    url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
+                    transport: "tcp".to_string(),
+                    reconnect_interval: 5,
+                    chunk_read_size: None,
+                    ffmpeg_buffer_size: None,
+                },
+                transcoding_override: None,
+            },
+        );
+        
         Self {
             server: ServerConfig {
                 host: "0.0.0.0".to_string(),
@@ -58,13 +83,7 @@ impl Default for Config {
                 }),
                 cors_allow_origin: Some("*".to_string()),
             },
-            rtsp: RtspConfig {
-                url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
-                transport: "tcp".to_string(),
-                reconnect_interval: 5,
-                chunk_read_size: None,
-                ffmpeg_buffer_size: None,
-            },
+            cameras,
             transcoding: TranscodingConfig {
                 output_format: "mjpeg".to_string(),
                 quality: 85,
