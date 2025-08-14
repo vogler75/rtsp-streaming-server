@@ -22,6 +22,12 @@ pub struct CameraStatus {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct PictureArrival {
+    pub t: u128,  // Timestamp in milliseconds since epoch
+    pub d: u128,  // Time difference from previous picture in milliseconds
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ClientStatus {
     pub id: String,
     pub camera_id: String,
@@ -333,5 +339,32 @@ impl MqttHandle {
         ).await?;
         
         Ok(())
+    }
+    
+    pub async fn publish_picture_arrival(&self, camera_id: &str, arrival_time: u128, time_diff: u128) {
+        let picture_event = PictureArrival {
+            t: arrival_time,
+            d: time_diff,
+        };
+        
+        if let Ok(payload) = serde_json::to_string(&picture_event) {
+            let topic = format!("{}/cameras/{}/picture/arrived", self.config.base_topic, camera_id);
+            let qos = match self.config.qos {
+                0 => QoS::AtMostOnce,
+                1 => QoS::AtLeastOnce,
+                _ => QoS::ExactlyOnce,
+            };
+            
+            if let Err(e) = self.client.publish(
+                topic,
+                qos,
+                false, // Don't retain picture arrival events
+                payload.as_bytes(),
+            ).await {
+                error!("Failed to publish picture arrival for camera {}: {}", camera_id, e);
+            }
+        } else {
+            error!("Failed to serialize picture arrival event for camera {}", camera_id);
+        }
     }
 }

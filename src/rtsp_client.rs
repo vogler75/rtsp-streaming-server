@@ -27,6 +27,7 @@ pub struct RtspClient {
     mqtt_handle: Option<MqttHandle>,
     capture_fps: Arc<RwLock<f32>>,
     send_fps: Arc<RwLock<f32>>,
+    last_picture_time: Arc<RwLock<Option<u128>>>, // Timestamp in milliseconds
 }
 
 impl RtspClient {
@@ -50,6 +51,7 @@ impl RtspClient {
             mqtt_handle,
             capture_fps: Arc::new(RwLock::new(0.0)),
             send_fps: Arc::new(RwLock::new(0.0)),
+            last_picture_time: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -276,6 +278,30 @@ impl RtspClient {
             {
                 let mut guard = self.latest_frame.write().await;
                 *guard = Some(jpeg_data);
+            }
+            
+            // Track picture arrival time for MQTT publishing (non-blocking)
+            if let Some(ref mqtt) = self.mqtt_handle {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
+                    
+                let mut last_time_guard = self.last_picture_time.write().await;
+                let time_diff = if let Some(last_time) = *last_time_guard {
+                    now.saturating_sub(last_time)
+                } else {
+                    0 // First picture, no time difference
+                };
+                *last_time_guard = Some(now);
+                drop(last_time_guard);
+                
+                // Spawn MQTT publishing in background to avoid blocking frame processing
+                let mqtt_clone = mqtt.clone();
+                let camera_id_clone = self.camera_id.clone();
+                tokio::spawn(async move {
+                    mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff).await;
+                });
             }
             
             // Log test frame generation every second if enabled
@@ -631,10 +657,43 @@ impl RtspClient {
                         Ok(jpeg_data) => {
                             frame_count += 1;
                             
+                            // Measure frame processing time for diagnostics
+                            let frame_start_time = std::time::Instant::now();
+                            
                             // Store the frame in the latest frame store
                             {
                                 let mut guard = self.latest_frame.write().await;
                                 *guard = Some(Bytes::from(jpeg_data));
+                            }
+                            
+                            // Track picture arrival time for MQTT publishing (non-blocking)
+                            if let Some(ref mqtt) = self.mqtt_handle {
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis();
+                                    
+                                let mut last_time_guard = self.last_picture_time.write().await;
+                                let time_diff = if let Some(last_time) = *last_time_guard {
+                                    now.saturating_sub(last_time)
+                                } else {
+                                    0 // First picture, no time difference
+                                };
+                                *last_time_guard = Some(now);
+                                drop(last_time_guard);
+                                
+                                // Spawn MQTT publishing in background to avoid blocking frame processing
+                                let mqtt_clone = mqtt.clone();
+                                let camera_id_clone = self.camera_id.clone();
+                                tokio::spawn(async move {
+                                    mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff).await;
+                                });
+                            }
+                            
+                            // Measure and log frame processing time if it's slow
+                            let processing_duration = frame_start_time.elapsed();
+                            if processing_duration.as_millis() > 10 {
+                                warn!("[{}] Slow frame processing: {}ms", self.camera_id, processing_duration.as_millis());
                             }
                             
                             // Log capture statistics every second if enabled

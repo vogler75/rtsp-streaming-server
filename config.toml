@@ -8,6 +8,19 @@ enabled = false
 cert_path = "certs/server.crt"
 key_path = "certs/server.key"
 
+# MQTT Configuration (optional)
+[mqtt]
+enabled = true
+broker_url = "mqtt://192.168.1.4:1883"  # Can also use mqtts:// for TLS
+client_id = "videoserver-01"
+# username = "mqtt_user"  # Optional
+# password = "mqtt_pass"  # Optional
+base_topic = "Videoserver"  # Base topic for all MQTT messages
+qos = 0  # Quality of Service (0, 1, or 2)
+retain = false  # Whether to retain messages
+keep_alive_secs = 60  # Keep-alive interval in seconds
+publish_interval_secs = 5  # How often to publish status updates
+
 # Global transcoding settings (can be overridden per camera)
 [transcoding]
 output_format = "mpegts"
@@ -50,9 +63,9 @@ output_format = "mjpeg"  # Output format: "mjpeg", "mpegts", "mp4", etc.
 
 gop_size = 10  # GOP size (keyframe interval) - frames between keyframes
 scale = "640:480,format=yuv420p"  # Video scaling: "640:480", "1280:-1", etc.
-#rtbufsize = 65536  # RTSP buffer size in bytes
 
 # FFmpeg advanced options
+#rtbufsize = 65536  # RTSP buffer size in bytes
 #fflags = "+nobuffer+discardcorrupt"
 #flags = "low_delay"
 #avioflags = "direct"
@@ -60,56 +73,3 @@ scale = "640:480,format=yuv420p"  # Video scaling: "640:480", "1280:-1", etc.
 #flush_packets = "1"
 #extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
 #extra_output_args = []
-
-[cameras.cam2]
-enabled = false  # Optional: Enable/disable this camera (default: true)
-path = "/cam2"
-url = "rtsp://admin007:admin007@192.168.1.182:554/stream1"
-transport = "tcp"
-reconnect_interval = 5
-chunk_read_size = 32768
-
-# Example: MPEG Transport Stream with MPEG1 video
-[cameras.cam2.ffmpeg]
-output_format = "mpegts"  # MPEG Transport Stream format
-video_codec = "mpeg1video"  # MPEG1 video codec
-video_bitrate = "200k"  # 200 kbps bitrate
-output_framerate = 10  # 10 fps output
-gop_size = 15  # Keyframe every 15 frames
-rtbufsize = 65536  # RTSP buffer size in bytes
-log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
-
-[cameras.cam3]
-enabled = false  # Example: This camera is disabled and won't be started
-path = "/cam3"
-url = "rtsp://admin007:admin007@192.168.1.188:554/stream2"
-transport = "tcp"
-reconnect_interval = 5
-chunk_read_size = 32768
-
-# Example: H.264 video with MP4 container (higher quality)
-[cameras.cam3.ffmpeg]
-output_format = "mp4"  # MP4 container format  
-video_codec = "libx264"  # H.264 codec
-video_bitrate = "1M"  # 1 Mbps bitrate
-output_framerate = 25  # 25 fps output
-gop_size = 50  # Keyframe every 50 frames (2 seconds at 25fps)
-scale = "1920:1080"  # Scale to Full HD
-rtbufsize = 131072  # 128KB buffer for higher bitrate
-log_stderr = "both"  # Log to both file and console
-
-# Camera-specific transcoding override (optional)
-# send_framerate = 5
-
-# MQTT Configuration (optional)
-[mqtt]
-enabled = true
-broker_url = "mqtt://192.168.1.4:1883"  # Can also use mqtts:// for TLS
-client_id = "videoserver-01"
-# username = "mqtt_user"  # Optional
-# password = "mqtt_pass"  # Optional
-base_topic = "Videoserver"  # Base topic for all MQTT messages
-qos = 0  # Quality of Service (0, 1, or 2)
-retain = false  # Whether to retain messages
-keep_alive_secs = 60  # Keep-alive interval in seconds
-publish_interval_secs = 5  # How often to publish status updates
