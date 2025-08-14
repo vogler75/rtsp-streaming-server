@@ -12,11 +12,13 @@ mod rtsp_client;
 mod websocket;
 mod transcoder;
 mod video_stream;
+mod mqtt;
 
 use config::Config;
 use video_stream::VideoStream;
 use websocket::websocket_handler;
 use std::collections::HashMap;
+use mqtt::{MqttPublisher, MqttHandle};
 
 
 #[tokio::main]
@@ -32,20 +34,67 @@ async fn main() -> Result<()> {
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
 
+    // Initialize MQTT if enabled
+    let mqtt_handle: Option<MqttHandle> = if let Some(mqtt_config) = config.mqtt.clone() {
+        if mqtt_config.enabled {
+            info!("Initializing MQTT connection to {}", mqtt_config.broker_url);
+            match MqttPublisher::new(mqtt_config).await {
+                Ok(publisher) => {
+                    match publisher.start().await {
+                        Ok(handle) => {
+                            info!("MQTT publisher started successfully");
+                            Some(handle)
+                        }
+                        Err(e) => {
+                            error!("Failed to start MQTT publisher: {}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to create MQTT publisher: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Create video streams for each camera
-    let mut camera_streams: HashMap<String, Arc<broadcast::Sender<bytes::Bytes>>> = HashMap::new();
+    #[derive(Clone)]
+    struct CameraStreamInfo {
+        camera_id: String,
+        frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+        mqtt_handle: Option<MqttHandle>,
+    }
+    let mut camera_streams: HashMap<String, CameraStreamInfo> = HashMap::new();
     
     for (camera_id, camera_config) in config.cameras.clone() {
+        // Check if camera is enabled (default to true if not specified)
+        let is_enabled = camera_config.enabled.unwrap_or(true);
+        if !is_enabled {
+            info!("Camera '{}' is disabled, skipping", camera_id);
+            continue;
+        }
+        
         info!("Configuring camera '{}' on path '{}'...", camera_id, camera_config.path);
         
         match VideoStream::new(
             camera_id.clone(),
             camera_config.clone(),
             &config.transcoding,
+            mqtt_handle.clone(),
         ).await {
             Ok(video_stream) => {
-                // Store the frame sender for this camera's path
-                camera_streams.insert(camera_config.path.clone(), video_stream.frame_sender.clone());
+                // Store the camera stream info for this camera's path
+                camera_streams.insert(camera_config.path.clone(), CameraStreamInfo {
+                    camera_id: camera_id.clone(),
+                    frame_sender: video_stream.frame_sender.clone(),
+                    mqtt_handle: mqtt_handle.clone(),
+                });
                 
                 // Start the video stream
                 video_stream.start().await;
@@ -89,11 +138,11 @@ async fn main() -> Result<()> {
         .nest_service("/static", tower_http::services::ServeDir::new("static"));
     
     // Add a route for each camera
-    for (path, frame_sender) in camera_streams {
+    for (path, stream_info) in camera_streams {
         info!("Adding route for camera at path: {}", path);
-        let sender = frame_sender.clone();
+        let info = stream_info.clone();
         app = app.route(&path, axum::routing::get(
-            move |ws, query| camera_handler(ws, query, sender.clone())
+            move |ws, query, addr| camera_handler(ws, query, addr, info.frame_sender.clone(), info.camera_id.clone(), info.mqtt_handle.clone())
         ));
     }
     
@@ -148,10 +197,22 @@ async fn index_handler(
 async fn camera_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
     frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+    camera_id: String,
+    mqtt_handle: Option<MqttHandle>,
 ) -> axum::response::Response {
     match ws {
-        Some(ws_upgrade) => websocket_handler(ws_upgrade, State(frame_sender)).await,
+        Some(ws_upgrade) => {
+            if let Some(connect_info) = addr {
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle).await
+            } else {
+                // Fallback with unknown IP
+                let fallback_addr = "127.0.0.1:0".parse().unwrap();
+                let connect_info = axum::extract::ConnectInfo(fallback_addr);
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle).await
+            }
+        },
         None => {
             // Check if 'full' parameter is present
             let is_full_mode = query.contains_key("full");

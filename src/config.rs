@@ -8,18 +8,21 @@ pub struct Config {
     pub server: ServerConfig,
     pub cameras: HashMap<String, CameraConfig>,
     pub transcoding: TranscodingConfig,
+    pub mqtt: Option<MqttConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraConfig {
+    pub enabled: Option<bool>,
     pub path: String,
     pub url: String,
     pub transport: String,
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
     pub ffmpeg_buffer_size: Option<usize>,
+    pub quality: Option<u8>,
     pub ffmpeg_options: Option<FfmpegOptions>,
-    pub ffmpeg_log_stderr: Option<bool>,
+    pub ffmpeg_log_stderr: Option<String>,
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
@@ -29,7 +32,7 @@ pub struct FfmpegOptions {
     pub fflags: Option<String>,
     pub flags: Option<String>,
     pub avioflags: Option<String>,
-    pub vsync: Option<String>,
+    pub fps_mode: Option<String>,
     pub flush_packets: Option<String>,
     pub extra_input_args: Option<Vec<String>>,
     pub extra_output_args: Option<Vec<String>>,
@@ -58,13 +61,12 @@ pub struct RtspConfig {
     pub chunk_read_size: Option<usize>,
     pub ffmpeg_buffer_size: Option<usize>,
     pub ffmpeg_options: Option<FfmpegOptions>,
-    pub ffmpeg_log_stderr: Option<bool>,
+    pub ffmpeg_log_stderr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscodingConfig {
     pub output_format: String,
-    pub quality: u8,
     pub capture_framerate: u32,  // FFmpeg capture rate from camera
     pub send_framerate: u32,     // Rate at which we send frames to clients
     pub channel_buffer_size: Option<usize>, // Number of frames to buffer (1 = only latest)
@@ -73,18 +75,34 @@ pub struct TranscodingConfig {
     pub debug_sending: Option<bool>, // Enable/disable sending rate debug output
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MqttConfig {
+    pub enabled: bool,
+    pub broker_url: String,
+    pub client_id: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub base_topic: String,
+    pub qos: u8,
+    pub retain: bool,
+    pub keep_alive_secs: u64,
+    pub publish_interval_secs: u64,
+}
+
 impl Default for Config {
     fn default() -> Self {
         let mut cameras = HashMap::new();
         cameras.insert(
             "default".to_string(),
             CameraConfig {
+                enabled: Some(true),
                 path: "/camera1".to_string(),
                 url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
                 transport: "tcp".to_string(),
                 reconnect_interval: 5,
                 chunk_read_size: None,
                 ffmpeg_buffer_size: None,
+                quality: Some(85),
                 ffmpeg_options: None,
                 ffmpeg_log_stderr: None,
                 transcoding_override: None,
@@ -105,7 +123,6 @@ impl Default for Config {
             cameras,
             transcoding: TranscodingConfig {
                 output_format: "mjpeg".to_string(),
-                quality: 85,
                 capture_framerate: 30,
                 send_framerate: 10,
                 channel_buffer_size: Some(1),
@@ -113,6 +130,7 @@ impl Default for Config {
                 debug_capture: Some(true),
                 debug_sending: Some(true),
             },
+            mqtt: None,
         }
     }
 }

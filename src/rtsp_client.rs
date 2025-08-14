@@ -9,6 +9,8 @@ use tokio::io::AsyncWriteExt;
 
 use crate::config::RtspConfig;
 use crate::transcoder::FrameTranscoder;
+use crate::mqtt::{MqttHandle, CameraStatus};
+use chrono::Utc;
 
 pub struct RtspClient {
     camera_id: String,
@@ -17,20 +19,23 @@ pub struct RtspClient {
     transcoder: FrameTranscoder,
     capture_framerate: u32,
     send_framerate: u32,
-    quality: u8,
+    quality: Option<u8>,
     latest_frame: Arc<RwLock<Option<Bytes>>>,
     allow_duplicate_frames: bool,
     debug_capture: bool,
     debug_sending: bool,
+    mqtt_handle: Option<MqttHandle>,
+    capture_fps: Arc<RwLock<f32>>,
+    send_fps: Arc<RwLock<f32>>,
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: u8, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool) -> Self {
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: Option<u8>, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
             frame_sender,
-            transcoder: FrameTranscoder::new(quality).await,
+            transcoder: FrameTranscoder::new(quality.unwrap_or(75)).await,
             capture_framerate,
             send_framerate,
             quality,
@@ -38,6 +43,9 @@ impl RtspClient {
             allow_duplicate_frames,
             debug_capture,
             debug_sending,
+            mqtt_handle,
+            capture_fps: Arc::new(RwLock::new(0.0)),
+            send_fps: Arc::new(RwLock::new(0.0)),
         }
     }
 
@@ -49,9 +57,11 @@ impl RtspClient {
         let allow_duplicate_frames = self.allow_duplicate_frames;
         let debug_sending = self.debug_sending;
         let camera_id = self.camera_id.clone();
+        let send_fps = self.send_fps.clone();
+        let mqtt_handle = self.mqtt_handle.clone();
         
         tokio::spawn(async move {
-            Self::frame_sender_task(camera_id, frame_sender, latest_frame, send_framerate, allow_duplicate_frames, debug_sending).await;
+            Self::frame_sender_task(camera_id, frame_sender, latest_frame, send_framerate, allow_duplicate_frames, debug_sending, send_fps, mqtt_handle).await;
         });
         
         // Main capture loop
@@ -62,6 +72,21 @@ impl RtspClient {
                 }
                 Err(e) => {
                     error!("[{}] RTSP connection error: {}", self.camera_id, e);
+                    
+                    // Update MQTT status to disconnected
+                    if let Some(ref mqtt) = self.mqtt_handle {
+                        let status = CameraStatus {
+                            id: self.camera_id.clone(),
+                            connected: false,
+                            capture_fps: 0.0,
+                            send_fps: 0.0,
+                            clients_connected: self.frame_sender.receiver_count(),
+                            last_frame_time: None,
+                            ffmpeg_running: false,
+                        };
+                        mqtt.update_camera_status(self.camera_id.clone(), status).await;
+                    }
+                    
                     info!("[{}] Reconnecting in {} seconds...", self.camera_id, self.config.reconnect_interval);
                     sleep(Duration::from_secs(self.config.reconnect_interval)).await;
                 }
@@ -76,6 +101,8 @@ impl RtspClient {
         send_framerate: u32,
         allow_duplicate_frames: bool,
         debug_sending: bool,
+        send_fps: Arc<RwLock<f32>>,
+        _mqtt_handle: Option<MqttHandle>,
     ) {
         info!("[{}] Starting frame sender task at {} FPS (duplicates: {})", camera_id, send_framerate, allow_duplicate_frames);
         let frame_duration = Duration::from_millis(1000 / send_framerate as u64);
@@ -115,9 +142,14 @@ impl RtspClient {
             
             // Log statistics every second if enabled
             let now = tokio::time::Instant::now();
-            if debug_sending && now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                debug!("[{}] SENDING: {:2}/s Pings : {:2}/s", 
-                       camera_id, sent_count, skipped_count);
+            if now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                let fps = sent_count as f32;
+                *send_fps.write().await = fps;
+                
+                if debug_sending {
+                    debug!("[{}] SENDING: {:2}/s Pings : {:2}/s", 
+                           camera_id, sent_count, skipped_count);
+                }
                 sent_count = 0;
                 skipped_count = 0;
                 last_log_time = now;
@@ -293,13 +325,21 @@ impl RtspClient {
     async fn run_ffmpeg_process(&self) -> Result<()> {
         // Use FFmpeg to directly read from RTSP and output MJPEG frames with low latency
         if self.capture_framerate > 0 {
-            info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, self.quality);
+            if let Some(q) = self.quality {
+                info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, q);
+            } else {
+                info!("Starting FFmpeg with capture framerate: {} FPS, default quality", self.capture_framerate);
+            }
         } else {
-            info!("Starting FFmpeg with natural camera framerate, quality: {}", self.quality);
+            if let Some(q) = self.quality {
+                info!("Starting FFmpeg with natural camera framerate, quality: {}", q);
+            } else {
+                info!("Starting FFmpeg with natural camera framerate, default quality");
+            }
         }
         
         // Create owned strings that will live long enough
-        let quality_str = self.quality.to_string();
+        let quality_str = self.quality.map(|q| q.to_string());
         let fps_str = if self.capture_framerate > 0 {
             Some(format!("fps={}", self.capture_framerate))
         } else {
@@ -311,23 +351,29 @@ impl RtspClient {
         
         // Use custom FFmpeg options or defaults
         if let Some(ref opts) = self.config.ffmpeg_options {
-            // Add fflags if specified
+            // Add fflags if specified and not empty
             if let Some(ref fflags) = opts.fflags {
-                ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
+                if !fflags.is_empty() {
+                    ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
+                }
             } else {
                 ffmpeg_args.extend_from_slice(&["-fflags", "+nobuffer+discardcorrupt"]);
             }
             
-            // Add flags if specified
+            // Add flags if specified and not empty
             if let Some(ref flags) = opts.flags {
-                ffmpeg_args.extend_from_slice(&["-flags", flags]);
+                if !flags.is_empty() {
+                    ffmpeg_args.extend_from_slice(&["-flags", flags]);
+                }
             } else {
                 ffmpeg_args.extend_from_slice(&["-flags", "low_delay"]);
             }
             
-            // Add avioflags if specified
+            // Add avioflags if specified and not empty
             if let Some(ref avioflags) = opts.avioflags {
-                ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
+                if !avioflags.is_empty() {
+                    ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
+                }
             } else {
                 ffmpeg_args.extend_from_slice(&["-avioflags", "direct"]);
             }
@@ -360,36 +406,48 @@ impl RtspClient {
             "-rtsp_transport", &self.config.transport,
             "-i", &self.config.url,
             "-f", "mjpeg",
-            "-q:v", &quality_str,                   // JPEG quality from config
         ]);
         
+        // Add quality parameter only if specified
+        if let Some(ref quality_val) = quality_str {
+            ffmpeg_args.extend_from_slice(&["-q:v", quality_val]);
+        }
+        
         // Add fps filter only if capture_framerate > 0
-        let vsync_value;
         if let Some(ref fps_filter) = fps_str {
             ffmpeg_args.extend_from_slice(&["-vf", fps_filter]);
             
-            // Use custom vsync or default to cfr when using fps filter
+            // Use custom fps_mode or default to cfr when using fps filter
             if let Some(ref opts) = self.config.ffmpeg_options {
-                if let Some(ref vsync) = opts.vsync {
-                    vsync_value = vsync.clone();
-                    ffmpeg_args.extend_from_slice(&["-vsync", &vsync_value]);
+                if let Some(ref fps_mode) = opts.fps_mode {
+                    if !fps_mode.is_empty() {
+                        ffmpeg_args.extend_from_slice(&["-fps_mode", fps_mode]);
+                    }
                 } else {
-                    ffmpeg_args.extend_from_slice(&["-vsync", "cfr"]);
+                    ffmpeg_args.extend_from_slice(&["-fps_mode", "cfr"]);
                 }
             } else {
-                ffmpeg_args.extend_from_slice(&["-vsync", "cfr"]);
+                ffmpeg_args.extend_from_slice(&["-fps_mode", "cfr"]);
             }
             info!("FFmpeg: Using fps filter: {}", fps_filter);
         } else {
+            // Add fps_mode for natural framerate if specified and not empty
+            if let Some(ref opts) = self.config.ffmpeg_options {
+                if let Some(ref fps_mode) = opts.fps_mode {
+                    if !fps_mode.is_empty() {
+                        ffmpeg_args.extend_from_slice(&["-fps_mode", fps_mode]);
+                    }
+                }
+            }
             info!("FFmpeg: No fps filter - using camera's natural frame rate");
         }
         
         // Add flush_packets option
-        let flush_packets_value;
         if let Some(ref opts) = self.config.ffmpeg_options {
             if let Some(ref flush) = opts.flush_packets {
-                flush_packets_value = flush.clone();
-                ffmpeg_args.extend_from_slice(&["-flush_packets", &flush_packets_value]);
+                if !flush.is_empty() {
+                    ffmpeg_args.extend_from_slice(&["-flush_packets", flush]);
+                }
             } else {
                 ffmpeg_args.extend_from_slice(&["-flush_packets", "1"]);
             }
@@ -419,6 +477,10 @@ impl RtspClient {
             "ffmpeg"
         };
         
+        // Log the full FFmpeg command
+        let full_command = format!("{} {}", ffmpeg_path, ffmpeg_args.join(" "));
+        info!("[{}] FFmpeg command: {}", self.camera_id, full_command);
+        
         let mut ffmpeg_cmd = tokio::process::Command::new(ffmpeg_path)
             .args(&ffmpeg_args)
             .stdin(std::process::Stdio::null())
@@ -427,24 +489,27 @@ impl RtspClient {
             .kill_on_drop(true)
             .spawn()?;
 
-        info!("📡 FFmpeg process started, reading MJPEG stream from camera");
+        info!("[{}] 📡 FFmpeg process started, reading MJPEG stream from camera", self.camera_id);
         
         // Handle stderr logging if enabled
-        if let Some(true) = self.config.ffmpeg_log_stderr {
-            let stderr = ffmpeg_cmd.stderr.take()
-                .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stderr"))?;
-            
-            let log_filename = format!("{}.log", self.camera_id);
-            let camera_id = self.camera_id.clone();
-            
-            info!("[{}] FFmpeg stderr logging enabled to {}", self.camera_id, log_filename);
-            
-            // Spawn a task to handle stderr logging
-            tokio::spawn(async move {
-                if let Err(e) = log_ffmpeg_stderr(stderr, &log_filename, &camera_id).await {
-                    error!("[{}] Failed to log FFmpeg stderr: {}", camera_id, e);
-                }
-            });
+        if let Some(ref log_mode) = self.config.ffmpeg_log_stderr {
+            if log_mode == "file" || log_mode == "console" || log_mode == "both" {
+                let stderr = ffmpeg_cmd.stderr.take()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stderr"))?;
+                
+                let log_filename = format!("{}.log", self.camera_id);
+                let camera_id = self.camera_id.clone();
+                let log_mode_clone = log_mode.clone();
+                
+                info!("[{}] FFmpeg stderr logging enabled (mode: {})", self.camera_id, log_mode);
+                
+                // Spawn a task to handle stderr logging
+                tokio::spawn(async move {
+                    if let Err(e) = log_ffmpeg_stderr(stderr, &log_filename, &camera_id, &log_mode_clone).await {
+                        error!("[{}] Failed to log FFmpeg stderr: {}", camera_id, e);
+                    }
+                });
+            }
         }
         
         let stdout = ffmpeg_cmd.stdout.take()
@@ -489,12 +554,31 @@ impl RtspClient {
                             
                             // Log capture statistics every second if enabled
                             let now = tokio::time::Instant::now();
-                            if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                                if self.capture_framerate > 0 {
-                                    debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s", 
-                                           self.camera_id, frame_count, self.capture_framerate);
-                                } else {
-                                    debug!("[{}] CAPTURE: {:2}/s Natural Rate", self.camera_id, frame_count);
+                            if now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                                let fps = frame_count as f32;
+                                *self.capture_fps.write().await = fps;
+                                
+                                // Update MQTT status
+                                if let Some(ref mqtt) = self.mqtt_handle {
+                                    let status = CameraStatus {
+                                        id: self.camera_id.clone(),
+                                        connected: true,
+                                        capture_fps: fps,
+                                        send_fps: *self.send_fps.read().await,
+                                        clients_connected: self.frame_sender.receiver_count(),
+                                        last_frame_time: Some(Utc::now().to_rfc3339()),
+                                        ffmpeg_running: true,
+                                    };
+                                    mqtt.update_camera_status(self.camera_id.clone(), status).await;
+                                }
+                                
+                                if self.debug_capture {
+                                    if self.capture_framerate > 0 {
+                                        debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s", 
+                                               self.camera_id, frame_count, self.capture_framerate);
+                                    } else {
+                                        debug!("[{}] CAPTURE: {:2}/s Natural Rate", self.camera_id, frame_count);
+                                    }
                                 }
                                 frame_count = 0;
                                 last_log_time = now;
@@ -570,39 +654,56 @@ async fn log_ffmpeg_stderr(
     stderr: tokio::process::ChildStderr,
     log_filename: &str,
     camera_id: &str,
+    log_mode: &str,
 ) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, BufReader};
     
-    // Open or create the log file
-    let mut log_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_filename)
-        .await?;
-    
-    // Write a timestamp header
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-    let header = format!("\n=== FFmpeg stderr log for {} started at {} ===\n", camera_id, timestamp);
-    log_file.write_all(header.as_bytes()).await?;
-    log_file.flush().await?;
+    // Open or create the log file if needed
+    let mut log_file = if log_mode == "file" || log_mode == "both" {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_filename)
+            .await?;
+        
+        // Write a timestamp header
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let header = format!("\n=== FFmpeg stderr log for {} started at {} (mode: {}) ===\n", camera_id, timestamp, log_mode);
+        file.write_all(header.as_bytes()).await?;
+        file.flush().await?;
+        Some(file)
+    } else {
+        None
+    };
     
     // Read stderr line by line and write to log file
     let reader = BufReader::new(stderr);
     let mut lines = reader.lines();
     
     while let Some(line) = lines.next_line().await? {
-        let log_line = format!("{}\n", line);
-        log_file.write_all(log_line.as_bytes()).await?;
+        // Log to file if enabled
+        if let Some(ref mut file) = log_file {
+            let log_line = format!("{}\n", line);
+            file.write_all(log_line.as_bytes()).await?;
+            file.flush().await?;
+        }
         
-        // Flush periodically to ensure logs are written
-        log_file.flush().await?;
+        // Log to console if enabled
+        if log_mode == "console" || log_mode == "both" {
+            info!("[{}] FFmpeg: {}", camera_id, line);
+        }
+        
+        // Note: FFmpeg stderr is NOT published to MQTT to avoid packet size issues
+        // Use file or console logging instead for FFmpeg diagnostics
     }
     
-    // Write closing marker
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-    let footer = format!("=== FFmpeg stderr log for {} ended at {} ===\n", camera_id, timestamp);
-    log_file.write_all(footer.as_bytes()).await?;
-    log_file.flush().await?;
+    // Write closing marker to file if enabled
+    if let Some(ref mut file) = log_file {
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let footer = format!("=== FFmpeg stderr log for {} ended at {} ===\n", camera_id, timestamp);
+        file.write_all(footer.as_bytes()).await?;
+        file.flush().await?;
+    }
     
     Ok(())
 }

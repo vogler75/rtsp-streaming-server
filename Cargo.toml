@@ -43,3 +43,9 @@ thiserror = "1"
 
 # Async channels
 tokio-stream = "0.1"
+
+# MQTT
+rumqttc = "0.24"
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }

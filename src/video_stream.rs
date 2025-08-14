@@ -6,6 +6,7 @@ use bytes::Bytes;
 
 use crate::config::{CameraConfig, TranscodingConfig};
 use crate::rtsp_client::RtspClient;
+use crate::mqtt::MqttHandle;
 
 pub struct VideoStream {
     pub camera_id: String,
@@ -18,6 +19,7 @@ impl VideoStream {
         camera_id: String,
         camera_config: CameraConfig,
         default_transcoding: &TranscodingConfig,
+        mqtt_handle: Option<MqttHandle>,
     ) -> Result<Self> {
         // Use camera-specific transcoding config if available, otherwise use default
         let transcoding = camera_config.transcoding_override.as_ref().unwrap_or(default_transcoding);
@@ -44,12 +46,13 @@ impl VideoStream {
             camera_id.clone(),
             rtsp_config,
             frame_tx.clone(),
-            transcoding.quality,
+            camera_config.quality,
             transcoding.capture_framerate,
             transcoding.send_framerate,
             transcoding.allow_duplicate_frames.unwrap_or(false),
             transcoding.debug_capture.unwrap_or(true),
             transcoding.debug_sending.unwrap_or(true),
+            mqtt_handle,
         ).await;
         
         Ok(Self {
