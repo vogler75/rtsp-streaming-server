@@ -19,14 +19,40 @@ pub struct CameraConfig {
     pub transport: String,
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
-    pub ffmpeg_buffer_size: Option<usize>,
-    pub quality: Option<u8>,
-    pub ffmpeg_options: Option<FfmpegOptions>,
-    pub ffmpeg_log_stderr: Option<String>,
+    pub ffmpeg: Option<FfmpegConfig>,
+    pub ffmpeg_options: Option<FfmpegOptions>,  // Legacy compatibility
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FfmpegConfig {
+    // Output format and codec settings
+    pub output_format: Option<String>,    // -f (e.g., "mjpeg", "mpegts")
+    pub video_codec: Option<String>,      // -codec:v (e.g., "mpeg1video", "libx264")
+    pub video_bitrate: Option<String>,    // -b:v (e.g., "200k", "1M")
+    pub quality: Option<u8>,              // -q:v (JPEG quality 1-100)
+    pub output_framerate: Option<u32>,    // -r (output framerate)
+    pub gop_size: Option<u32>,            // -g (GOP size, keyframe interval)
+    pub scale: Option<String>,            // -vf scale (e.g., "640:480", "1280:-1")
+    
+    // Buffer and performance settings
+    pub rtbufsize: Option<usize>,         // -rtbufsize (RTSP buffer size in bytes)
+    
+    // FFmpeg flags and options
+    pub fflags: Option<String>,
+    pub flags: Option<String>,
+    pub avioflags: Option<String>,
+    pub fps_mode: Option<String>,
+    pub flush_packets: Option<String>,
+    pub extra_input_args: Option<Vec<String>>,
+    pub extra_output_args: Option<Vec<String>>,
+    
+    // Logging
+    pub log_stderr: Option<String>,       // FFmpeg stderr logging: "file", "console", "both"
+}
+
+// Legacy struct for backward compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FfmpegOptions {
     pub fflags: Option<String>,
@@ -59,9 +85,7 @@ pub struct RtspConfig {
     pub transport: String,
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
-    pub ffmpeg_buffer_size: Option<usize>,
     pub ffmpeg_options: Option<FfmpegOptions>,
-    pub ffmpeg_log_stderr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,10 +125,8 @@ impl Default for Config {
                 transport: "tcp".to_string(),
                 reconnect_interval: 5,
                 chunk_read_size: None,
-                ffmpeg_buffer_size: None,
-                quality: Some(85),
+                ffmpeg: None,
                 ffmpeg_options: None,
-                ffmpeg_log_stderr: None,
                 transcoding_override: None,
             },
         );

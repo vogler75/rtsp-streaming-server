@@ -7,7 +7,7 @@ use bytes::Bytes;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
-use crate::config::RtspConfig;
+use crate::config::{RtspConfig, FfmpegConfig};
 use crate::transcoder::FrameTranscoder;
 use crate::mqtt::{MqttHandle, CameraStatus};
 use chrono::Utc;
@@ -19,7 +19,7 @@ pub struct RtspClient {
     transcoder: FrameTranscoder,
     capture_framerate: u32,
     send_framerate: u32,
-    quality: Option<u8>,
+    ffmpeg_config: Option<FfmpegConfig>,
     latest_frame: Arc<RwLock<Option<Bytes>>>,
     allow_duplicate_frames: bool,
     debug_capture: bool,
@@ -30,15 +30,19 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, quality: Option<u8>, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
             frame_sender,
-            transcoder: FrameTranscoder::new(quality.unwrap_or(75)).await,
+            transcoder: FrameTranscoder::new(
+                ffmpeg_config.as_ref()
+                    .and_then(|c| c.quality)
+                    .unwrap_or(75)
+            ).await,
             capture_framerate,
             send_framerate,
-            quality,
+            ffmpeg_config,
             latest_frame: Arc::new(RwLock::new(None)),
             allow_duplicate_frames,
             debug_capture,
@@ -324,14 +328,15 @@ impl RtspClient {
     
     async fn run_ffmpeg_process(&self) -> Result<()> {
         // Use FFmpeg to directly read from RTSP and output MJPEG frames with low latency
+        let ffmpeg = self.ffmpeg_config.as_ref();
         if self.capture_framerate > 0 {
-            if let Some(q) = self.quality {
+            if let Some(q) = ffmpeg.and_then(|c| c.quality) {
                 info!("Starting FFmpeg with capture framerate: {} FPS, quality: {}", self.capture_framerate, q);
             } else {
                 info!("Starting FFmpeg with capture framerate: {} FPS, default quality", self.capture_framerate);
             }
         } else {
-            if let Some(q) = self.quality {
+            if let Some(q) = ffmpeg.and_then(|c| c.quality) {
                 info!("Starting FFmpeg with natural camera framerate, quality: {}", q);
             } else {
                 info!("Starting FFmpeg with natural camera framerate, default quality");
@@ -339,7 +344,9 @@ impl RtspClient {
         }
         
         // Create owned strings that will live long enough
-        let quality_str = self.quality.map(|q| q.to_string());
+        let quality_str = ffmpeg.and_then(|c| c.quality).map(|q| q.to_string());
+        let output_fps_str = ffmpeg.and_then(|c| c.output_framerate).map(|fps| fps.to_string());
+        let gop_str = ffmpeg.and_then(|c| c.gop_size).map(|gop| gop.to_string());
         let fps_str = if self.capture_framerate > 0 {
             Some(format!("fps={}", self.capture_framerate))
         } else {
@@ -349,122 +356,199 @@ impl RtspClient {
         // Build FFmpeg arguments with configurable options
         let mut ffmpeg_args = Vec::new();
         
-        // Use custom FFmpeg options or defaults
-        if let Some(ref opts) = self.config.ffmpeg_options {
+        // Use FFmpeg configuration or defaults
+        let use_legacy = ffmpeg.is_none() && self.config.ffmpeg_options.is_some();
+        
+        if use_legacy {
+            // Legacy ffmpeg_options support for backward compatibility
+            if let Some(ref opts) = self.config.ffmpeg_options {
+                // Add fflags if specified and not empty
+                if let Some(ref fflags) = opts.fflags {
+                    if !fflags.is_empty() {
+                        ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
+                    }
+                }
+                
+                // Add flags if specified and not empty
+                if let Some(ref flags) = opts.flags {
+                    if !flags.is_empty() {
+                        ffmpeg_args.extend_from_slice(&["-flags", flags]);
+                    }
+                }
+                
+                // Add avioflags if specified and not empty
+                if let Some(ref avioflags) = opts.avioflags {
+                    if !avioflags.is_empty() {
+                        ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
+                    }
+                }
+                
+                // Add extra input arguments if specified
+                if let Some(ref extra_input) = opts.extra_input_args {
+                    for arg in extra_input {
+                        ffmpeg_args.push(arg);
+                    }
+                }
+            }
+        } else if let Some(ref config) = ffmpeg {
+            // New ffmpeg configuration
             // Add fflags if specified and not empty
-            if let Some(ref fflags) = opts.fflags {
+            if let Some(ref fflags) = config.fflags {
                 if !fflags.is_empty() {
                     ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
                 }
-            } else {
-                ffmpeg_args.extend_from_slice(&["-fflags", "+nobuffer+discardcorrupt"]);
             }
             
             // Add flags if specified and not empty
-            if let Some(ref flags) = opts.flags {
+            if let Some(ref flags) = config.flags {
                 if !flags.is_empty() {
                     ffmpeg_args.extend_from_slice(&["-flags", flags]);
                 }
-            } else {
-                ffmpeg_args.extend_from_slice(&["-flags", "low_delay"]);
             }
             
             // Add avioflags if specified and not empty
-            if let Some(ref avioflags) = opts.avioflags {
+            if let Some(ref avioflags) = config.avioflags {
                 if !avioflags.is_empty() {
                     ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
                 }
-            } else {
-                ffmpeg_args.extend_from_slice(&["-avioflags", "direct"]);
             }
             
             // Add extra input arguments if specified
-            if let Some(ref extra_input) = opts.extra_input_args {
+            if let Some(ref extra_input) = config.extra_input_args {
                 for arg in extra_input {
                     ffmpeg_args.push(arg);
                 }
             }
-        } else {
-            // Use defaults if no custom options
-            ffmpeg_args.extend_from_slice(&[
-                "-fflags", "+nobuffer+discardcorrupt",
-                "-flags", "low_delay",
-                "-avioflags", "direct",
-            ]);
         }
+        // No default values - only use what's explicitly configured
         
-        // Add buffer size if configured (in KB)
+        // Add RTSP buffer size if configured (in KB)
         let buffer_size_str;
-        if let Some(buffer_size) = self.config.ffmpeg_buffer_size {
+        if let Some(buffer_size) = ffmpeg.and_then(|c| c.rtbufsize) {
             buffer_size_str = format!("{}k", buffer_size / 1024);
             ffmpeg_args.extend_from_slice(&["-rtbufsize", &buffer_size_str]);
-            info!("FFmpeg buffer size set to: {}", buffer_size_str);
+            info!("FFmpeg RTSP buffer size set to: {}", buffer_size_str);
         }
         
         // Add basic arguments
         ffmpeg_args.extend_from_slice(&[
             "-rtsp_transport", &self.config.transport,
             "-i", &self.config.url,
-            "-f", "mjpeg",
         ]);
         
-        // Add quality parameter only if specified
+        // Add output format (default to mjpeg if not specified)
+        let format = ffmpeg
+            .and_then(|c| c.output_format.as_deref())
+            .unwrap_or("mjpeg");
+        ffmpeg_args.extend_from_slice(&["-f", format]);
+        
+        // Add video codec if specified
+        if let Some(ref codec) = ffmpeg.and_then(|c| c.video_codec.as_ref()) {
+            ffmpeg_args.extend_from_slice(&["-codec:v", codec]);
+        }
+        
+        // Add video bitrate if specified
+        if let Some(ref bitrate) = ffmpeg.and_then(|c| c.video_bitrate.as_ref()) {
+            ffmpeg_args.extend_from_slice(&["-b:v", bitrate]);
+        }
+        
+        // Add quality parameter only if specified (mainly for MJPEG)
         if let Some(ref quality_val) = quality_str {
             ffmpeg_args.extend_from_slice(&["-q:v", quality_val]);
         }
         
-        // Add fps filter only if capture_framerate > 0
-        if let Some(ref fps_filter) = fps_str {
-            ffmpeg_args.extend_from_slice(&["-vf", fps_filter]);
-            
-            // Use custom fps_mode or default to cfr when using fps filter
-            if let Some(ref opts) = self.config.ffmpeg_options {
-                if let Some(ref fps_mode) = opts.fps_mode {
-                    if !fps_mode.is_empty() {
-                        ffmpeg_args.extend_from_slice(&["-fps_mode", fps_mode]);
-                    }
-                } else {
-                    ffmpeg_args.extend_from_slice(&["-fps_mode", "cfr"]);
-                }
-            } else {
-                ffmpeg_args.extend_from_slice(&["-fps_mode", "cfr"]);
-            }
-            info!("FFmpeg: Using fps filter: {}", fps_filter);
-        } else {
-            // Add fps_mode for natural framerate if specified and not empty
-            if let Some(ref opts) = self.config.ffmpeg_options {
-                if let Some(ref fps_mode) = opts.fps_mode {
-                    if !fps_mode.is_empty() {
-                        ffmpeg_args.extend_from_slice(&["-fps_mode", fps_mode]);
-                    }
-                }
-            }
-            info!("FFmpeg: No fps filter - using camera's natural frame rate");
+        // Add output framerate if specified
+        if let Some(ref fps) = output_fps_str {
+            ffmpeg_args.extend_from_slice(&["-r", fps]);
         }
         
-        // Add flush_packets option
-        if let Some(ref opts) = self.config.ffmpeg_options {
-            if let Some(ref flush) = opts.flush_packets {
-                if !flush.is_empty() {
-                    ffmpeg_args.extend_from_slice(&["-flush_packets", flush]);
-                }
-            } else {
-                ffmpeg_args.extend_from_slice(&["-flush_packets", "1"]);
-            }
-        } else {
-            ffmpeg_args.extend_from_slice(&["-flush_packets", "1"]);
+        // Add GOP size if specified
+        if let Some(ref gop) = gop_str {
+            ffmpeg_args.extend_from_slice(&["-g", gop]);
         }
+        
+        // Build video filter chain if needed
+        let mut video_filters = Vec::new();
+        
+        // Add scale filter if specified
+        if let Some(ref scale) = ffmpeg.and_then(|c| c.scale.as_ref()) {
+            video_filters.push(format!("scale={}", scale));
+        }
+        
+        // Add fps filter only if capture_framerate > 0
+        if let Some(ref fps_filter) = fps_str {
+            video_filters.push(fps_filter.clone());
+        }
+        
+        // Apply video filters if any
+        let filter_chain;
+        if !video_filters.is_empty() {
+            filter_chain = video_filters.join(",");
+            ffmpeg_args.extend_from_slice(&["-vf", &filter_chain]);
+            
+            // Use custom fps_mode only if explicitly configured
+            let fps_mode = if use_legacy {
+                self.config.ffmpeg_options.as_ref()
+                    .and_then(|opts| opts.fps_mode.as_ref())
+            } else {
+                ffmpeg.and_then(|c| c.fps_mode.as_ref())
+            };
+            
+            if let Some(ref mode) = fps_mode {
+                if !mode.is_empty() {
+                    ffmpeg_args.extend_from_slice(&["-fps_mode", mode]);
+                }
+            }
+            // No default fps_mode - let FFmpeg decide
+            
+            info!("FFmpeg: Using video filters: {}", filter_chain);
+        } else {
+            // Add fps_mode for natural framerate if specified and not empty
+            let fps_mode = if use_legacy {
+                self.config.ffmpeg_options.as_ref()
+                    .and_then(|opts| opts.fps_mode.as_ref())
+            } else {
+                ffmpeg.and_then(|c| c.fps_mode.as_ref())
+            };
+            
+            if let Some(ref mode) = fps_mode {
+                if !mode.is_empty() {
+                    ffmpeg_args.extend_from_slice(&["-fps_mode", mode]);
+                }
+            }
+            info!("FFmpeg: No video filters - using camera's natural frame rate");
+        }
+        
+        // Add flush_packets option only if explicitly configured
+        let flush_packets = if use_legacy {
+            self.config.ffmpeg_options.as_ref()
+                .and_then(|opts| opts.flush_packets.as_ref())
+        } else {
+            ffmpeg.and_then(|c| c.flush_packets.as_ref())
+        };
+        
+        if let Some(ref flush) = flush_packets {
+            if !flush.is_empty() {
+                ffmpeg_args.extend_from_slice(&["-flush_packets", flush]);
+            }
+        }
+        // No default flush_packets - let FFmpeg decide
         
         ffmpeg_args.extend_from_slice(&[
             "-an",                                  // No audio
         ]);
         
         // Add extra output arguments if specified
-        if let Some(ref opts) = self.config.ffmpeg_options {
-            if let Some(ref extra_output) = opts.extra_output_args {
-                for arg in extra_output {
-                    ffmpeg_args.push(arg);
-                }
+        let extra_output = if use_legacy {
+            self.config.ffmpeg_options.as_ref()
+                .and_then(|opts| opts.extra_output_args.as_ref())
+        } else {
+            ffmpeg.and_then(|c| c.extra_output_args.as_ref())
+        };
+        
+        if let Some(extra_output) = extra_output {
+            for arg in extra_output {
+                ffmpeg_args.push(arg);
             }
         }
         
@@ -492,7 +576,8 @@ impl RtspClient {
         info!("[{}] 📡 FFmpeg process started, reading MJPEG stream from camera", self.camera_id);
         
         // Handle stderr logging if enabled
-        if let Some(ref log_mode) = self.config.ffmpeg_log_stderr {
+        let log_mode = ffmpeg.and_then(|c| c.log_stderr.as_ref());
+        if let Some(log_mode) = log_mode {
             if log_mode == "file" || log_mode == "console" || log_mode == "both" {
                 let stderr = ffmpeg_cmd.stderr.take()
                     .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stderr"))?;

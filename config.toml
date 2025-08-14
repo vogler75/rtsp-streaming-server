@@ -10,37 +10,56 @@ key_path = "certs/server.key"
 
 # Global transcoding settings (can be overridden per camera)
 [transcoding]
-output_format = "mjpeg"
+output_format = "mpegts"
 capture_framerate = 0  # FPS to capture from camera (0 = max available)
 send_framerate = 10    # FPS to send to clients
-channel_buffer_size = 1 # Number of frames to buffer (1 = only latest frame)
+channel_buffer_size = 10 # Number of frames to buffer (1 = only latest frame)
 allow_duplicate_frames = false # If false, each frame is sent only once
 debug_capture = false    # Enable debug output for capture rate
 debug_sending = false   # Enable debug output for sending rate
 
 # Camera configurations
 # Each camera has a unique ID and configurable path
+# 
+# Video codec options:
+# - output_format: "mjpeg" (default), "mpegts", "mp4", "avi", etc.
+# - video_codec: "mpeg1video", "libx264", "libx265", "h264_nvenc", etc.
+# - video_bitrate: "200k", "1M", "2000k" (for non-MJPEG codecs)
+# - output_framerate: Output FPS (different from capture framerate)
+# - gop_size: Keyframe interval (frames between keyframes)
+# - quality: JPEG quality 1-100 (mainly for MJPEG format)
 
 [cameras.cam1]
 enabled = true  # Optional: Enable/disable this camera (default: true)
 path = "/cam1"
-url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
+url = "rtsp://admin007:admin007@192.168.1.171:554/stream2"
 transport = "tcp"
 reconnect_interval = 5
-chunk_read_size = 32768
-#ffmpeg_buffer_size = 65536
-#quality = 50  # JPEG quality (1-100), omit to use FFmpeg default
-ffmpeg_log_stderr = "console"  # Options: "file", "console", "both", or omit/false to disable
+chunk_read_size = 8192 # 32768
 
-# Optional FFmpeg options (defaults shown, uncomment to override)
-[cameras.cam1.ffmpeg_options]
-fflags = "" # "+nobuffer+discardcorrupt"
-flags = ""
-avioflags = "" # "direct"
-fps_mode = ""  # Use "cfr" for constant framerate, "vfr" for variable, "passthrough" to keep original
-flush_packets = ""
-extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
-extra_output_args = []
+# FFmpeg configuration for cam1
+[cameras.cam1.ffmpeg]
+log_stderr = "console"  # FFmpeg stderr logging: "file", "console", "both"
+
+output_format = "mjpeg"  # Output format: "mjpeg", "mpegts", "mp4", etc.
+#output_framerate = 10  # Output framerate (fps) - different from capture rate
+
+#video_codec = "mpeg1video"  # Video codec: "mpeg1video", "libx264", "libx265", etc.
+#video_bitrate = "200k"  # Video bitrate: "200k", "1M", "2000k", etc.
+#quality = 50  # JPEG quality (1-100), mainly for MJPEG format
+
+gop_size = 10  # GOP size (keyframe interval) - frames between keyframes
+scale = "640:480,format=yuv420p"  # Video scaling: "640:480", "1280:-1", etc.
+#rtbufsize = 65536  # RTSP buffer size in bytes
+
+# FFmpeg advanced options
+#fflags = "+nobuffer+discardcorrupt"
+#flags = "low_delay"
+#avioflags = "direct"
+#fps_mode = "cfr"  # Use "cfr" for constant framerate, "vfr" for variable, "passthrough" to keep original
+#flush_packets = "1"
+#extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
+#extra_output_args = []
 
 [cameras.cam2]
 enabled = false  # Optional: Enable/disable this camera (default: true)
@@ -49,8 +68,16 @@ url = "rtsp://admin007:admin007@192.168.1.182:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
 chunk_read_size = 32768
-ffmpeg_buffer_size = 65536
-#ffmpeg_log_stderr = "file"  # Options: "file", "console", "both", or omit/false to disable
+
+# Example: MPEG Transport Stream with MPEG1 video
+[cameras.cam2.ffmpeg]
+output_format = "mpegts"  # MPEG Transport Stream format
+video_codec = "mpeg1video"  # MPEG1 video codec
+video_bitrate = "200k"  # 200 kbps bitrate
+output_framerate = 10  # 10 fps output
+gop_size = 15  # Keyframe every 15 frames
+rtbufsize = 65536  # RTSP buffer size in bytes
+log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
 
 [cameras.cam3]
 enabled = false  # Example: This camera is disabled and won't be started
@@ -59,10 +86,19 @@ url = "rtsp://admin007:admin007@192.168.1.188:554/stream2"
 transport = "tcp"
 reconnect_interval = 5
 chunk_read_size = 32768
-ffmpeg_buffer_size = 65536
-#ffmpeg_log_stderr = "file"  # Options: "file", "console", "both", or omit/false to disable
+
+# Example: H.264 video with MP4 container (higher quality)
+[cameras.cam3.ffmpeg]
+output_format = "mp4"  # MP4 container format  
+video_codec = "libx264"  # H.264 codec
+video_bitrate = "1M"  # 1 Mbps bitrate
+output_framerate = 25  # 25 fps output
+gop_size = 50  # Keyframe every 50 frames (2 seconds at 25fps)
+scale = "1920:1080"  # Scale to Full HD
+rtbufsize = 131072  # 128KB buffer for higher bitrate
+log_stderr = "both"  # Log to both file and console
+
 # Camera-specific transcoding override (optional)
-quality = 30  # JPEG quality (1-100), omit to use FFmpeg default
 # send_framerate = 5
 
 # MQTT Configuration (optional)
