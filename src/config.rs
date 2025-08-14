@@ -18,8 +18,21 @@ pub struct CameraConfig {
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
     pub ffmpeg_buffer_size: Option<usize>,
+    pub ffmpeg_options: Option<FfmpegOptions>,
+    pub ffmpeg_log_stderr: Option<bool>,
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FfmpegOptions {
+    pub fflags: Option<String>,
+    pub flags: Option<String>,
+    pub avioflags: Option<String>,
+    pub vsync: Option<String>,
+    pub flush_packets: Option<String>,
+    pub extra_input_args: Option<Vec<String>>,
+    pub extra_output_args: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +57,8 @@ pub struct RtspConfig {
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
     pub ffmpeg_buffer_size: Option<usize>,
+    pub ffmpeg_options: Option<FfmpegOptions>,
+    pub ffmpeg_log_stderr: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +85,8 @@ impl Default for Config {
                 reconnect_interval: 5,
                 chunk_read_size: None,
                 ffmpeg_buffer_size: None,
+                ffmpeg_options: None,
+                ffmpeg_log_stderr: None,
                 transcoding_override: None,
             },
         );

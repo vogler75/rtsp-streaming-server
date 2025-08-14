@@ -27,3 +27,6 @@ Cargo.lock
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Others
+ffmpeg.exe

@@ -4,6 +4,8 @@ use tokio::time::{sleep, Duration};
 use tracing::{info, error, debug, warn};
 use anyhow::Result;
 use bytes::Bytes;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 
 use crate::config::RtspConfig;
 use crate::transcoder::FrameTranscoder;
@@ -243,14 +245,17 @@ impl RtspClient {
             // Log test frame generation every second if enabled
             let now = tokio::time::Instant::now();
             if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                let effective_framerate = if self.capture_framerate == 0 { 30 } else { self.capture_framerate };
                 debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s (test)", 
-                       self.camera_id, frame_count, self.capture_framerate);
+                       self.camera_id, frame_count, effective_framerate);
                 frame_count = 0;
                 last_log_time = now;
             }
             
             // Generate frames at configured capture FPS
-            let frame_duration_ms = 1000 / self.capture_framerate as u64;
+            // Use default of 30 FPS if capture_framerate is 0 (indicating max available)
+            let effective_framerate = if self.capture_framerate == 0 { 30 } else { self.capture_framerate };
+            let frame_duration_ms = 1000 / effective_framerate as u64;
             tokio::time::sleep(Duration::from_millis(frame_duration_ms)).await;
         }
     }
@@ -301,12 +306,46 @@ impl RtspClient {
             None
         };
         
-        // Build FFmpeg arguments with optional buffer size
-        let mut ffmpeg_args = vec![
-            "-fflags", "+nobuffer+discardcorrupt",  // Disable buffering, discard corrupt frames
-            "-flags", "low_delay",                  // Low delay mode
-            "-avioflags", "direct",                 // Direct I/O to avoid buffering
-        ];
+        // Build FFmpeg arguments with configurable options
+        let mut ffmpeg_args = Vec::new();
+        
+        // Use custom FFmpeg options or defaults
+        if let Some(ref opts) = self.config.ffmpeg_options {
+            // Add fflags if specified
+            if let Some(ref fflags) = opts.fflags {
+                ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
+            } else {
+                ffmpeg_args.extend_from_slice(&["-fflags", "+nobuffer+discardcorrupt"]);
+            }
+            
+            // Add flags if specified
+            if let Some(ref flags) = opts.flags {
+                ffmpeg_args.extend_from_slice(&["-flags", flags]);
+            } else {
+                ffmpeg_args.extend_from_slice(&["-flags", "low_delay"]);
+            }
+            
+            // Add avioflags if specified
+            if let Some(ref avioflags) = opts.avioflags {
+                ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
+            } else {
+                ffmpeg_args.extend_from_slice(&["-avioflags", "direct"]);
+            }
+            
+            // Add extra input arguments if specified
+            if let Some(ref extra_input) = opts.extra_input_args {
+                for arg in extra_input {
+                    ffmpeg_args.push(arg);
+                }
+            }
+        } else {
+            // Use defaults if no custom options
+            ffmpeg_args.extend_from_slice(&[
+                "-fflags", "+nobuffer+discardcorrupt",
+                "-flags", "low_delay",
+                "-avioflags", "direct",
+            ]);
+        }
         
         // Add buffer size if configured (in KB)
         let buffer_size_str;
@@ -325,23 +364,62 @@ impl RtspClient {
         ]);
         
         // Add fps filter only if capture_framerate > 0
+        let vsync_value;
         if let Some(ref fps_filter) = fps_str {
-            ffmpeg_args.extend_from_slice(&[
-                "-vf", fps_filter,                  // Force exact framerate
-                "-vsync", "cfr",                    // Constant frame rate output
-            ]);
+            ffmpeg_args.extend_from_slice(&["-vf", fps_filter]);
+            
+            // Use custom vsync or default to cfr when using fps filter
+            if let Some(ref opts) = self.config.ffmpeg_options {
+                if let Some(ref vsync) = opts.vsync {
+                    vsync_value = vsync.clone();
+                    ffmpeg_args.extend_from_slice(&["-vsync", &vsync_value]);
+                } else {
+                    ffmpeg_args.extend_from_slice(&["-vsync", "cfr"]);
+                }
+            } else {
+                ffmpeg_args.extend_from_slice(&["-vsync", "cfr"]);
+            }
             info!("FFmpeg: Using fps filter: {}", fps_filter);
         } else {
             info!("FFmpeg: No fps filter - using camera's natural frame rate");
         }
         
+        // Add flush_packets option
+        let flush_packets_value;
+        if let Some(ref opts) = self.config.ffmpeg_options {
+            if let Some(ref flush) = opts.flush_packets {
+                flush_packets_value = flush.clone();
+                ffmpeg_args.extend_from_slice(&["-flush_packets", &flush_packets_value]);
+            } else {
+                ffmpeg_args.extend_from_slice(&["-flush_packets", "1"]);
+            }
+        } else {
+            ffmpeg_args.extend_from_slice(&["-flush_packets", "1"]);
+        }
+        
         ffmpeg_args.extend_from_slice(&[
-            "-flush_packets", "1",                  // Flush packets immediately
             "-an",                                  // No audio
-            "-"                                     // Output to stdout
         ]);
         
-        let mut ffmpeg_cmd = tokio::process::Command::new("ffmpeg")
+        // Add extra output arguments if specified
+        if let Some(ref opts) = self.config.ffmpeg_options {
+            if let Some(ref extra_output) = opts.extra_output_args {
+                for arg in extra_output {
+                    ffmpeg_args.push(arg);
+                }
+            }
+        }
+        
+        ffmpeg_args.push("-");  // Output to stdout
+        
+        // On Windows, try to use ffmpeg.exe from current directory first, then from PATH
+        let ffmpeg_path = if cfg!(windows) && std::path::Path::new("./ffmpeg.exe").exists() {
+            "./ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
+        
+        let mut ffmpeg_cmd = tokio::process::Command::new(ffmpeg_path)
             .args(&ffmpeg_args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -350,6 +428,24 @@ impl RtspClient {
             .spawn()?;
 
         info!("📡 FFmpeg process started, reading MJPEG stream from camera");
+        
+        // Handle stderr logging if enabled
+        if let Some(true) = self.config.ffmpeg_log_stderr {
+            let stderr = ffmpeg_cmd.stderr.take()
+                .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stderr"))?;
+            
+            let log_filename = format!("{}.log", self.camera_id);
+            let camera_id = self.camera_id.clone();
+            
+            info!("[{}] FFmpeg stderr logging enabled to {}", self.camera_id, log_filename);
+            
+            // Spawn a task to handle stderr logging
+            tokio::spawn(async move {
+                if let Err(e) = log_ffmpeg_stderr(stderr, &log_filename, &camera_id).await {
+                    error!("[{}] Failed to log FFmpeg stderr: {}", camera_id, e);
+                }
+            });
+        }
         
         let stdout = ffmpeg_cmd.stdout.take()
             .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stdout"))?;
@@ -468,4 +564,45 @@ impl RtspClient {
             buffer.extend_from_slice(&chunk[0..n]);
         }
     }
+}
+
+async fn log_ffmpeg_stderr(
+    stderr: tokio::process::ChildStderr,
+    log_filename: &str,
+    camera_id: &str,
+) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    
+    // Open or create the log file
+    let mut log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_filename)
+        .await?;
+    
+    // Write a timestamp header
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let header = format!("\n=== FFmpeg stderr log for {} started at {} ===\n", camera_id, timestamp);
+    log_file.write_all(header.as_bytes()).await?;
+    log_file.flush().await?;
+    
+    // Read stderr line by line and write to log file
+    let reader = BufReader::new(stderr);
+    let mut lines = reader.lines();
+    
+    while let Some(line) = lines.next_line().await? {
+        let log_line = format!("{}\n", line);
+        log_file.write_all(log_line.as_bytes()).await?;
+        
+        // Flush periodically to ensure logs are written
+        log_file.flush().await?;
+    }
+    
+    // Write closing marker
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let footer = format!("=== FFmpeg stderr log for {} ended at {} ===\n", camera_id, timestamp);
+    log_file.write_all(footer.as_bytes()).await?;
+    log_file.flush().await?;
+    
+    Ok(())
 }

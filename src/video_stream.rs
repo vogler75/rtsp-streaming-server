@@ -36,6 +36,8 @@ impl VideoStream {
             reconnect_interval: camera_config.reconnect_interval,
             chunk_read_size: camera_config.chunk_read_size,
             ffmpeg_buffer_size: camera_config.ffmpeg_buffer_size,
+            ffmpeg_options: camera_config.ffmpeg_options.clone(),
+            ffmpeg_log_stderr: camera_config.ffmpeg_log_stderr,
         };
         
         let rtsp_client = RtspClient::new(
