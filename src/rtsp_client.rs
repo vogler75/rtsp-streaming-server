@@ -8,7 +8,7 @@ use bytes::Bytes;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
-use crate::config::{RtspConfig, FfmpegConfig, TranscodingConfig};
+use crate::config::{RtspConfig, FfmpegConfig, TranscodingConfig, CameraMqttConfig};
 use crate::errors::{Result, StreamError};
 use crate::transcoder::FrameTranscoder;
 use crate::mqtt::{MqttHandle, CameraStatus};
@@ -25,18 +25,20 @@ pub struct RtspClient {
     debug_capture: bool,
     debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
+    camera_mqtt_config: Option<CameraMqttConfig>,
     capture_fps: Arc<RwLock<f32>>,
     last_picture_time: Arc<RwLock<Option<u128>>>, // Timestamp in milliseconds
     last_frame_hash: Arc<RwLock<Option<u64>>>, // Hash of last frame for deduplication
     duplicate_frame_count: Arc<RwLock<u64>>, // Count of duplicate frames since last status update
+    last_mqtt_publish_time: Arc<RwLock<Option<u128>>>, // Last MQTT image publish timestamp
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
-        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle).await
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle, camera_mqtt_config).await
     }
 
-    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>) -> Self {
         Self {
             camera_id,
             config,
@@ -52,10 +54,12 @@ impl RtspClient {
             debug_capture,
             debug_duplicate_frames,
             mqtt_handle,
+            camera_mqtt_config,
             capture_fps: Arc::new(RwLock::new(0.0)),
             last_picture_time: Arc::new(RwLock::new(None)),
             last_frame_hash: Arc::new(RwLock::new(None)),
             duplicate_frame_count: Arc::new(RwLock::new(0)),
+            last_mqtt_publish_time: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -134,7 +138,7 @@ impl RtspClient {
             let jpeg_data = self.transcoder.create_test_frame().await?;
             
             // Send frame directly to broadcast
-            let _ = self.frame_sender.send(jpeg_data);
+            let _ = self.frame_sender.send(jpeg_data.clone());
             
             // Track picture arrival time for MQTT publishing (non-blocking)
             if let Some(ref mqtt) = self.mqtt_handle {
@@ -158,6 +162,48 @@ impl RtspClient {
                 tokio::spawn(async move {
                     mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff, 0).await; // Test frames have no meaningful size
                 });
+                
+                // Handle camera-specific MQTT image publishing for test frames
+                if let Some(ref camera_mqtt) = &self.camera_mqtt_config {
+                    let should_publish = if camera_mqtt.publish_interval == 0 {
+                        // Publish every frame when interval is 0
+                        true
+                    } else {
+                        // Check if enough time has passed since last publish
+                        let mut last_publish_guard = self.last_mqtt_publish_time.write().await;
+                        let should_publish = if let Some(last_publish) = *last_publish_guard {
+                            let interval_ms = camera_mqtt.publish_interval * 1000;
+                            now.saturating_sub(last_publish) >= interval_ms as u128
+                        } else {
+                            true // First publish
+                        };
+                        
+                        if should_publish {
+                            *last_publish_guard = Some(now);
+                        }
+                        drop(last_publish_guard);
+                        should_publish
+                    };
+                    
+                    if should_publish {
+                        // Clone necessary data for async task
+                        let mqtt_clone2 = mqtt.clone();
+                        let camera_id_clone2 = self.camera_id.clone();
+                        let jpeg_data_clone = jpeg_data.clone();
+                        let topic_name = camera_mqtt.topic_name.clone();
+                        
+                        // Spawn MQTT image publishing in background
+                        tokio::spawn(async move {
+                            if let Err(e) = mqtt_clone2.publish_camera_image(
+                                &camera_id_clone2,
+                                &jpeg_data_clone,
+                                topic_name.as_ref()
+                            ).await {
+                                error!("Failed to publish test camera image for {}: {}", camera_id_clone2, e);
+                            }
+                        });
+                    }
+                }
             }
             
             // Reset frame count every second for test frame generation
@@ -558,7 +604,7 @@ impl RtspClient {
                             let frame_start_time = std::time::Instant::now();
                             
                             // Send frame directly to broadcast
-                            let _ = self.frame_sender.send(Bytes::from(frame_data));
+                            let _ = self.frame_sender.send(Bytes::from(frame_data.clone()));
                             
                             // Track picture arrival time for MQTT publishing (non-blocking)
                             if let Some(ref mqtt) = self.mqtt_handle {
@@ -586,6 +632,48 @@ impl RtspClient {
 
                                 *last_time_guard = Some(now);
                                 drop(last_time_guard);
+                                
+                                // Handle camera-specific MQTT image publishing
+                                if let Some(ref camera_mqtt) = &self.camera_mqtt_config {
+                                    let should_publish = if camera_mqtt.publish_interval == 0 {
+                                        // Publish every frame when interval is 0
+                                        true
+                                    } else {
+                                        // Check if enough time has passed since last publish
+                                        let mut last_publish_guard = self.last_mqtt_publish_time.write().await;
+                                        let should_publish = if let Some(last_publish) = *last_publish_guard {
+                                            let interval_ms = camera_mqtt.publish_interval * 1000;
+                                            now.saturating_sub(last_publish) >= interval_ms as u128
+                                        } else {
+                                            true // First publish
+                                        };
+                                        
+                                        if should_publish {
+                                            *last_publish_guard = Some(now);
+                                        }
+                                        drop(last_publish_guard);
+                                        should_publish
+                                    };
+                                    
+                                    if should_publish {
+                                        // Clone necessary data for async task
+                                        let mqtt_clone = mqtt.clone();
+                                        let camera_id_clone = self.camera_id.clone();
+                                        let frame_data_clone = frame_data.clone();
+                                        let topic_name = camera_mqtt.topic_name.clone();
+                                        
+                                        // Spawn MQTT image publishing in background
+                                        tokio::spawn(async move {
+                                            if let Err(e) = mqtt_clone.publish_camera_image(
+                                                &camera_id_clone,
+                                                &frame_data_clone,
+                                                topic_name.as_ref()
+                                            ).await {
+                                                error!("Failed to publish camera image for {}: {}", camera_id_clone, e);
+                                            }
+                                        });
+                                    }
+                                }
                             }
                             
                             // Measure and log frame processing time if it's slow

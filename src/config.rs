@@ -21,6 +21,7 @@ pub struct CameraConfig {
     pub chunk_read_size: Option<usize>,
     pub token: Option<String>,
     pub ffmpeg: Option<FfmpegConfig>,
+    pub mqtt: Option<CameraMqttConfig>,
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
@@ -105,6 +106,13 @@ pub struct MqttConfig {
     pub keep_alive_secs: u64,
     pub publish_interval_secs: u64,
     pub publish_picture_arrival: Option<bool>, // Enable/disable picture arrival publishing
+    pub max_packet_size: Option<usize>, // Maximum MQTT packet size in bytes (default: 268435455)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraMqttConfig {
+    pub publish_interval: u64, // Interval in seconds, 0 = publish every frame
+    pub topic_name: Option<String>, // Optional custom topic name, defaults to <base_topic>/cameras/<cam-name>/jpg
 }
 
 impl Default for Config {

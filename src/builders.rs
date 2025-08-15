@@ -100,6 +100,7 @@ impl RtspClientBuilder {
             self.debug_capture,
             self.debug_duplicate_frames,
             self.mqtt_handle,
+            None, // Camera MQTT config not available in builder pattern
         ).await)
     }
 }

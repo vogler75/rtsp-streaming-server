@@ -81,6 +81,10 @@ impl MqttPublisher {
         
         mqtt_options.set_keep_alive(Duration::from_secs(config.keep_alive_secs));
         
+        // Set maximum packet size (default to 256MB if not specified)
+        let max_packet_size = config.max_packet_size.unwrap_or(268435455); // 256MB - 1 byte
+        mqtt_options.set_max_packet_size(max_packet_size, max_packet_size);
+        
         if let Some(username) = &config.username {
             if let Some(password) = &config.password {
                 mqtt_options.set_credentials(username, password);
@@ -379,5 +383,28 @@ impl MqttHandle {
         } else {
             error!("Failed to serialize picture arrival event for camera {}", camera_id);
         }
+    }
+    
+    pub async fn publish_camera_image(&self, camera_id: &str, jpeg_data: &[u8], custom_topic: Option<&String>) -> Result<()> {
+        let topic = if let Some(custom_topic) = custom_topic {
+            custom_topic.clone()
+        } else {
+            format!("{}/cameras/{}/jpg", self.config.base_topic, camera_id)
+        };
+        
+        let qos = match self.config.qos {
+            0 => QoS::AtMostOnce,
+            1 => QoS::AtLeastOnce,
+            _ => QoS::ExactlyOnce,
+        };
+        
+        self.client.publish(
+            topic,
+            qos,
+            false, // Don't retain image data
+            jpeg_data,
+        ).await?;
+        
+        Ok(())
     }
 }

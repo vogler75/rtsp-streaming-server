@@ -58,6 +58,7 @@ impl VideoStream {
             transcoding.debug_capture.unwrap_or(true),
             transcoding.debug_duplicate_frames.unwrap_or(false),
             mqtt_handle,
+            camera_config.mqtt.clone(),
         ).await;
         
         Ok(Self {
