@@ -24,6 +24,7 @@ pub struct CameraStatus {
 pub struct PictureArrival {
     pub t: u128,  // Timestamp in milliseconds since epoch
     pub d: u128,  // Time difference from previous picture in milliseconds
+    pub s: usize, // Frame size in bytes
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -340,10 +341,16 @@ impl MqttHandle {
         Ok(())
     }
     
-    pub async fn publish_picture_arrival(&self, camera_id: &str, arrival_time: u128, time_diff: u128) {
+    pub async fn publish_picture_arrival(&self, camera_id: &str, arrival_time: u128, time_diff: u128, frame_size: usize) {
+        // Check if picture arrival publishing is enabled (default: true for backward compatibility)
+        if !self.config.publish_picture_arrival.unwrap_or(true) {
+            return;
+        }
+        
         let picture_event = PictureArrival {
             t: arrival_time,
             d: time_diff,
+            s: frame_size,
         };
         
         if let Ok(payload) = serde_json::to_string(&picture_event) {

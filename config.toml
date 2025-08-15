@@ -20,6 +20,7 @@ qos = 0  # Quality of Service (0, 1, or 2)
 retain = false  # Whether to retain messages
 keep_alive_secs = 60  # Keep-alive interval in seconds
 publish_interval_secs = 5  # How often to publish status updates
+publish_picture_arrival = false  # Enable/disable picture arrival publishing (default: true)
 
 # Global transcoding settings (can be overridden per camera)
 [transcoding]

@@ -149,7 +149,7 @@ impl RtspClient {
                 let mqtt_clone = mqtt.clone();
                 let camera_id_clone = self.camera_id.clone();
                 tokio::spawn(async move {
-                    mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff).await;
+                    mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff, 0).await; // Test frames have no meaningful size
                 });
             }
             
@@ -502,7 +502,16 @@ impl RtspClient {
                 frame_result = self.read_mjpeg_frame(&mut reader, &mut buffer) => {
                     match frame_result {
                         Ok(frame_data) => {
+                            // Validate frame is not empty or too small (minimum JPEG is ~100 bytes)
+                            if frame_data.len() == 0 {
+                                warn!("[{}] Skipping invalid frame: too small ({} bytes)", self.camera_id, frame_data.len());
+                                continue;
+                            }
+                            
                             frame_count += 1;
+                            
+                            // Get frame size before moving the data
+                            let frame_size = frame_data.len();
                             
                             // Measure frame processing time for diagnostics
                             let frame_start_time = std::time::Instant::now();
@@ -523,15 +532,22 @@ impl RtspClient {
                                 } else {
                                     0 // First picture, no time difference
                                 };
-                                *last_time_guard = Some(now);
-                                drop(last_time_guard);
-                                
+
                                 // Spawn MQTT publishing in background to avoid blocking frame processing
                                 let mqtt_clone = mqtt.clone();
                                 let camera_id_clone = self.camera_id.clone();
+                                let frame_size_for_mqtt = frame_size;
                                 tokio::spawn(async move {
-                                    mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff).await;
-                                });
+                                    mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff, frame_size_for_mqtt).await;
+                                });                                
+
+                                // Only publish if time difference is reasonable (>= 10ms to avoid flooding)
+                                if time_diff < 3 {
+                                    debug!("[{}] Frames too frequent ({}ms), frame size: {} bytes", self.camera_id, time_diff, frame_size);
+                                }
+
+                                *last_time_guard = Some(now);
+                                drop(last_time_guard);
                             }
                             
                             // Measure and log frame processing time if it's slow
@@ -572,8 +588,30 @@ impl RtspClient {
                             }
                         }
                         Err(e) => {
-                            error!("[{}] Error reading frame data: {}", self.camera_id, e);
-                            return Err(e);
+                            // Check if FFmpeg process is still alive before returning error
+                            match ffmpeg_cmd.try_wait() {
+                                Ok(Some(status)) => {
+                                    // Process has exited
+                                    error!("[{}] FFmpeg process died with status: {}", self.camera_id, status);
+                                    return Err(StreamError::ffmpeg("FFmpeg process died"));
+                                }
+                                Ok(None) => {
+                                    // Process is still running, but we got an error reading frame
+                                    error!("[{}] Error reading frame data while FFmpeg is running: {}", self.camera_id, e);
+                                    // Try to continue if it's just a corrupted frame
+                                    if e.to_string().contains("EOF") {
+                                        // EOF might mean FFmpeg is dying, return error
+                                        return Err(e);
+                                    }
+                                    // For other errors, try to continue
+                                    warn!("[{}] Attempting to continue after frame read error", self.camera_id);
+                                    continue;
+                                }
+                                Err(check_err) => {
+                                    error!("[{}] Failed to check FFmpeg process status: {}", self.camera_id, check_err);
+                                    return Err(e);
+                                }
+                            }
                         }
                     }
                 }
@@ -594,11 +632,19 @@ impl RtspClient {
         // Read until we find the start of a JPEG frame
         let mut byte = [0u8; 1];
         let mut prev_byte = 0u8;
+        let mut bytes_skipped = 0u32;
         
         // Skip to the start of the next JPEG frame
         loop {
             if reader.read_exact(&mut byte).await.is_err() {
                 return Err(StreamError::ffmpeg("EOF while searching for JPEG start"));
+            }
+            
+            bytes_skipped += 1;
+            
+            // If we're skipping too many bytes, something is wrong
+            if bytes_skipped > 100_000 {
+                return Err(StreamError::ffmpeg("Skipped too many bytes looking for JPEG start - stream corrupted"));
             }
             
             if prev_byte == JPEG_START[0] && byte[0] == JPEG_START[1] {

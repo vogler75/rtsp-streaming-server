@@ -106,6 +106,7 @@ pub struct MqttConfig {
     pub retain: bool,
     pub keep_alive_secs: u64,
     pub publish_interval_secs: u64,
+    pub publish_picture_arrival: Option<bool>, // Enable/disable picture arrival publishing
 }
 
 impl Default for Config {

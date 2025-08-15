@@ -54,6 +54,23 @@ cert_path = "certs/server.crt"
 key_path = "certs/server.key"
 ```
 
+### MQTT Configuration (Optional)
+
+```toml
+[mqtt]
+enabled = true
+broker_url = "mqtt://192.168.1.4:1883"  # Can also use mqtts:// for TLS
+client_id = "videoserver-01"
+# username = "mqtt_user"  # Optional
+# password = "mqtt_pass"  # Optional
+base_topic = "Videoserver"  # Base topic for all MQTT messages
+qos = 0  # Quality of Service (0, 1, or 2)
+retain = false  # Whether to retain messages
+keep_alive_secs = 60  # Keep-alive interval in seconds
+publish_interval_secs = 5  # How often to publish status updates
+publish_picture_arrival = true  # Enable/disable picture arrival publishing (default: true)
+```
+
 ### Global Transcoding Settings
 
 ```toml
@@ -136,6 +153,19 @@ scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 - **server.tls.enabled**: Enable HTTPS/TLS (default: false)
 - **server.tls.cert_path**: Path to SSL certificate file
 - **server.tls.key_path**: Path to SSL private key file
+
+#### MQTT Options
+- **mqtt.enabled**: Enable/disable MQTT publishing (default: false)
+- **mqtt.broker_url**: MQTT broker URL (mqtt:// or mqtts://)
+- **mqtt.client_id**: Unique client identifier
+- **mqtt.username**: Optional authentication username
+- **mqtt.password**: Optional authentication password
+- **mqtt.base_topic**: Base topic prefix for all messages
+- **mqtt.qos**: Quality of Service level (0, 1, or 2)
+- **mqtt.retain**: Whether to retain messages
+- **mqtt.keep_alive_secs**: Keep-alive interval in seconds
+- **mqtt.publish_interval_secs**: How often to publish status updates
+- **mqtt.publish_picture_arrival**: Enable/disable picture arrival events (default: true)
 
 #### Camera Options
 - **path**: URL path for this camera (e.g., "/cam1")
