@@ -78,6 +78,7 @@ publish_picture_arrival = true  # Enable/disable picture arrival publishing (def
 output_format = "mjpeg"
 quality = 50
 capture_framerate = 0      # 0 = max available from camera
+output_framerate = 5       # Output FPS (can be overridden per camera)
 channel_buffer_size = 1    # Frame buffer size (1 = only latest)
 debug_capture = true       # Show capture rate debug info
 ```
@@ -114,7 +115,6 @@ scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 
 #video_codec = "mjpeg"  # Video codec: mjpeg is default for MJPEG format
 #video_bitrate = "200k"  # Video bitrate: "200k", "1M", "2000k", etc.
-#gop_size = 10  # GOP size (keyframe interval) - frames between keyframes
 
 # FFmpeg advanced options for low latency
 #rtbufsize = 65536  # RTSP buffer size in bytes
@@ -176,6 +176,7 @@ scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 - **output_format**: Output format - currently "mjpeg"
 - **quality**: JPEG quality (1-100)
 - **capture_framerate**: Capture rate from camera (0 = max)
+- **output_framerate**: Output framerate (can be overridden per camera)
 - **channel_buffer_size**: Number of frames to buffer
 - **debug_capture**: Enable capture rate debug output
 

@@ -8,7 +8,7 @@ use bytes::Bytes;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
-use crate::config::{RtspConfig, FfmpegConfig};
+use crate::config::{RtspConfig, FfmpegConfig, TranscodingConfig};
 use crate::errors::{Result, StreamError};
 use crate::transcoder::FrameTranscoder;
 use crate::mqtt::{MqttHandle, CameraStatus};
@@ -21,6 +21,7 @@ pub struct RtspClient {
     transcoder: FrameTranscoder,
     capture_framerate: u32,
     ffmpeg_config: Option<FfmpegConfig>,
+    transcoding_config: TranscodingConfig,
     debug_capture: bool,
     debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
@@ -31,11 +32,11 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
-        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle).await
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle).await
     }
 
-    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
@@ -47,6 +48,7 @@ impl RtspClient {
             ).await,
             capture_framerate,
             ffmpeg_config,
+            transcoding_config,
             debug_capture,
             debug_duplicate_frames,
             mqtt_handle,
@@ -222,8 +224,12 @@ impl RtspClient {
         
         // Create owned strings that will live long enough
         let quality_str = ffmpeg.and_then(|c| c.quality).map(|q| q.to_string());
-        let output_fps_str = ffmpeg.and_then(|c| c.output_framerate).map(|fps| fps.to_string());
-        let gop_str = ffmpeg.and_then(|c| c.gop_size).map(|gop| gop.to_string());
+        // Use FFmpeg config output_framerate first, then fall back to transcoding config default
+        // Treat 0 as "not set" (don't apply output framerate limiting)
+        let output_fps_str = ffmpeg.and_then(|c| c.output_framerate)
+            .or(self.transcoding_config.output_framerate)
+            .filter(|&fps| fps > 0)  // Only use if > 0
+            .map(|fps| fps.to_string());
         let fps_str = if self.capture_framerate > 0 {
             Some(format!("fps={}", self.capture_framerate))
         } else {
@@ -350,11 +356,6 @@ impl RtspClient {
                 ffmpeg_args.push(fps.clone());
             }
         
-            // Add GOP size if specified
-            if let Some(ref gop) = gop_str {
-                ffmpeg_args.push("-g".to_string());
-                ffmpeg_args.push(gop.clone());
-            }
         
             // Add movflags if specified (important for fMP4 streaming)
             if let Some(ref movflags) = ffmpeg.and_then(|c| c.movflags.as_ref()) {
@@ -621,10 +622,10 @@ impl RtspClient {
                                 
                                 if self.debug_capture {
                                     if self.capture_framerate > 0 {
-                                        debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s", 
+                                        debug!("[{}] Capturing: {:2}/s Target: {:2}/s", 
                                                self.camera_id, frame_count, self.capture_framerate);
                                     } else {
-                                        debug!("[{}] CAPTURE: {:2}/s Natural Rate", self.camera_id, frame_count);
+                                        debug!("[{}] Capturing: {:2}/s", self.camera_id, frame_count);
                                     }
                                 }
                                 frame_count = 0;

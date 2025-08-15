@@ -26,8 +26,9 @@ publish_picture_arrival = true  # Enable/disable picture arrival publishing (def
 [transcoding]
 output_format = "mjpeg"
 capture_framerate = 10  # FPS to capture from camera (0 = max available)
+output_framerate = 0    # Output FPS (can be overridden per camera, 0 = max available)
 channel_buffer_size = 10 # Number of frames to buffer (1 = only latest frame)
-debug_capture = true    # Enable debug output for capture rate
+debug_capture = false    # Enable debug output for capture rate
 debug_duplicate_frames = false # Enable/disable duplicate frame warnings
 
 # Camera configurations
@@ -38,7 +39,6 @@ debug_duplicate_frames = false # Enable/disable duplicate frame warnings
 # - video_codec: "mpeg1video", "libx264", "libx265", "h264_nvenc", etc.
 # - video_bitrate: "200k", "1M", "2000k" (for non-MJPEG codecs)
 # - output_framerate: Output FPS (different from capture framerate)
-# - gop_size: Keyframe interval (frames between keyframes)
 # - quality: JPEG quality 1-100 (mainly for MJPEG format)
 
 ####################################################################################################
@@ -68,7 +68,6 @@ scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 
 #video_codec = "mjpeg"  # Video codec: mjpeg is default for MJPEG format
 #video_bitrate = "200k"  # Video bitrate: "200k", "1M", "2000k", etc.
-#gop_size = 10  # GOP size (keyframe interval) - frames between keyframes
 
 # FFmpeg advanced options for low latency
 #rtbufsize = 65536  # RTSP buffer size in bytes

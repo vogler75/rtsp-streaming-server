@@ -39,7 +39,6 @@ pub struct FfmpegConfig {
     pub video_bitrate: Option<String>,    // -b:v (e.g., "200k", "1M")
     pub quality: Option<u8>,              // -q:v (JPEG quality 1-100)
     pub output_framerate: Option<u32>,    // -r (output framerate)
-    pub gop_size: Option<u32>,            // -g (GOP size, keyframe interval)
     pub scale: Option<String>,            // -vf scale (e.g., "640:480", "1280:-1")
     pub movflags: Option<String>,         // -movflags (e.g., "frag_keyframe+empty_moov+default_base_moof" for fMP4)
     
@@ -87,6 +86,7 @@ pub struct RtspConfig {
 pub struct TranscodingConfig {
     pub output_format: String,
     pub capture_framerate: u32,  // FFmpeg capture rate from camera
+    pub output_framerate: Option<u32>, // Output framerate (can be overridden per camera)
     pub channel_buffer_size: Option<usize>, // Number of frames to buffer (1 = only latest)
     pub debug_capture: Option<bool>, // Enable/disable capture rate debug output
     pub debug_duplicate_frames: Option<bool>, // Enable/disable duplicate frame warnings
@@ -126,6 +126,7 @@ impl Default for Config {
             transcoding: TranscodingConfig {
                 output_format: "mjpeg".to_string(),
                 capture_framerate: 30,
+                output_framerate: None,
                 channel_buffer_size: Some(1),
                 debug_capture: Some(true),
                 debug_duplicate_frames: Some(false),

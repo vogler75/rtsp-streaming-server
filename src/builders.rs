@@ -15,6 +15,7 @@ pub struct RtspClientBuilder {
     config: Option<RtspConfig>,
     frame_sender: Option<Arc<broadcast::Sender<Bytes>>>,
     ffmpeg_config: Option<FfmpegConfig>,
+    transcoding_config: Option<TranscodingConfig>,
     capture_framerate: u32,
     debug_capture: bool,
     debug_duplicate_frames: bool,
@@ -29,6 +30,7 @@ impl RtspClientBuilder {
             config: None,
             frame_sender: None,
             ffmpeg_config: None,
+            transcoding_config: None,
             capture_framerate: 0,
             debug_capture: false,
             debug_duplicate_frames: false,
@@ -79,11 +81,21 @@ impl RtspClientBuilder {
         let config = self.config.ok_or_else(|| StreamError::config("RTSP config is required"))?;
         let frame_sender = self.frame_sender.ok_or_else(|| StreamError::config("Frame sender is required"))?;
 
+        let default_transcoding = TranscodingConfig {
+            output_format: "mjpeg".to_string(),
+            capture_framerate: 30,
+            output_framerate: None,
+            channel_buffer_size: Some(1),
+            debug_capture: Some(true),
+            debug_duplicate_frames: Some(false),
+        };
+        
         Ok(RtspClient::new_from_builder(
             camera_id,
             config,
             frame_sender,
             self.ffmpeg_config,
+            self.transcoding_config.unwrap_or(default_transcoding),
             self.capture_framerate,
             self.debug_capture,
             self.debug_duplicate_frames,
