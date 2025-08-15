@@ -31,6 +31,7 @@ channel_buffer_size = 10 # Number of frames to buffer (1 = only latest frame)
 allow_duplicate_frames = false # If false, each frame is sent only once
 debug_capture = false    # Enable debug output for capture rate
 debug_sending = false   # Enable debug output for sending rate
+debug_duplicate_frames = true # Enable/disable duplicate frame warnings
 
 # Camera configurations
 # Each camera has a unique ID and configurable path

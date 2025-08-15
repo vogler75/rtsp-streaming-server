@@ -24,6 +24,7 @@ pub struct RtspClient {
     ffmpeg_config: Option<FfmpegConfig>,
     debug_capture: bool,
     _debug_sending: bool,
+    debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
     capture_fps: Arc<RwLock<f32>>,
     last_picture_time: Arc<RwLock<Option<u128>>>, // Timestamp in milliseconds
@@ -32,11 +33,11 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
-        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, capture_framerate, send_framerate, _allow_duplicate_frames, debug_capture, debug_sending, mqtt_handle).await
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, capture_framerate, send_framerate, _allow_duplicate_frames, debug_capture, debug_sending, debug_duplicate_frames, mqtt_handle).await
     }
 
-    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
@@ -51,6 +52,7 @@ impl RtspClient {
             ffmpeg_config,
             debug_capture,
             _debug_sending: debug_sending,
+            debug_duplicate_frames,
             mqtt_handle,
             capture_fps: Arc::new(RwLock::new(0.0)),
             last_picture_time: Arc::new(RwLock::new(None)),
@@ -515,6 +517,9 @@ impl RtspClient {
                                 continue;
                             }
                             
+                            // Get frame size before processing
+                            let frame_size = frame_data.len();
+                            
                             // Calculate hash of frame data for deduplication
                             let mut hasher = DefaultHasher::new();
                             frame_data.hash(&mut hasher);
@@ -532,8 +537,15 @@ impl RtspClient {
                                 // Increment duplicate counter
                                 let mut dup_count_guard = self.duplicate_frame_count.write().await;
                                 *dup_count_guard += 1;
+                                let dup_count = *dup_count_guard;
                                 drop(dup_count_guard);
                                 drop(last_hash_guard);
+                                
+                                // Optional warning for duplicate frames
+                                if self.debug_duplicate_frames {
+                                    warn!("[{}] Skipping duplicate frame (size: {} bytes, total duplicates: {})", 
+                                          self.camera_id, frame_size, dup_count);
+                                }
                                 
                                 // Skip processing duplicate frame
                                 continue;
@@ -544,9 +556,6 @@ impl RtspClient {
                             }
                             
                             frame_count += 1;
-                            
-                            // Get frame size before moving the data
-                            let frame_size = frame_data.len();
                             
                             // Measure frame processing time for diagnostics
                             let frame_start_time = std::time::Instant::now();

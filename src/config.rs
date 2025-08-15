@@ -92,6 +92,7 @@ pub struct TranscodingConfig {
     pub allow_duplicate_frames: Option<bool>, // Whether to send same frame multiple times
     pub debug_capture: Option<bool>, // Enable/disable capture rate debug output
     pub debug_sending: Option<bool>, // Enable/disable sending rate debug output
+    pub debug_duplicate_frames: Option<bool>, // Enable/disable duplicate frame warnings
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +134,7 @@ impl Default for Config {
                 allow_duplicate_frames: Some(false),
                 debug_capture: Some(true),
                 debug_sending: Some(true),
+                debug_duplicate_frames: Some(false),
             },
             mqtt: None,
         }

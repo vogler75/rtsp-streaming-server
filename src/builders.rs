@@ -20,6 +20,7 @@ pub struct RtspClientBuilder {
     allow_duplicate_frames: bool,
     debug_capture: bool,
     debug_sending: bool,
+    debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
 }
 
@@ -36,6 +37,7 @@ impl RtspClientBuilder {
             allow_duplicate_frames: false,
             debug_capture: false,
             debug_sending: false,
+            debug_duplicate_frames: false,
             mqtt_handle: None,
         }
     }
@@ -105,6 +107,7 @@ impl RtspClientBuilder {
             self.allow_duplicate_frames,
             self.debug_capture,
             self.debug_sending,
+            self.debug_duplicate_frames,
             self.mqtt_handle,
         ).await)
     }
