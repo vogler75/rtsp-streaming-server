@@ -26,6 +26,12 @@ pub struct CameraConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FfmpegConfig {
+    // Command override - if set, replaces all other FFmpeg options
+    pub command: Option<String>,          // Full FFmpeg command (without 'ffmpeg' prefix)
+    
+    // Input timing options
+    pub use_wallclock_as_timestamps: Option<bool>, // -use_wallclock_as_timestamps 1 (must be first option)
+    
     // Output format and codec settings
     pub output_format: Option<String>,    // -f (e.g., "mjpeg", "mpegts", "mp4")
     pub video_codec: Option<String>,      // -codec:v (e.g., "mpeg1video", "libx264")

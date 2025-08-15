@@ -301,89 +301,129 @@ impl RtspClient {
         };
         
         // Build FFmpeg arguments with configurable options
-        let mut ffmpeg_args = Vec::new();
+        let mut ffmpeg_args: Vec<String> = Vec::new();
         
-        // Use FFmpeg configuration if available
-        if let Some(ref config) = ffmpeg {
+        // Check if command override is specified
+        let use_command_override = ffmpeg
+            .as_ref()
+            .and_then(|config| config.command.as_ref())
+            .is_some();
+        
+        if use_command_override {
+            // Use custom command override
+            if let Some(ref config) = ffmpeg {
+                if let Some(ref command) = config.command {
+                    info!("[{}] Using custom FFmpeg command override", self.camera_id);
+                    
+                    // Split the command string into arguments (simple space-based splitting)
+                    // Note: For more complex quoting, users can use extra_input_args and extra_output_args
+                    let args: Vec<&str> = command.split_whitespace().collect();
+                    
+                    // Replace placeholders in the command
+                    for arg in args {
+                        let replaced_arg = arg.replace("$url", &self.config.url);
+                        ffmpeg_args.push(replaced_arg.to_string());
+                    }
+                }
+            }
+        } else {
+            // Use granular configuration options
+            if let Some(ref config) = ffmpeg {
+            // Add use_wallclock_as_timestamps as the first option if enabled
+            if config.use_wallclock_as_timestamps.unwrap_or(false) {
+                ffmpeg_args.push("-use_wallclock_as_timestamps".to_string());
+                ffmpeg_args.push("1".to_string());
+            }
+            
             // Add fflags if specified and not empty
             if let Some(ref fflags) = config.fflags {
                 if !fflags.is_empty() {
-                    ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
+                    ffmpeg_args.push("-fflags".to_string());
+                    ffmpeg_args.push(fflags.clone());
                 }
             }
             
             // Add flags if specified and not empty
             if let Some(ref flags) = config.flags {
                 if !flags.is_empty() {
-                    ffmpeg_args.extend_from_slice(&["-flags", flags]);
+                    ffmpeg_args.push("-flags".to_string());
+                    ffmpeg_args.push(flags.clone());
                 }
             }
             
             // Add avioflags if specified and not empty
             if let Some(ref avioflags) = config.avioflags {
                 if !avioflags.is_empty() {
-                    ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
+                    ffmpeg_args.push("-avioflags".to_string());
+                    ffmpeg_args.push(avioflags.clone());
                 }
             }
             
             // Add extra input arguments if specified
             if let Some(ref extra_input) = config.extra_input_args {
                 for arg in extra_input {
-                    ffmpeg_args.push(arg);
+                    ffmpeg_args.push(arg.clone());
                 }
             }
-        }
-        // No default values - only use what's explicitly configured
+            }
+            // No default values - only use what's explicitly configured
+            
+            // Add RTSP buffer size if configured (in KB)
+            if let Some(buffer_size) = ffmpeg.and_then(|c| c.rtbufsize) {
+                let buffer_size_str = format!("{}k", buffer_size / 1024);
+                ffmpeg_args.push("-rtbufsize".to_string());
+                ffmpeg_args.push(buffer_size_str.clone());
+                info!("FFmpeg RTSP buffer size set to: {}", buffer_size_str);
+            }
+            
+            // Add basic arguments
+            ffmpeg_args.push("-rtsp_transport".to_string());
+            ffmpeg_args.push(self.config.transport.clone());
+            ffmpeg_args.push("-i".to_string());
+            ffmpeg_args.push(self.config.url.clone());
         
-        // Add RTSP buffer size if configured (in KB)
-        let buffer_size_str;
-        if let Some(buffer_size) = ffmpeg.and_then(|c| c.rtbufsize) {
-            buffer_size_str = format!("{}k", buffer_size / 1024);
-            ffmpeg_args.extend_from_slice(&["-rtbufsize", &buffer_size_str]);
-            info!("FFmpeg RTSP buffer size set to: {}", buffer_size_str);
-        }
+            // Add output format (default to mjpeg if not specified)
+            let format = ffmpeg
+                .and_then(|c| c.output_format.as_deref())
+                .unwrap_or("mjpeg");
+            ffmpeg_args.push("-f".to_string());
+            ffmpeg_args.push(format.to_string());
         
-        // Add basic arguments
-        ffmpeg_args.extend_from_slice(&[
-            "-rtsp_transport", &self.config.transport,
-            "-i", &self.config.url,
-        ]);
+            // Add video codec if specified
+            if let Some(ref codec) = ffmpeg.and_then(|c| c.video_codec.as_ref()) {
+                ffmpeg_args.push("-codec:v".to_string());
+                ffmpeg_args.push(codec.to_string());
+            }
         
-        // Add output format (default to mjpeg if not specified)
-        let format = ffmpeg
-            .and_then(|c| c.output_format.as_deref())
-            .unwrap_or("mjpeg");
-        ffmpeg_args.extend_from_slice(&["-f", format]);
+            // Add video bitrate if specified
+            if let Some(ref bitrate) = ffmpeg.and_then(|c| c.video_bitrate.as_ref()) {
+                ffmpeg_args.push("-b:v".to_string());
+                ffmpeg_args.push(bitrate.to_string());
+            }
         
-        // Add video codec if specified
-        if let Some(ref codec) = ffmpeg.and_then(|c| c.video_codec.as_ref()) {
-            ffmpeg_args.extend_from_slice(&["-codec:v", codec]);
-        }
+            // Add quality parameter only if specified (mainly for MJPEG)
+            if let Some(ref quality_val) = quality_str {
+                ffmpeg_args.push("-q:v".to_string());
+                ffmpeg_args.push(quality_val.clone());
+            }
         
-        // Add video bitrate if specified
-        if let Some(ref bitrate) = ffmpeg.and_then(|c| c.video_bitrate.as_ref()) {
-            ffmpeg_args.extend_from_slice(&["-b:v", bitrate]);
-        }
+            // Add output framerate if specified
+            if let Some(ref fps) = output_fps_str {
+                ffmpeg_args.push("-r".to_string());
+                ffmpeg_args.push(fps.clone());
+            }
         
-        // Add quality parameter only if specified (mainly for MJPEG)
-        if let Some(ref quality_val) = quality_str {
-            ffmpeg_args.extend_from_slice(&["-q:v", quality_val]);
-        }
+            // Add GOP size if specified
+            if let Some(ref gop) = gop_str {
+                ffmpeg_args.push("-g".to_string());
+                ffmpeg_args.push(gop.clone());
+            }
         
-        // Add output framerate if specified
-        if let Some(ref fps) = output_fps_str {
-            ffmpeg_args.extend_from_slice(&["-r", fps]);
-        }
-        
-        // Add GOP size if specified
-        if let Some(ref gop) = gop_str {
-            ffmpeg_args.extend_from_slice(&["-g", gop]);
-        }
-        
-        // Add movflags if specified (important for fMP4 streaming)
-        if let Some(ref movflags) = ffmpeg.and_then(|c| c.movflags.as_ref()) {
-            ffmpeg_args.extend_from_slice(&["-movflags", movflags]);
-        }
+            // Add movflags if specified (important for fMP4 streaming)
+            if let Some(ref movflags) = ffmpeg.and_then(|c| c.movflags.as_ref()) {
+                ffmpeg_args.push("-movflags".to_string());
+                ffmpeg_args.push(movflags.to_string());
+            }
         
         // Build video filter chain if needed
         let mut video_filters = Vec::new();
@@ -402,14 +442,16 @@ impl RtspClient {
         let filter_chain;
         if !video_filters.is_empty() {
             filter_chain = video_filters.join(",");
-            ffmpeg_args.extend_from_slice(&["-vf", &filter_chain]);
+            ffmpeg_args.push("-vf".to_string());
+            ffmpeg_args.push(filter_chain.clone());
             
             // Use custom fps_mode only if explicitly configured
             let fps_mode = ffmpeg.and_then(|c| c.fps_mode.as_ref());
             
             if let Some(ref mode) = fps_mode {
                 if !mode.is_empty() {
-                    ffmpeg_args.extend_from_slice(&["-fps_mode", mode]);
+                    ffmpeg_args.push("-fps_mode".to_string());
+                    ffmpeg_args.push(mode.to_string());
                 }
             }
             // No default fps_mode - let FFmpeg decide
@@ -421,7 +463,8 @@ impl RtspClient {
             
             if let Some(ref mode) = fps_mode {
                 if !mode.is_empty() {
-                    ffmpeg_args.extend_from_slice(&["-fps_mode", mode]);
+                    ffmpeg_args.push("-fps_mode".to_string());
+                    ffmpeg_args.push(mode.to_string());
                 }
             }
             info!("FFmpeg: No video filters - using camera's natural frame rate");
@@ -432,25 +475,25 @@ impl RtspClient {
         
         if let Some(ref flush) = flush_packets {
             if !flush.is_empty() {
-                ffmpeg_args.extend_from_slice(&["-flush_packets", flush]);
+                ffmpeg_args.push("-flush_packets".to_string());
+                ffmpeg_args.push(flush.to_string());
             }
         }
         // No default flush_packets - let FFmpeg decide
         
-        ffmpeg_args.extend_from_slice(&[
-            "-an",                                  // No audio
-        ]);
+            ffmpeg_args.push("-an".to_string());
         
-        // Add extra output arguments if specified
-        let extra_output = ffmpeg.and_then(|c| c.extra_output_args.as_ref());
-        
-        if let Some(extra_output) = extra_output {
-            for arg in extra_output {
-                ffmpeg_args.push(arg);
+            // Add extra output arguments if specified
+            let extra_output = ffmpeg.and_then(|c| c.extra_output_args.as_ref());
+            
+            if let Some(extra_output) = extra_output {
+                for arg in extra_output {
+                    ffmpeg_args.push(arg.clone());
+                }
             }
-        }
         
-        ffmpeg_args.push("-");  // Output to stdout
+            ffmpeg_args.push("-".to_string());  // Output to stdout
+        }
         
         // On Windows, try to use ffmpeg.exe from current directory first, then from PATH
         let ffmpeg_path = if cfg!(windows) && std::path::Path::new("./ffmpeg.exe").exists() {
