@@ -32,9 +32,20 @@
         
         .main-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 2fr 1fr;
             gap: 20px;
             margin-bottom: 20px;
+        }
+        
+        .left-column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .right-column {
+            display: flex;
+            flex-direction: column;
         }
         
         .panel {
@@ -80,11 +91,31 @@
         }
         
         .recordings-list {
-            max-height: 400px;
+            height: 500px;
             overflow-y: auto;
             background: rgba(0, 0, 0, 0.2);
             border-radius: 5px;
             padding: 10px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+        }
+        
+        .recordings-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .recordings-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        
+        .recordings-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+        
+        .recordings-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
         }
         
         .recording-item {
@@ -230,6 +261,38 @@
             color: rgba(255, 255, 255, 0.7);
             margin-top: 5px;
         }
+        
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .output-header h2 {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        
+        .clear-button {
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #f44336 0%, #e53935 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: transform 0.2s;
+            min-width: auto;
+            flex: none;
+        }
+        
+        .clear-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(244, 67, 54, 0.3);
+        }
     </style>
 </head>
 <body>
@@ -242,78 +305,88 @@
         </div>
         
         <div class="main-grid">
-            <!-- Video Display Panel -->
-            <div class="panel">
-                <h2>Video Stream</h2>
-                <div id="videoContainer">
-                    <canvas id="videoCanvas"></canvas>
-                    <div id="statusMessage">Not connected</div>
+            <!-- Left Column: Video Display and Controls -->
+            <div class="left-column">
+                <!-- Video Display Panel -->
+                <div class="panel">
+                    <h2>Video Stream</h2>
+                    <div id="videoContainer">
+                        <canvas id="videoCanvas"></canvas>
+                        <div id="statusMessage">Not connected</div>
+                    </div>
+                    
+                    <!-- Playback Controls -->
+                    <div class="speed-controls">
+                        <button id="decreaseSpeed">➖ Slower</button>
+                        <div class="speed-display" id="speedDisplay">1.0x</div>
+                        <button id="increaseSpeed">➕ Faster</button>
+                    </div>
                 </div>
                 
-                <!-- Playback Controls -->
-                <div class="speed-controls">
-                    <button id="decreaseSpeed">➖ Slower</button>
-                    <div class="speed-display" id="speedDisplay">1.0x</div>
-                    <button id="increaseSpeed">➕ Faster</button>
-                    <button id="stopReplay" class="danger" disabled>⏹ Stop Replay</button>
+                <!-- Recording Controls Panel -->
+                <div class="panel">
+                    <h2>Recording Controls</h2>
+                    
+                    <!-- Time Range Selection -->
+                    <div class="control-group">
+                        <label>Start Time:</label>
+                        <input type="datetime-local" id="startTime" />
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>End Time:</label>
+                        <input type="datetime-local" id="endTime" />
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="refreshRecordings">🔄 Refresh List</button>
+                        <button id="startReplay" class="success">▶️ Start Replay</button>
+                        <button id="stopReplay" class="danger" disabled>⏹ Stop Replay</button>
+                    </div>
+                    
+                    <!-- Recording Controls -->
+                    <h3 style="margin-top: 25px; margin-bottom: 10px;">Recording Controls</h3>
+                    <div class="control-group">
+                        <label>Recording Reason:</label>
+                        <input type="text" id="recordingReason" placeholder="e.g., Security event, Motion detected..." />
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>Duration (seconds, optional):</label>
+                        <input type="number" id="recordingDuration" placeholder="Leave empty for manual stop" min="1" />
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="startRecording" class="success">🔴 Start Recording</button>
+                        <button id="stopRecording" class="danger" disabled>⏹ Stop Recording</button>
+                    </div>
+                    
+                    <!-- Live Stream Controls -->
+                    <h3 style="margin-top: 25px; margin-bottom: 10px;">Live Stream Controls</h3>
+                    <div class="button-group">
+                        <button id="startLiveStream" class="success">📹 Start Live Stream</button>
+                        <button id="stopLiveStream" class="danger" disabled>⏹ Stop Live Stream</button>
+                    </div>
                 </div>
             </div>
             
-            <!-- Control Panel -->
-            <div class="panel">
-                <h2>Recording Controls</h2>
-                
-                <!-- Time Range Selection -->
-                <div class="control-group">
-                    <label>Start Time:</label>
-                    <input type="datetime-local" id="startTime" />
-                </div>
-                
-                <div class="control-group">
-                    <label>End Time:</label>
-                    <input type="datetime-local" id="endTime" />
-                </div>
-                
-                <div class="button-group">
-                    <button id="refreshRecordings">🔄 Refresh List</button>
-                    <button id="startReplay" class="success">▶️ Start Replay</button>
-                </div>
-                
-                <!-- Recording Controls -->
-                <h3 style="margin-top: 25px; margin-bottom: 10px;">Recording Controls</h3>
-                <div class="control-group">
-                    <label>Recording Reason:</label>
-                    <input type="text" id="recordingReason" placeholder="e.g., Security event, Motion detected..." />
-                </div>
-                
-                <div class="control-group">
-                    <label>Duration (seconds, optional):</label>
-                    <input type="number" id="recordingDuration" placeholder="Leave empty for manual stop" min="1" />
-                </div>
-                
-                <div class="button-group">
-                    <button id="startRecording" class="success">🔴 Start Recording</button>
-                    <button id="stopRecording" class="danger" disabled>⏹ Stop Recording</button>
-                </div>
-                
-                <!-- Live Stream Controls -->
-                <h3 style="margin-top: 25px; margin-bottom: 10px;">Live Stream Controls</h3>
-                <div class="button-group">
-                    <button id="startLiveStream" class="success">📹 Start Live Stream</button>
-                    <button id="stopLiveStream" class="danger" disabled>⏹ Stop Live Stream</button>
-                </div>
-                
-                <!-- Recordings List -->
-                <h3 style="margin-top: 20px; margin-bottom: 10px;">Available Recordings</h3>
-                <div class="recordings-list" id="recordingsList">
-                    <div class="info-text">Click "Refresh List" to load recordings</div>
+            <!-- Right Column: Recordings List -->
+            <div class="right-column">
+                <div class="panel">
+                    <h2>Available Recordings</h2>
+                    <div class="recordings-list" id="recordingsList">
+                        <div class="info-text">Click "Refresh List" to load recordings</div>
+                    </div>
                 </div>
             </div>
         </div>
         
         <!-- JSON Output Panel -->
         <div class="panel">
-            <h2>Command Responses</h2>
+            <div class="output-header">
+                <h2>Command Responses</h2>
+                <button id="clearOutput" class="clear-button">🗑 Clear</button>
+            </div>
             <div id="jsonOutput">Waiting for responses...</div>
         </div>
     </div>
@@ -344,6 +417,7 @@
                 document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
                 document.getElementById('startLiveStream').addEventListener('click', () => this.startLiveStream());
                 document.getElementById('stopLiveStream').addEventListener('click', () => this.stopLiveStream());
+                document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
                 
                 // Set default time range (last 24 hours)
                 const now = new Date();
@@ -598,6 +672,10 @@
             
             stopLiveStream() {
                 this.sendCommand({ cmd: 'stoplivestream' });
+            }
+            
+            clearOutput() {
+                document.getElementById('jsonOutput').textContent = 'Output cleared...';
             }
             
             changeSpeed(delta) {

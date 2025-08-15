@@ -10,14 +10,12 @@ use crate::errors::Result;
 
 #[derive(Debug, Clone)]
 pub struct RecordingConfig {
-    pub database_path: String,
     pub max_frame_size: usize,  // Maximum size for a single frame in bytes
 }
 
 impl Default for RecordingConfig {
     fn default() -> Self {
         Self {
-            database_path: "recordings.db".to_string(),
             max_frame_size: 10 * 1024 * 1024, // 10MB default max frame size
         }
     }
@@ -26,8 +24,6 @@ impl Default for RecordingConfig {
 #[derive(Debug, Clone)]
 pub struct ActiveRecording {
     pub session_id: i64,
-    pub camera_id: String,
-    pub client_id: String,
     pub start_time: DateTime<Utc>,
     pub frame_count: u64,
     pub requested_duration: Option<i64>,
@@ -79,8 +75,6 @@ impl RecordingManager {
         // Create active recording entry
         let active_recording = ActiveRecording {
             session_id,
-            camera_id: camera_id.to_string(),
-            client_id: client_id.to_string(),
             start_time: Utc::now(),
             frame_count: 0,
             requested_duration,

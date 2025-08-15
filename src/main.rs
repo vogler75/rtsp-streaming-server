@@ -99,7 +99,6 @@ async fn main() -> Result<()> {
                     let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
                     
                     let recording_config = RecordingConfig {
-                        database_path: recording_config.database_path.clone(),
                         max_frame_size: recording_config.max_frame_size.unwrap_or(10 * 1024 * 1024),
                     };
                     
