@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{sleep, Duration};
 use tracing::{info, error, debug, warn};
@@ -25,6 +27,8 @@ pub struct RtspClient {
     mqtt_handle: Option<MqttHandle>,
     capture_fps: Arc<RwLock<f32>>,
     last_picture_time: Arc<RwLock<Option<u128>>>, // Timestamp in milliseconds
+    last_frame_hash: Arc<RwLock<Option<u64>>>, // Hash of last frame for deduplication
+    duplicate_frame_count: Arc<RwLock<u64>>, // Count of duplicate frames since last status update
 }
 
 impl RtspClient {
@@ -50,6 +54,8 @@ impl RtspClient {
             mqtt_handle,
             capture_fps: Arc::new(RwLock::new(0.0)),
             last_picture_time: Arc::new(RwLock::new(None)),
+            last_frame_hash: Arc::new(RwLock::new(None)),
+            duplicate_frame_count: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -72,6 +78,7 @@ impl RtspClient {
                             clients_connected: self.frame_sender.receiver_count(),
                             last_frame_time: None,
                             ffmpeg_running: false,
+                            duplicate_frames: 0, // No duplicates when disconnected
                         };
                         mqtt.update_camera_status(self.camera_id.clone(), status).await;
                     }
@@ -508,6 +515,34 @@ impl RtspClient {
                                 continue;
                             }
                             
+                            // Calculate hash of frame data for deduplication
+                            let mut hasher = DefaultHasher::new();
+                            frame_data.hash(&mut hasher);
+                            let current_hash = hasher.finish();
+                            
+                            // Check for duplicate frames
+                            let mut last_hash_guard = self.last_frame_hash.write().await;
+                            let is_duplicate = if let Some(last_hash) = *last_hash_guard {
+                                last_hash == current_hash
+                            } else {
+                                false // First frame
+                            };
+                            
+                            if is_duplicate {
+                                // Increment duplicate counter
+                                let mut dup_count_guard = self.duplicate_frame_count.write().await;
+                                *dup_count_guard += 1;
+                                drop(dup_count_guard);
+                                drop(last_hash_guard);
+                                
+                                // Skip processing duplicate frame
+                                continue;
+                            } else {
+                                // Update last frame hash
+                                *last_hash_guard = Some(current_hash);
+                                drop(last_hash_guard);
+                            }
+                            
                             frame_count += 1;
                             
                             // Get frame size before moving the data
@@ -541,10 +576,7 @@ impl RtspClient {
                                     mqtt_clone.publish_picture_arrival(&camera_id_clone, now, time_diff, frame_size_for_mqtt).await;
                                 });                                
 
-                                // Only publish if time difference is reasonable (>= 10ms to avoid flooding)
-                                if time_diff < 3 {
-                                    debug!("[{}] Frames too frequent ({}ms), frame size: {} bytes", self.camera_id, time_diff, frame_size);
-                                }
+                                // Note: Rapid frames are now handled by duplicate detection above
 
                                 *last_time_guard = Some(now);
                                 drop(last_time_guard);
@@ -564,6 +596,12 @@ impl RtspClient {
                                 
                                 // Update MQTT status
                                 if let Some(ref mqtt) = self.mqtt_handle {
+                                    // Get and reset duplicate count
+                                    let mut dup_count_guard = self.duplicate_frame_count.write().await;
+                                    let duplicate_count = *dup_count_guard;
+                                    *dup_count_guard = 0; // Reset counter after reading
+                                    drop(dup_count_guard);
+                                    
                                     let status = CameraStatus {
                                         id: self.camera_id.clone(),
                                         connected: true,
@@ -571,6 +609,7 @@ impl RtspClient {
                                         clients_connected: self.frame_sender.receiver_count(),
                                         last_frame_time: Some(Utc::now().to_rfc3339()),
                                         ffmpeg_running: true,
+                                        duplicate_frames: duplicate_count,
                                     };
                                     mqtt.update_camera_status(self.camera_id.clone(), status).await;
                                 }

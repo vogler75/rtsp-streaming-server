@@ -18,6 +18,7 @@ pub struct CameraStatus {
     pub clients_connected: usize,
     pub last_frame_time: Option<String>,
     pub ffmpeg_running: bool,
+    pub duplicate_frames: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
