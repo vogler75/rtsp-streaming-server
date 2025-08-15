@@ -56,7 +56,7 @@ impl RecordingManager {
     pub async fn start_recording(
         &self,
         camera_id: &str,
-        client_id: &str,
+        _client_id: &str,
         reason: Option<&str>,
         requested_duration: Option<i64>,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
@@ -68,8 +68,6 @@ impl RecordingManager {
         let session_id = self.database.create_recording_session(
             camera_id,
             reason,
-            requested_duration,
-            client_id,
         ).await?;
 
         // Create active recording entry
@@ -233,7 +231,6 @@ impl RecordingManager {
             camera_id: camera_id.map(|s| s.to_string()),
             from,
             to,
-            status: None,
         };
 
         self.database.list_recordings(&query).await

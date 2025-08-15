@@ -15,7 +15,6 @@ pub enum ControlCommand {
     #[serde(rename = "startrecording")]
     StartRecording {
         reason: Option<String>,
-        seconds: Option<i64>,
     },
     #[serde(rename = "stoprecording")]
     StopRecording,
@@ -224,8 +223,8 @@ impl ControlHandler {
         sender: Arc<tokio::sync::Mutex<futures_util::stream::SplitSink<WebSocket, Message>>>,
     ) -> CommandResponse {
         match command {
-            ControlCommand::StartRecording { reason, seconds } => {
-                Self::handle_start_recording(camera_id, client_id, reason, seconds, recording_manager, frame_sender).await
+            ControlCommand::StartRecording { reason } => {
+                Self::handle_start_recording(camera_id, client_id, reason, recording_manager, frame_sender).await
             }
             ControlCommand::StopRecording => {
                 Self::handle_stop_recording(camera_id, recording_manager).await
@@ -255,7 +254,6 @@ impl ControlHandler {
         camera_id: &str,
         client_id: &str,
         reason: Option<String>,
-        seconds: Option<i64>,
         recording_manager: &RecordingManager,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
     ) -> CommandResponse {
@@ -268,15 +266,11 @@ impl ControlHandler {
             camera_id,
             client_id,
             reason.as_deref(),
-            seconds,
+            None, // No duration support
             frame_sender,
         ).await {
             Ok(session_id) => {
-                let message = if let Some(duration) = seconds {
-                    format!("Recording started for {} seconds (session {})", duration, session_id)
-                } else {
-                    format!("Recording started (session {})", session_id)
-                };
+                let message = format!("Recording started (session {})", session_id);
                 CommandResponse::success(&message)
             }
             Err(e) => {

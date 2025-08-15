@@ -56,7 +56,7 @@ url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
 chunk_read_size = 8192 # 32768
-token = "secure-cam1-token"  # Optional: Token required for WebSocket authentication
+#token = "secure-cam1-token"  # Optional: Token required for WebSocket authentication
 
 # MQTT configuration for this camera
 [cameras.cam1.mqtt]
@@ -93,7 +93,7 @@ scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 
 ####################################################################################################
 [cameras.cam2]
-enabled = true  # Optional: Enable/disable this camera (default: true)
+enabled = true  # Optional: Enable/disable this campleaera (default: true)
 path = "/cam2"
 url = "rtsp://admin007:admin007@192.168.1.188:554/stream1"
 transport = "tcp"

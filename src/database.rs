@@ -10,20 +10,13 @@ pub struct RecordingSession {
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
     pub reason: Option<String>,
-    pub requested_duration: Option<i64>,
-    pub client_id: String,
     pub status: RecordingStatus,
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RecordedFrame {
-    pub id: i64,
-    pub session_id: i64,
     pub timestamp: DateTime<Utc>,
-    pub frame_number: i64,
     pub frame_data: Vec<u8>,  // Store actual frame data
-    pub frame_size: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +52,6 @@ pub struct RecordingQuery {
     pub camera_id: Option<String>,
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
-    pub status: Option<RecordingStatus>,
 }
 
 #[async_trait]
@@ -70,8 +62,6 @@ pub trait DatabaseProvider: Send + Sync {
         &self,
         camera_id: &str,
         reason: Option<&str>,
-        requested_duration: Option<i64>,
-        client_id: &str,
     ) -> Result<i64>;
     
     async fn stop_recording_session(&self, session_id: i64) -> Result<()>;
@@ -173,20 +163,16 @@ impl DatabaseProvider for SqliteDatabase {
         &self,
         camera_id: &str,
         reason: Option<&str>,
-        requested_duration: Option<i64>,
-        client_id: &str,
     ) -> Result<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO recording_sessions (camera_id, start_time, reason, requested_duration, client_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO recording_sessions (camera_id, start_time, reason)
+            VALUES (?, ?, ?)
             "#,
         )
         .bind(camera_id)
         .bind(Utc::now())
         .bind(reason)
-        .bind(requested_duration)
-        .bind(client_id)
         .execute(&self.pool)
         .await?;
 
@@ -221,10 +207,7 @@ impl DatabaseProvider for SqliteDatabase {
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
                 reason: row.get("reason"),
-                requested_duration: row.get("requested_duration"),
-                client_id: row.get("client_id"),
                 status: RecordingStatus::from(row.get::<String, _>("status")),
-                created_at: row.get("created_at"),
             });
         }
 
@@ -257,23 +240,38 @@ impl DatabaseProvider for SqliteDatabase {
     }
 
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>> {
-        // Simple implementation - for production you'd want better query building
-        let sql = if let Some(ref _camera_id) = query.camera_id {
-            "SELECT * FROM recording_sessions WHERE camera_id = ? ORDER BY start_time DESC"
+        let mut conditions = Vec::new();
+        let mut bind_values: Vec<String> = Vec::new();
+        
+        if let Some(ref camera_id) = query.camera_id {
+            conditions.push("camera_id = ?");
+            bind_values.push(camera_id.clone());
+        }
+        
+        if let Some(from) = query.from {
+            conditions.push("start_time >= ?");
+            bind_values.push(from.to_rfc3339());
+        }
+        
+        if let Some(to) = query.to {
+            conditions.push("start_time <= ?");
+            bind_values.push(to.to_rfc3339());
+        }
+        
+        let where_clause = if conditions.is_empty() {
+            String::new()
         } else {
-            "SELECT * FROM recording_sessions ORDER BY start_time DESC"
+            format!(" WHERE {}", conditions.join(" AND "))
         };
-
-        let rows = if let Some(ref camera_id) = query.camera_id {
-            sqlx::query(sql)
-                .bind(camera_id)
-                .fetch_all(&self.pool)
-                .await?
-        } else {
-            sqlx::query(sql)
-                .fetch_all(&self.pool)
-                .await?
-        };
+        
+        let sql = format!("SELECT * FROM recording_sessions{} ORDER BY start_time DESC", where_clause);
+        
+        let mut query_builder = sqlx::query(&sql);
+        for value in &bind_values {
+            query_builder = query_builder.bind(value);
+        }
+        
+        let rows = query_builder.fetch_all(&self.pool).await?;
 
         let mut sessions = Vec::new();
         for row in rows {
@@ -283,10 +281,7 @@ impl DatabaseProvider for SqliteDatabase {
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
                 reason: row.get("reason"),
-                requested_duration: row.get("requested_duration"),
-                client_id: row.get("client_id"),
                 status: RecordingStatus::from(row.get::<String, _>("status")),
-                created_at: row.get("created_at"),
             });
         }
 
@@ -324,12 +319,8 @@ impl DatabaseProvider for SqliteDatabase {
         let mut frames = Vec::new();
         for row in rows {
             frames.push(RecordedFrame {
-                id: row.get("id"),
-                session_id: row.get("session_id"),
                 timestamp: row.get("timestamp"),
-                frame_number: row.get("frame_number"),
                 frame_data: row.get("frame_data"),
-                frame_size: row.get("frame_size"),
             });
         }
 
@@ -359,12 +350,8 @@ impl DatabaseProvider for SqliteDatabase {
         let mut frames = Vec::new();
         for row in rows {
             frames.push(RecordedFrame {
-                id: row.get("id"),
-                session_id: row.get("session_id"),
                 timestamp: row.get("timestamp"),
-                frame_number: row.get("frame_number"),
                 frame_data: row.get("frame_data"),
-                frame_size: row.get("frame_size"),
             });
         }
 

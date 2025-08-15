@@ -340,15 +340,23 @@
                 <div class="panel">
                     <h2>Recording Controls</h2>
                     
-                    <!-- Time Range Selection -->
+                    <!-- Day Selection -->
                     <div class="control-group">
-                        <label>Start Time:</label>
-                        <input type="datetime-local" id="startTime" />
+                        <label>Select Day:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="date" id="selectedDay" style="flex: 1;" />
+                            <button id="setTodayButton" style="flex: none; padding: 5px 10px; font-size: 12px;">Today</button>
+                        </div>
                     </div>
                     
+                    <!-- Time Range Selection -->
                     <div class="control-group">
-                        <label>End Time:</label>
-                        <input type="datetime-local" id="endTime" />
+                        <label>Time Range:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="datetime-local" id="startTime" style="flex: 1;" />
+                            <span style="color: rgba(255, 255, 255, 0.7);">to</span>
+                            <input type="datetime-local" id="endTime" style="flex: 1;" />
+                        </div>
                     </div>
                     
                     <div class="button-group">
@@ -362,11 +370,6 @@
                     <div class="control-group">
                         <label>Recording Reason:</label>
                         <input type="text" id="recordingReason" placeholder="e.g., Security event, Motion detected..." />
-                    </div>
-                    
-                    <div class="control-group">
-                        <label>Duration (seconds, optional):</label>
-                        <input type="number" id="recordingDuration" placeholder="Leave empty for manual stop" min="1" />
                     </div>
                     
                     <div class="button-group">
@@ -433,12 +436,11 @@
                 document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
                 document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket());
                 document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket());
+                document.getElementById('setTodayButton').addEventListener('click', () => this.setToday());
+                document.getElementById('selectedDay').addEventListener('change', () => this.updateTimeRangeFromDay());
                 
-                // Set default time range (last 24 hours)
-                const now = new Date();
-                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                document.getElementById('startTime').value = this.formatDateTimeLocal(yesterday);
-                document.getElementById('endTime').value = this.formatDateTimeLocal(now);
+                // Set default day and time range to today
+                this.setToday();
             }
             
             formatDateTimeLocal(date) {
@@ -448,6 +450,29 @@
                 const hours = String(date.getHours()).padStart(2, '0');
                 const minutes = String(date.getMinutes()).padStart(2, '0');
                 return `${year}-${month}-${day}T${hours}:${minutes}`;
+            }
+            
+            formatDateLocal(date) {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+            
+            setToday() {
+                const now = new Date();
+                document.getElementById('selectedDay').value = this.formatDateLocal(now);
+                this.updateTimeRangeFromDay();
+            }
+            
+            updateTimeRangeFromDay() {
+                const selectedDay = document.getElementById('selectedDay').value;
+                if (selectedDay) {
+                    const startOfDay = new Date(selectedDay + 'T00:00');
+                    const endOfDay = new Date(selectedDay + 'T23:59');
+                    document.getElementById('startTime').value = this.formatDateTimeLocal(startOfDay);
+                    document.getElementById('endTime').value = this.formatDateTimeLocal(endOfDay);
+                }
             }
             
             connectWebSocket() {
@@ -667,7 +692,6 @@
             
             startRecording() {
                 const reason = document.getElementById('recordingReason').value;
-                const duration = document.getElementById('recordingDuration').value;
                 
                 const command = {
                     cmd: 'startrecording'
@@ -675,10 +699,6 @@
                 
                 if (reason.trim()) {
                     command.reason = reason.trim();
-                }
-                
-                if (duration && parseInt(duration) > 0) {
-                    command.seconds = parseInt(duration);
                 }
                 
                 this.sendCommand(command);
