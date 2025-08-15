@@ -9,6 +9,7 @@ use futures_util::{stream::StreamExt, SinkExt};
 use tracing::{info, error, debug};
 use bytes::Bytes;
 use crate::mqtt::{MqttHandle, ClientStatus};
+use crate::config::CameraConfig;
 use chrono::Utc;
 use uuid::Uuid;
 use std::net::SocketAddr;
@@ -19,7 +20,10 @@ pub async fn websocket_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     camera_id: String,
     mqtt_handle: Option<MqttHandle>,
+    _camera_config: CameraConfig,
 ) -> Response {
+    // Authentication is handled in camera_handler before this function is called
+    info!("WebSocket upgrade for client {} on camera {}", addr, camera_id);
     ws.on_upgrade(move |socket| handle_socket(socket, frame_sender, camera_id, mqtt_handle, addr))
 }
 

@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.6",
+			"version": "1.0.7",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -52,6 +52,11 @@
 						"type": "boolean",
 						"default": false,
 						"description": "Show build version number"
+					},
+					"token": {
+						"type": "string",
+						"default": "",
+						"description": "Authentication token for WebSocket connection (Bearer token)"
 					}
 				}
 			}

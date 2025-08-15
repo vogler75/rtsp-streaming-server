@@ -49,3 +49,6 @@ rumqttc = "0.24"
 
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
+
+# Command line argument parsing
+clap = { version = "4", features = ["derive"] }

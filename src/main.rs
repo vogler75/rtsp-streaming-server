@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::BufReader;
 use axum::response::IntoResponse;
 use axum::extract::State;
+use clap::Parser;
 
 mod config;
 mod errors;
@@ -22,6 +23,13 @@ use websocket::websocket_handler;
 use std::collections::HashMap;
 use mqtt::{MqttPublisher, MqttHandle};
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to the configuration file
+    #[arg(short, long, default_value = "config.toml")]
+    config: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,10 +37,20 @@ async fn main() -> Result<()> {
         .with_env_filter("rtsp_streaming_server=debug,info")
         .init();
 
-    let config = Config::load("config.toml").unwrap_or_else(|_| {
-        warn!("Could not load config.toml, using default configuration");
-        Config::default()
-    });
+    // Parse command line arguments
+    let args = Args::parse();
+
+    let config = match Config::load(&args.config) {
+        Ok(cfg) => {
+            info!("Loaded configuration from {}", args.config);
+            cfg
+        }
+        Err(e) => {
+            warn!("Could not load configuration from {}: {}", args.config, e);
+            info!("Using default configuration");
+            Config::default()
+        }
+    };
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
 
@@ -71,6 +89,7 @@ async fn main() -> Result<()> {
         camera_id: String,
         frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
         mqtt_handle: Option<MqttHandle>,
+        camera_config: config::CameraConfig,
     }
     let mut camera_streams: HashMap<String, CameraStreamInfo> = HashMap::new();
     
@@ -96,6 +115,7 @@ async fn main() -> Result<()> {
                     camera_id: camera_id.clone(),
                     frame_sender: video_stream.frame_sender.clone(),
                     mqtt_handle: mqtt_handle.clone(),
+                    camera_config: camera_config.clone(),
                 });
                 
                 // Start the video stream
@@ -144,7 +164,7 @@ async fn main() -> Result<()> {
         info!("Adding route for camera at path: {}", path);
         let info = stream_info.clone();
         app = app.route(&path, axum::routing::get(
-            move |ws, query, addr| camera_handler(ws, query, addr, info.frame_sender.clone(), info.camera_id.clone(), info.mqtt_handle.clone())
+            move |ws, query, addr| camera_handler(ws, query, addr, info.frame_sender.clone(), info.camera_id.clone(), info.mqtt_handle.clone(), info.camera_config.clone())
         ));
     }
     
@@ -203,16 +223,33 @@ async fn camera_handler(
     frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
     camera_id: String,
     mqtt_handle: Option<MqttHandle>,
+    camera_config: config::CameraConfig,
 ) -> axum::response::Response {
     match ws {
         Some(ws_upgrade) => {
+            // Check token authentication before upgrading WebSocket
+            if let Some(expected_token) = &camera_config.token {
+                // Get token from query parameters
+                if let Some(provided_token) = query.get("token") {
+                    if provided_token == expected_token {
+                        info!("Token authentication successful for camera {}", camera_id);
+                    } else {
+                        warn!("Invalid token provided for camera {}", camera_id);
+                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                    }
+                } else {
+                    warn!("Missing token for camera {} that requires authentication", camera_id);
+                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing token").into_response();
+                }
+            }
+            
             if let Some(connect_info) = addr {
-                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle).await
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             } else {
                 // Fallback with unknown IP
                 let fallback_addr = "127.0.0.1:0".parse().unwrap();
                 let connect_info = axum::extract::ConnectInfo(fallback_addr);
-                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle).await
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             }
         },
         None => {

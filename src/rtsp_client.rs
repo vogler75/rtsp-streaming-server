@@ -190,11 +190,11 @@ impl RtspClient {
 
     async fn generate_test_frames(&self) -> Result<()> {
         info!("Starting test frame generation");
-        let mut frame_count = 0u64;
+        let mut _frame_count = 0u64;
         let mut last_log_time = tokio::time::Instant::now();
         
         loop {
-            frame_count += 1;
+            _frame_count += 1;
 
             let jpeg_data = self.transcoder.create_test_frame().await?;
             
@@ -225,13 +225,10 @@ impl RtspClient {
                 });
             }
             
-            // Log test frame generation every second if enabled
+            // Reset frame count every second for test frame generation
             let now = tokio::time::Instant::now();
-            if self.debug_capture && now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                let effective_framerate = if self.capture_framerate == 0 { 30 } else { self.capture_framerate };
-                debug!("[{}] CAPTURE: {:2}/s Target: {:2}/s (test)", 
-                       self.camera_id, frame_count, effective_framerate);
-                frame_count = 0;
+            if now.duration_since(last_log_time) >= Duration::from_secs(1) {
+                _frame_count = 0;
                 last_log_time = now;
             }
             

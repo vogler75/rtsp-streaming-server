@@ -11,6 +11,7 @@ let statusElement = null;
 let versionElement = null;
 let isConnected = false;
 let currentURL = '';
+let currentToken = '';
 let shouldConnect = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
@@ -146,23 +147,31 @@ function connectToWebSocket(url) {
     console.log('URL:', url);
     console.log('Protocol:', url.startsWith('wss://') ? 'Secure WebSocket (WSS)' : 'WebSocket (WS)');
     
+    // Add token to URL if provided
+    let connectUrl = url;
+    if (currentToken && currentToken.trim() !== '') {
+      const separator = url.includes('?') ? '&' : '?';
+      connectUrl = url + separator + 'token=' + encodeURIComponent(currentToken);
+      console.log('Using authentication token');
+    }
+    
     // For WSS with self-signed certificates, try different approaches
-    if (url.startsWith('wss://')) {
+    if (connectUrl.startsWith('wss://')) {
       console.log('Attempting WSS connection (ignoring certificate errors where possible)');
       
       // Try to create WebSocket with additional error handling for certificate issues
       try {
-        websocket = new WebSocket(url);
+        websocket = new WebSocket(connectUrl);
       } catch (certError) {
         console.warn('WSS connection failed, possibly due to certificate issues:', certError);
         
         // Fallback: try converting WSS to WS for testing
-        const wsUrl = url.replace('wss://', 'ws://');
+        const wsUrl = connectUrl.replace('wss://', 'ws://');
         console.log('Attempting fallback to WS:', wsUrl);
         websocket = new WebSocket(wsUrl);
       }
     } else {
-      websocket = new WebSocket(url);
+      websocket = new WebSocket(connectUrl);
     }
     
     websocket.onopen = function() {
@@ -382,6 +391,30 @@ function setProperty(data) {
         versionElement.style.display = data.value ? 'block' : 'none';
       }
       break;
+    case 'token':
+      if (data.value !== currentToken) {
+        currentToken = data.value;
+        console.log('Token updated');
+        
+        // If we're connected and token changed, reconnect with new token
+        if (shouldConnect && currentURL) {
+          if (websocket) {
+            console.log('Token changed - reconnecting with new authentication...');
+            websocket.close();
+            websocket = null;
+          }
+          
+          // Clear any pending reconnection timers
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          
+          // Reconnect with new token
+          connectToWebSocket(currentURL);
+        }
+      }
+      break;
   }
 }
 
@@ -395,6 +428,7 @@ WebCC.start(
       
       // Set initial properties
       currentURL = WebCC.Properties.URL || '';
+      currentToken = WebCC.Properties.token || '';
       shouldConnect = WebCC.Properties.connect || false;
       
       // Check version property at startup
@@ -427,7 +461,8 @@ WebCC.start(
       connected: false,
       fps: 0,
       kbs: 0,
-      version: false
+      version: false,
+      token: ''
     }
   },
   // placeholder to include additional Unified dependencies

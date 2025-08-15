@@ -19,6 +19,7 @@ pub struct CameraConfig {
     pub transport: String,
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
+    pub token: Option<String>,
     pub ffmpeg: Option<FfmpegConfig>,
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
@@ -109,20 +110,7 @@ pub struct MqttConfig {
 
 impl Default for Config {
     fn default() -> Self {
-        let mut cameras = HashMap::new();
-        cameras.insert(
-            "default".to_string(),
-            CameraConfig {
-                enabled: Some(true),
-                path: "/camera1".to_string(),
-                url: "rtsp://admin:password@192.168.1.100:554/stream".to_string(),
-                transport: "tcp".to_string(),
-                reconnect_interval: 5,
-                chunk_read_size: None,
-                ffmpeg: None,
-                transcoding_override: None,
-            },
-        );
+        let cameras = HashMap::new(); // No default cameras - must be configured
         
         Self {
             server: ServerConfig {

@@ -120,6 +120,10 @@
         </div>
         
         <div class="controls">
+            <div style="margin-bottom: 10px;">
+                <input type="text" id="tokenInput" placeholder="Enter access token (optional)" 
+                       style="padding: 8px; border-radius: 3px; border: 1px solid #555; background-color: #333; color: white; width: 250px;">
+            </div>
             <button id="connectBtn" onclick="connect()">Connect</button>
             <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
             <button onclick="toggleFullscreen()">Fullscreen</button>
@@ -172,12 +176,29 @@
             updateStatus('connecting', 'Connecting...');
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}${currentPath}`;
+            
+            // Get token from input field
+            const token = document.getElementById('tokenInput').value.trim();
+            
+            // Build WebSocket URL with optional token parameter
+            let wsUrl = `${protocol}//${window.location.host}${currentPath}`;
+            if (token) {
+                wsUrl += `?token=${encodeURIComponent(token)}`;
+                console.log('Connecting with token authentication via query parameter');
+            } else {
+                console.log('Connecting without token');
+            }
             
             console.log('Connecting to:', wsUrl);
             
-            ws = new WebSocket(wsUrl);
-            ws.binaryType = 'arraybuffer';
+            try {
+                ws = new WebSocket(wsUrl);
+                ws.binaryType = 'arraybuffer';
+            } catch (error) {
+                console.error('Failed to create WebSocket:', error);
+                updateStatus('disconnected', 'Connection failed');
+                return;
+            }
             
             ws.onopen = function() {
                 console.log('WebSocket connected');
