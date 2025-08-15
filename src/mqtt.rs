@@ -348,7 +348,7 @@ impl MqttHandle {
         };
         
         if let Ok(payload) = serde_json::to_string(&picture_event) {
-            let topic = format!("{}/cameras/{}/picture/arrived", self.config.base_topic, camera_id);
+            let topic = format!("{}/cameras/{}/capturing", self.config.base_topic, camera_id);
             let qos = match self.config.qos {
                 0 => QoS::AtMostOnce,
                 1 => QoS::AtLeastOnce,

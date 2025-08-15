@@ -8,6 +8,7 @@
 let websocket = null;
 let videoElement = null;
 let statusElement = null;
+let versionElement = null;
 let isConnected = false;
 let currentURL = '';
 let shouldConnect = false;
@@ -15,12 +16,20 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let reconnectInterval = 3000;
 
+// FPS and bitrate tracking variables
+let frameCount = 0;
+let fpsCounter = 0;
+let lastFpsTime = Date.now();
+let bytesReceived = 0;
+let lastBitrateTime = Date.now();
+
 ////////////////////////////////////////////
 // VideoPlayer functions
 
 function initializeVideoPlayer() {
   videoElement = document.getElementById('videoPlayer');
   statusElement = document.getElementById('status');
+  versionElement = document.getElementById('versionDisplay');
   
   videoElement.onerror = function(e) {
     // Only log video errors if we're actually using the video element
@@ -47,16 +56,31 @@ function updateConnectionStatus(connected) {
   isConnected = connected;
   WebCC.Properties.connected = connected;
   
+  // Reset statistics when disconnected
+  if (!connected) {
+    frameCount = 0;
+    fpsCounter = 0;
+    lastFpsTime = Date.now();
+    bytesReceived = 0;
+    lastBitrateTime = Date.now();
+    WebCC.Properties.fps = 0;
+    WebCC.Properties.kbs = 0;
+  }
+  
   if (statusElement) {
     if (connected) {
-      statusElement.textContent = 'Connected';
-      statusElement.style.backgroundColor = 'rgba(0,128,0,0.7)';
+      // Hide status when connected
+      statusElement.style.display = 'none';
       reconnectAttempts = 0;
     } else if (shouldConnect) {
+      // Show status when disconnected but trying to connect
+      statusElement.style.display = 'block';
       const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts})` : '';
       statusElement.textContent = 'Disconnected' + reconnectText;
       statusElement.style.backgroundColor = 'rgba(128,0,0,0.7)';
     } else {
+      // Show status when stopped
+      statusElement.style.display = 'block';
       statusElement.textContent = 'Stopped';
       statusElement.style.backgroundColor = 'rgba(64,64,64,0.7)';
     }
@@ -182,6 +206,29 @@ function connectToWebSocket(url) {
         const blobUrl = URL.createObjectURL(event.data);
         imgElement.src = blobUrl;
         
+        // Update statistics
+        frameCount++;
+        fpsCounter++;
+        bytesReceived += event.data.size;
+        
+        const now = Date.now();
+        
+        // FPS calculation - update every second
+        if (now - lastFpsTime >= 1000) {
+          const fps = Math.round(fpsCounter * 1000 / (now - lastFpsTime));
+          WebCC.Properties.fps = fps;
+          fpsCounter = 0;
+          lastFpsTime = now;
+        }
+        
+        // Bitrate calculation - update every second
+        if (now - lastBitrateTime >= 1000) {
+          const kbs = Math.round(bytesReceived / 1024); // KB/s
+          WebCC.Properties.kbs = kbs;
+          bytesReceived = 0;
+          lastBitrateTime = now;
+        }
+        
         // Clean up blob URL after image loads
         imgElement.onload = function() {
           // Small delay before cleanup to ensure image is displayed
@@ -274,9 +321,7 @@ function connectToWebSocket(url) {
   }
 }
 
-function setProperty(data) {
-  console.log('Property changed:', data.key, '=', data.value);
-  
+function setProperty(data) {  
   switch (data.key) {
     case 'URL':
       if (data.value !== currentURL) {
@@ -332,6 +377,11 @@ function setProperty(data) {
         showBlankScreen();
       }
       break;
+    case 'version':
+      if (versionElement) {
+        versionElement.style.display = data.value ? 'block' : 'none';
+      }
+      break;
   }
 }
 
@@ -346,6 +396,11 @@ WebCC.start(
       // Set initial properties
       currentURL = WebCC.Properties.URL || '';
       shouldConnect = WebCC.Properties.connect || false;
+      
+      // Check version property at startup
+      if (versionElement && WebCC.Properties.version) {
+        versionElement.style.display = 'block';
+      }
       
       // Connect if both URL and connect are set
       if (shouldConnect && currentURL) {
@@ -369,7 +424,10 @@ WebCC.start(
     properties: {
       URL: '',
       connect: false,
-      connected: false
+      connected: false,
+      fps: 0,
+      kbs: 0,
+      version: false
     }
   },
   // placeholder to include additional Unified dependencies

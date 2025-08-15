@@ -330,7 +330,7 @@ impl RtspClient {
             // Use granular configuration options
             if let Some(ref config) = ffmpeg {
             // Add use_wallclock_as_timestamps as the first option if enabled
-            if config.use_wallclock_as_timestamps.unwrap_or(false) {
+            if config.use_wallclock_as_timestamps.unwrap_or(true) {
                 ffmpeg_args.push("-use_wallclock_as_timestamps".to_string());
                 ffmpeg_args.push("1".to_string());
             }

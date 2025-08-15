@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.2",
+			"version": "1.0.6",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -37,6 +37,21 @@
 						"type": "boolean",
 						"default": false,
 						"description": "Indicates the connection state"
+					},
+					"fps": {
+						"type": "number",
+						"default": 0,
+						"description": "Current frames per second of the video stream"
+					},
+					"kbs": {
+						"type": "number",
+						"default": 0,
+						"description": "Current kilobytes per second of the video stream"
+					},
+					"version": {
+						"type": "boolean",
+						"default": false,
+						"description": "Show build version number"
 					}
 				}
 			}
