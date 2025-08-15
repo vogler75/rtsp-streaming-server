@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use anyhow::Result;
 use std::collections::HashMap;
+use crate::errors::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,7 +20,6 @@ pub struct CameraConfig {
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
     pub ffmpeg: Option<FfmpegConfig>,
-    pub ffmpeg_options: Option<FfmpegOptions>,  // Legacy compatibility
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
@@ -53,17 +52,6 @@ pub struct FfmpegConfig {
     pub log_stderr: Option<String>,       // FFmpeg stderr logging: "file", "console", "both"
 }
 
-// Legacy struct for backward compatibility
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FfmpegOptions {
-    pub fflags: Option<String>,
-    pub flags: Option<String>,
-    pub avioflags: Option<String>,
-    pub fps_mode: Option<String>,
-    pub flush_packets: Option<String>,
-    pub extra_input_args: Option<Vec<String>>,
-    pub extra_output_args: Option<Vec<String>>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -86,7 +74,6 @@ pub struct RtspConfig {
     pub transport: String,
     pub reconnect_interval: u64,
     pub chunk_read_size: Option<usize>,
-    pub ffmpeg_options: Option<FfmpegOptions>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +114,6 @@ impl Default for Config {
                 reconnect_interval: 5,
                 chunk_read_size: None,
                 ffmpeg: None,
-                ffmpeg_options: None,
                 transcoding_override: None,
             },
         );

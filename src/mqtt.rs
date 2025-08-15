@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::errors::{Result, StreamError};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -63,10 +63,10 @@ impl MqttPublisher {
     pub async fn new(config: MqttConfig) -> Result<Self> {
         // Parse the broker URL to extract host and port
         let url = url::Url::parse(&config.broker_url)
-            .map_err(|e| anyhow::anyhow!("Invalid MQTT broker URL '{}': {}", config.broker_url, e))?;
+            .map_err(|e| StreamError::mqtt(format!("Invalid MQTT broker URL '{}': {}", config.broker_url, e)))?;
         
         let host = url.host_str()
-            .ok_or_else(|| anyhow::anyhow!("No host found in MQTT broker URL: {}", config.broker_url))?;
+            .ok_or_else(|| StreamError::mqtt(format!("No host found in MQTT broker URL: {}", config.broker_url)))?;
         
         let port = url.port().unwrap_or(1883);
         

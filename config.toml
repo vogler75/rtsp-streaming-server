@@ -45,7 +45,7 @@ debug_sending = false   # Enable debug output for sending rate
 [cameras.cam1]
 enabled = true  # Optional: Enable/disable this camera (default: true)
 path = "/cam1"
-url = "rtsp://admin007:admin007@192.168.1.171:554/stream2"
+url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
 chunk_read_size = 8192 # 32768
@@ -64,11 +64,11 @@ gop_size = 10  # GOP size (keyframe interval) - frames between keyframes
 #scale = "640:480"  # Video scaling: "640:480", "1280:-1", etc.
 
 # FFmpeg advanced options for low latency
-rtbufsize = 65536  # RTSP buffer size in bytes
-fflags = "+nobuffer+discardcorrupt"
-flags = "low_delay"
+#rtbufsize = 65536  # RTSP buffer size in bytes
+#fflags = "+nobuffer+discardcorrupt"
+#flags = "low_delay"
 #avioflags = "direct"
 #fps_mode = "cfr"  # Use "cfr" for constant framerate, "vfr" for variable, "passthrough" to keep original
 #flush_packets = "1"
-#extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
-#extra_output_args = []
+extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
+extra_output_args = []

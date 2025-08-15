@@ -2,12 +2,12 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{sleep, Duration};
 use tracing::{info, error, debug, warn};
-use anyhow::Result;
 use bytes::Bytes;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
 use crate::config::{RtspConfig, FfmpegConfig};
+use crate::errors::{Result, StreamError};
 use crate::transcoder::FrameTranscoder;
 use crate::mqtt::{MqttHandle, CameraStatus};
 use chrono::Utc;
@@ -30,6 +30,10 @@ pub struct RtspClient {
 
 impl RtspClient {
     pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, capture_framerate, send_framerate, _allow_duplicate_frames, debug_capture, debug_sending, mqtt_handle).await
+    }
+
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
@@ -157,7 +161,7 @@ impl RtspClient {
                 let video_stream_i = session.streams()
                     .iter()
                     .position(|s| s.media() == "video")
-                    .ok_or_else(|| anyhow::anyhow!("❌ No video stream found in RTSP response"))?;
+                    .ok_or_else(|| StreamError::rtsp_stream("No video stream found in RTSP response"))?;
 
                 info!("[{}] ✅ Found video stream at index {} with codec {:?}", self.camera_id, 
                     video_stream_i, session.streams()[video_stream_i].encoding_name());
@@ -175,11 +179,11 @@ impl RtspClient {
             }
             Ok(Err(e)) => {
                 error!("[{}] ❌ Failed to connect to RTSP server: {}", self.camera_id, e);
-                return Err(e.into());
+                return Err(StreamError::rtsp_connection(format!("Connection error: {}", e)));
             }
             Err(_) => {
                 error!("❌ Timeout connecting to RTSP server (10 seconds)");
-                return Err(anyhow::anyhow!("Connection timeout"));
+                return Err(StreamError::rtsp_connection("Connection timeout"));
             }
         }
     }
@@ -257,7 +261,7 @@ impl RtspClient {
                     
                     if retry_count >= max_retries {
                         error!("FFmpeg failed {} times, giving up", max_retries);
-                        return Err(anyhow::anyhow!("FFmpeg process repeatedly failed"));
+                        return Err(StreamError::ffmpeg("FFmpeg process repeatedly failed"));
                     }
                     
                     // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
@@ -299,42 +303,8 @@ impl RtspClient {
         // Build FFmpeg arguments with configurable options
         let mut ffmpeg_args = Vec::new();
         
-        // Use FFmpeg configuration or defaults
-        let use_legacy = ffmpeg.is_none() && self.config.ffmpeg_options.is_some();
-        
-        if use_legacy {
-            // Legacy ffmpeg_options support for backward compatibility
-            if let Some(ref opts) = self.config.ffmpeg_options {
-                // Add fflags if specified and not empty
-                if let Some(ref fflags) = opts.fflags {
-                    if !fflags.is_empty() {
-                        ffmpeg_args.extend_from_slice(&["-fflags", fflags]);
-                    }
-                }
-                
-                // Add flags if specified and not empty
-                if let Some(ref flags) = opts.flags {
-                    if !flags.is_empty() {
-                        ffmpeg_args.extend_from_slice(&["-flags", flags]);
-                    }
-                }
-                
-                // Add avioflags if specified and not empty
-                if let Some(ref avioflags) = opts.avioflags {
-                    if !avioflags.is_empty() {
-                        ffmpeg_args.extend_from_slice(&["-avioflags", avioflags]);
-                    }
-                }
-                
-                // Add extra input arguments if specified
-                if let Some(ref extra_input) = opts.extra_input_args {
-                    for arg in extra_input {
-                        ffmpeg_args.push(arg);
-                    }
-                }
-            }
-        } else if let Some(ref config) = ffmpeg {
-            // New ffmpeg configuration
+        // Use FFmpeg configuration if available
+        if let Some(ref config) = ffmpeg {
             // Add fflags if specified and not empty
             if let Some(ref fflags) = config.fflags {
                 if !fflags.is_empty() {
@@ -435,12 +405,7 @@ impl RtspClient {
             ffmpeg_args.extend_from_slice(&["-vf", &filter_chain]);
             
             // Use custom fps_mode only if explicitly configured
-            let fps_mode = if use_legacy {
-                self.config.ffmpeg_options.as_ref()
-                    .and_then(|opts| opts.fps_mode.as_ref())
-            } else {
-                ffmpeg.and_then(|c| c.fps_mode.as_ref())
-            };
+            let fps_mode = ffmpeg.and_then(|c| c.fps_mode.as_ref());
             
             if let Some(ref mode) = fps_mode {
                 if !mode.is_empty() {
@@ -452,12 +417,7 @@ impl RtspClient {
             info!("FFmpeg: Using video filters: {}", filter_chain);
         } else {
             // Add fps_mode for natural framerate if specified and not empty
-            let fps_mode = if use_legacy {
-                self.config.ffmpeg_options.as_ref()
-                    .and_then(|opts| opts.fps_mode.as_ref())
-            } else {
-                ffmpeg.and_then(|c| c.fps_mode.as_ref())
-            };
+            let fps_mode = ffmpeg.and_then(|c| c.fps_mode.as_ref());
             
             if let Some(ref mode) = fps_mode {
                 if !mode.is_empty() {
@@ -468,12 +428,7 @@ impl RtspClient {
         }
         
         // Add flush_packets option only if explicitly configured
-        let flush_packets = if use_legacy {
-            self.config.ffmpeg_options.as_ref()
-                .and_then(|opts| opts.flush_packets.as_ref())
-        } else {
-            ffmpeg.and_then(|c| c.flush_packets.as_ref())
-        };
+        let flush_packets = ffmpeg.and_then(|c| c.flush_packets.as_ref());
         
         if let Some(ref flush) = flush_packets {
             if !flush.is_empty() {
@@ -487,12 +442,7 @@ impl RtspClient {
         ]);
         
         // Add extra output arguments if specified
-        let extra_output = if use_legacy {
-            self.config.ffmpeg_options.as_ref()
-                .and_then(|opts| opts.extra_output_args.as_ref())
-        } else {
-            ffmpeg.and_then(|c| c.extra_output_args.as_ref())
-        };
+        let extra_output = ffmpeg.and_then(|c| c.extra_output_args.as_ref());
         
         if let Some(extra_output) = extra_output {
             for arg in extra_output {
@@ -528,7 +478,7 @@ impl RtspClient {
         if let Some(log_mode) = log_mode {
             if log_mode == "file" || log_mode == "console" || log_mode == "both" {
                 let stderr = ffmpeg_cmd.stderr.take()
-                    .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stderr"))?;
+                    .ok_or_else(|| StreamError::ffmpeg("Failed to get FFmpeg stderr"))?;
                 
                 let log_filename = format!("{}.log", self.camera_id);
                 let camera_id = self.camera_id.clone();
@@ -546,7 +496,7 @@ impl RtspClient {
         }
         
         let stdout = ffmpeg_cmd.stdout.take()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get FFmpeg stdout"))?;
+            .ok_or_else(|| StreamError::ffmpeg("Failed to get FFmpeg stdout"))?;
             
         let mut reader = tokio::io::BufReader::new(stdout);
         let mut frame_count = 0u64;
@@ -570,7 +520,7 @@ impl RtspClient {
                             error!("[{}] Failed to wait for FFmpeg process: {}", self.camera_id, e);
                         }
                     }
-                    return Err(anyhow::anyhow!("FFmpeg process died"));
+                    return Err(StreamError::ffmpeg("FFmpeg process died"));
                 }
                 
                 // Read frame data from stdout (MJPEG or other format)
@@ -674,7 +624,7 @@ impl RtspClient {
         // Skip to the start of the next JPEG frame
         loop {
             if reader.read_exact(&mut byte).await.is_err() {
-                return Err(anyhow::anyhow!("EOF while searching for JPEG start"));
+                return Err(StreamError::ffmpeg("EOF while searching for JPEG start"));
             }
             
             if prev_byte == JPEG_START[0] && byte[0] == JPEG_START[1] {
@@ -689,7 +639,7 @@ impl RtspClient {
         prev_byte = 0;
         loop {
             if reader.read_exact(&mut byte).await.is_err() {
-                return Err(anyhow::anyhow!("EOF while reading JPEG data"));
+                return Err(StreamError::ffmpeg("EOF while reading JPEG data"));
             }
             
             buffer.push(byte[0]);
@@ -702,7 +652,7 @@ impl RtspClient {
             
             // Sanity check: if frame is too large, something is wrong
             if buffer.len() > 10 * 1024 * 1024 { // 10MB max
-                return Err(anyhow::anyhow!("JPEG frame too large, likely corrupted"));
+                return Err(StreamError::ffmpeg("JPEG frame too large, likely corrupted"));
             }
         }
         

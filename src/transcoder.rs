@@ -1,6 +1,6 @@
 use bytes::Bytes;
-use anyhow::Result;
 use tracing::info;
+use crate::errors::Result;
 
 pub struct FrameTranscoder {
 }

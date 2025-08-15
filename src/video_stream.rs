@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{info, error};
-use anyhow::Result;
 use bytes::Bytes;
 
-use crate::config::{CameraConfig, TranscodingConfig};
+use crate::config::{CameraConfig, TranscodingConfig, RtspConfig};
+use crate::errors::Result;
 use crate::rtsp_client::RtspClient;
 use crate::mqtt::MqttHandle;
 
@@ -21,8 +21,17 @@ impl VideoStream {
         default_transcoding: &TranscodingConfig,
         mqtt_handle: Option<MqttHandle>,
     ) -> Result<Self> {
+        Self::new_from_builder(camera_id, camera_config, default_transcoding.clone(), mqtt_handle).await
+    }
+
+    pub async fn new_from_builder(
+        camera_id: String,
+        camera_config: CameraConfig,
+        default_transcoding: TranscodingConfig,
+        mqtt_handle: Option<MqttHandle>,
+    ) -> Result<Self> {
         // Use camera-specific transcoding config if available, otherwise use default
-        let transcoding = camera_config.transcoding_override.as_ref().unwrap_or(default_transcoding);
+        let transcoding = camera_config.transcoding_override.as_ref().unwrap_or(&default_transcoding);
         
         let channel_buffer_size = transcoding.channel_buffer_size.unwrap_or(1);
         info!("Creating video stream for camera '{}' on path '{}' with buffer size: {} frames", 
@@ -32,12 +41,11 @@ impl VideoStream {
         let frame_tx = Arc::new(frame_tx);
         
         // Create RtspConfig from camera config
-        let rtsp_config = crate::config::RtspConfig {
+        let rtsp_config = RtspConfig {
             url: camera_config.url.clone(),
             transport: camera_config.transport.clone(),
             reconnect_interval: camera_config.reconnect_interval,
             chunk_read_size: camera_config.chunk_read_size,
-            ffmpeg_options: camera_config.ffmpeg_options.clone(),
         };
         
         let rtsp_client = RtspClient::new(

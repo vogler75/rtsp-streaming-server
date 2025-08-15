@@ -1,13 +1,14 @@
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{info, warn, error};
-use anyhow::Result;
 use std::fs::File;
 use std::io::BufReader;
 use axum::response::IntoResponse;
 use axum::extract::State;
 
 mod config;
+mod errors;
+mod builders;
 mod rtsp_client;
 mod websocket;
 mod transcoder;
@@ -15,6 +16,7 @@ mod video_stream;
 mod mqtt;
 
 use config::Config;
+use errors::{Result, StreamError};
 use video_stream::VideoStream;
 use websocket::websocket_handler;
 use std::collections::HashMap;
@@ -108,7 +110,7 @@ async fn main() -> Result<()> {
     
     if camera_streams.is_empty() {
         error!("No cameras configured or all failed to initialize");
-        return Err(anyhow::anyhow!("No cameras available"));
+        return Err(StreamError::config("No cameras available"));
     }
 
     let cors_layer = if let Some(origin) = &config.server.cors_allow_origin {
@@ -231,39 +233,39 @@ async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
 async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::TlsConfig) -> Result<()> {
     // Load TLS certificates
     let cert_file = File::open(&tls_cfg.cert_path)
-        .map_err(|e| anyhow::anyhow!("Failed to open certificate file '{}': {}", tls_cfg.cert_path, e))?;
+        .map_err(|e| StreamError::server(format!("Failed to open certificate file '{}': {}", tls_cfg.cert_path, e)))?;
     let key_file = File::open(&tls_cfg.key_path)
-        .map_err(|e| anyhow::anyhow!("Failed to open private key file '{}': {}", tls_cfg.key_path, e))?;
+        .map_err(|e| StreamError::server(format!("Failed to open private key file '{}': {}", tls_cfg.key_path, e)))?;
 
     let mut cert_reader = BufReader::new(cert_file);
     let mut key_reader = BufReader::new(key_file);
 
     // Parse certificate and key
     let certs = rustls_pemfile::certs(&mut cert_reader)
-        .map_err(|e| anyhow::anyhow!("Failed to parse certificate: {}", e))?
+        .map_err(|e| StreamError::server(format!("Failed to parse certificate: {}", e)))?
         .into_iter()
         .map(rustls::Certificate)
         .collect();
     
     let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
-        .map_err(|e| anyhow::anyhow!("Failed to parse private key: {}", e))?;
+        .map_err(|e| StreamError::server(format!("Failed to parse private key: {}", e)))?;
     
     if keys.is_empty() {
         // Try RSA private keys if PKCS8 fails
         let mut key_reader = BufReader::new(File::open(&tls_cfg.key_path)?);
         keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
-            .map_err(|e| anyhow::anyhow!("Failed to parse RSA private key: {}", e))?;
+            .map_err(|e| StreamError::server(format!("Failed to parse RSA private key: {}", e)))?;
     }
     
     let private_key = keys.into_iter().next()
-        .ok_or_else(|| anyhow::anyhow!("No private key found in key file"))?;
+        .ok_or_else(|| StreamError::server("No private key found in key file"))?;
 
     // Create TLS configuration
     let rustls_config = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
         .with_single_cert(certs, rustls::PrivateKey(private_key))
-        .map_err(|e| anyhow::anyhow!("Failed to create TLS config: {}", e))?;
+        .map_err(|e| StreamError::server(format!("Failed to create TLS config: {}", e)))?;
 
     info!("HTTPS server listening on https://{}", addr);
     info!("Certificate: {}", tls_cfg.cert_path);
@@ -274,7 +276,7 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
     axum_server::bind_rustls(addr.parse()?, tls_config)
         .serve(app.into_make_service())
         .await
-        .map_err(|e| anyhow::anyhow!("HTTPS server error: {}", e))?;
+        .map_err(|e| StreamError::server(format!("HTTPS server error: {}", e)))?;
 
     Ok(())
 }
