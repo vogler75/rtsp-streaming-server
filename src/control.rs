@@ -12,32 +12,19 @@ use crate::recording::RecordingManager;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd")]
 pub enum ControlCommand {
-    #[serde(rename = "startrecording")]
-    StartRecording {
-        reason: Option<String>,
-    },
-    #[serde(rename = "stoprecording")]
-    StopRecording,
-    #[serde(rename = "startreplay")]
+    #[serde(rename = "start")]
     StartReplay {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     },
-    #[serde(rename = "stopreplay")]
-    StopReplay,
-    #[serde(rename = "replayspeed")]
+    #[serde(rename = "stop")]
+    Stop,
+    #[serde(rename = "speed")]
     ReplaySpeed {
         speed: f32,
     },
-    #[serde(rename = "listrecordings")]
-    ListRecordings {
-        from: Option<DateTime<Utc>>,
-        to: Option<DateTime<Utc>>,
-    },
-    #[serde(rename = "startlivestream")]
+    #[serde(rename = "live")]
     StartLiveStream,
-    #[serde(rename = "stoplivestream")]
-    StopLiveStream,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,7 +202,7 @@ impl ControlHandler {
     async fn process_command(
         command: ControlCommand,
         camera_id: &str,
-        client_id: &str,
+        _client_id: &str,
         recording_manager: &RecordingManager,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
         replay_state: &mut ReplayState,
@@ -223,81 +210,21 @@ impl ControlHandler {
         sender: Arc<tokio::sync::Mutex<futures_util::stream::SplitSink<WebSocket, Message>>>,
     ) -> CommandResponse {
         match command {
-            ControlCommand::StartRecording { reason } => {
-                Self::handle_start_recording(camera_id, client_id, reason, recording_manager, frame_sender).await
-            }
-            ControlCommand::StopRecording => {
-                Self::handle_stop_recording(camera_id, recording_manager).await
-            }
             ControlCommand::StartReplay { from, to } => {
                 Self::handle_start_replay(camera_id, from, to, recording_manager, replay_state, live_stream_state, sender).await
             }
-            ControlCommand::StopReplay => {
-                Self::handle_stop_replay(replay_state).await
+            ControlCommand::Stop => {
+                Self::handle_stop(replay_state, live_stream_state).await
             }
             ControlCommand::ReplaySpeed { speed } => {
                 Self::handle_replay_speed(speed, replay_state).await
             }
-            ControlCommand::ListRecordings { from, to } => {
-                Self::handle_list_recordings(camera_id, from, to, recording_manager).await
-            }
             ControlCommand::StartLiveStream => {
                 Self::handle_start_live_stream(frame_sender, replay_state, live_stream_state, sender).await
             }
-            ControlCommand::StopLiveStream => {
-                Self::handle_stop_live_stream(live_stream_state).await
-            }
         }
     }
 
-    async fn handle_start_recording(
-        camera_id: &str,
-        client_id: &str,
-        reason: Option<String>,
-        recording_manager: &RecordingManager,
-        frame_sender: Arc<broadcast::Sender<Bytes>>,
-    ) -> CommandResponse {
-        // Check if already recording
-        if recording_manager.is_recording(camera_id).await {
-            return CommandResponse::error(409, "Recording already in progress for this camera");
-        }
-
-        match recording_manager.start_recording(
-            camera_id,
-            client_id,
-            reason.as_deref(),
-            None, // No duration support
-            frame_sender,
-        ).await {
-            Ok(session_id) => {
-                let message = format!("Recording started (session {})", session_id);
-                CommandResponse::success(&message)
-            }
-            Err(e) => {
-                error!("Failed to start recording: {}", e);
-                CommandResponse::error(500, "Failed to start recording")
-            }
-        }
-    }
-
-    async fn handle_stop_recording(
-        camera_id: &str,
-        recording_manager: &RecordingManager,
-    ) -> CommandResponse {
-        match recording_manager.stop_recording(camera_id).await {
-            Ok(was_recording) => {
-                if was_recording {
-                    CommandResponse::success("Recording stopped")
-                } else {
-                    CommandResponse::error(404, "No active recording found")
-                }
-            }
-            Err(e) => {
-                error!("Failed to stop recording: {}", e);
-                CommandResponse::error(500, "Failed to stop recording")
-            }
-        }
-    }
 
     async fn handle_start_replay(
         camera_id: &str,
@@ -308,17 +235,9 @@ impl ControlHandler {
         live_stream_state: &mut LiveStreamState,
         sender: Arc<tokio::sync::Mutex<futures_util::stream::SplitSink<WebSocket, Message>>>,
     ) -> CommandResponse {
-        // Stop any existing replay
-        if replay_state.active {
-            if let Some(stop_sender) = &replay_state.stop_sender {
-                let _ = stop_sender.send(());
-            }
-            replay_state.active = false;
-        }
-
-        // Stop any active live stream
-        if live_stream_state.active {
-            Self::handle_stop_live_stream(live_stream_state).await;
+        // Stop any existing replay or live stream
+        if replay_state.active || live_stream_state.active {
+            Self::handle_stop(replay_state, live_stream_state).await;
         }
 
         // Check if frames exist first
@@ -409,7 +328,13 @@ impl ControlHandler {
         }
     }
 
-    async fn handle_stop_replay(replay_state: &mut ReplayState) -> CommandResponse {
+    async fn handle_stop(
+        replay_state: &mut ReplayState, 
+        live_stream_state: &mut LiveStreamState
+    ) -> CommandResponse {
+        let mut stopped_operations = Vec::new();
+        
+        // Check if replay is active and stop it
         if replay_state.active {
             if let Some(stop_sender) = &replay_state.stop_sender {
                 let _ = stop_sender.send(());
@@ -417,9 +342,24 @@ impl ControlHandler {
             replay_state.active = false;
             replay_state.speed_sender = None;
             replay_state.stop_sender = None;
-            CommandResponse::success("Replay stopped")
-        } else {
-            CommandResponse::error(404, "No active replay to stop")
+            stopped_operations.push("replay");
+        }
+        
+        // Check if live stream is active and stop it
+        if live_stream_state.active {
+            if let Some(stop_sender) = &live_stream_state.stop_sender {
+                let _ = stop_sender.send(());
+            }
+            live_stream_state.active = false;
+            live_stream_state.stop_sender = None;
+            stopped_operations.push("live stream");
+        }
+        
+        // Return appropriate response based on what was stopped
+        match stopped_operations.len() {
+            0 => CommandResponse::error(404, "No active replay or live stream to stop"),
+            1 => CommandResponse::success(&format!("{} stopped", stopped_operations[0].to_string())),
+            _ => CommandResponse::success(&format!("{} stopped", stopped_operations.join(" and "))),
         }
     }
 
@@ -437,41 +377,6 @@ impl ControlHandler {
         }
     }
 
-    async fn handle_list_recordings(
-        camera_id: &str,
-        from: Option<DateTime<Utc>>,
-        to: Option<DateTime<Utc>>,
-        recording_manager: &RecordingManager,
-    ) -> CommandResponse {
-        match recording_manager.list_recordings(Some(camera_id), from, to).await {
-            Ok(recordings) => {
-                let recordings_data: Vec<serde_json::Value> = recordings
-                    .into_iter()
-                    .map(|r| serde_json::json!({
-                        "id": r.id,
-                        "camera_id": r.camera_id,
-                        "start_time": r.start_time,
-                        "end_time": r.end_time,
-                        "reason": r.reason,
-                        "status": String::from(r.status),
-                        "duration_seconds": r.end_time
-                            .map(|end| end.signed_duration_since(r.start_time).num_seconds())
-                    }))
-                    .collect();
-
-                let data = serde_json::json!({
-                    "recordings": recordings_data,
-                    "count": recordings_data.len()
-                });
-
-                CommandResponse::success_with_data("Recordings retrieved", data)
-            }
-            Err(e) => {
-                error!("Failed to list recordings: {}", e);
-                CommandResponse::error(500, "Failed to list recordings")
-            }
-        }
-    }
 
     async fn handle_start_live_stream(
         frame_sender: Arc<broadcast::Sender<Bytes>>,
@@ -481,7 +386,7 @@ impl ControlHandler {
     ) -> CommandResponse {
         // Stop any active replay first
         if replay_state.active {
-            Self::handle_stop_replay(replay_state).await;
+            Self::handle_stop(replay_state, live_stream_state).await;
         }
 
         // Check if already streaming
@@ -552,24 +457,6 @@ impl ControlHandler {
         CommandResponse::success("Live stream started")
     }
 
-    async fn handle_stop_live_stream(
-        live_stream_state: &mut LiveStreamState,
-    ) -> CommandResponse {
-        if !live_stream_state.active {
-            return CommandResponse::error(400, "No active live stream");
-        }
-
-        // Send stop signal
-        if let Some(stop_sender) = &live_stream_state.stop_sender {
-            let _ = stop_sender.send(());
-        }
-
-        // Reset state
-        live_stream_state.active = false;
-        live_stream_state.stop_sender = None;
-
-        CommandResponse::success("Live stream stopped")
-    }
 }
 
 pub async fn handle_control_websocket(

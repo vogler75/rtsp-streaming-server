@@ -404,7 +404,7 @@ This makes it easy to identify issues with specific cameras.
 
 ## Control API
 
-The server provides both WebSocket and HTTP REST APIs for controlling camera recordings and playback.
+The server provides both WebSocket and HTTP REST APIs for controlling cameras. Recording management uses REST API, while replay and live streaming use WebSocket.
 
 ### WebSocket Control API
 
@@ -424,52 +424,28 @@ For cameras configured with tokens, include the token as a query parameter or se
 
 #### WebSocket Commands
 
-Send JSON commands to control recording, playback, and live streaming:
-
-##### Start Recording
-```json
-{
-  "cmd": "startrecording",
-  "reason": "Security event detected"
-}
-```
-
-##### Stop Recording
-```json
-{
-  "cmd": "stoprecording"
-}
-```
-
-##### List Recordings
-```json
-{
-  "cmd": "listrecordings",
-  "from": "2025-08-15T00:00:00.000Z",
-  "to": "2025-08-15T23:59:59.999Z"
-}
-```
+Send JSON commands to control playback and live streaming:
 
 ##### Start Replay
 ```json
 {
-  "cmd": "startreplay",
+  "cmd": "start",
   "from": "2025-08-15T10:00:00.000Z",
   "to": "2025-08-15T11:00:00.000Z"
 }
 ```
 
-##### Stop Replay
+##### Stop (Replay or Live Stream)
 ```json
 {
-  "cmd": "stopreplay"
+  "cmd": "stop"
 }
 ```
 
 ##### Adjust Replay Speed
 ```json
 {
-  "cmd": "replayspeed",
+  "cmd": "speed",
   "speed": 2.0
 }
 ```
@@ -477,14 +453,7 @@ Send JSON commands to control recording, playback, and live streaming:
 ##### Start Live Stream
 ```json
 {
-  "cmd": "startlivestream"
-}
-```
-
-##### Stop Live Stream
-```json
-{
-  "cmd": "stoplivestream"
+  "cmd": "live"
 }
 ```
 

@@ -48,6 +48,12 @@
             flex-direction: column;
         }
         
+        .right-column .panel {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+        
         .panel {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
@@ -91,7 +97,8 @@
         }
         
         .recordings-list {
-            height: 500px;
+            flex: 1;
+            min-height: 400px;
             overflow-y: auto;
             background: rgba(0, 0, 0, 0.2);
             border-radius: 5px;
@@ -362,9 +369,10 @@
                     <div class="button-group">
                         <button id="refreshRecordings">🔄 Refresh List</button>
                         <button id="startReplay" class="success">▶️ Start Replay</button>
-                        <button id="stopReplay" class="danger" disabled>⏹ Stop Replay</button>
+                        <button id="startLiveStream" class="success">📹 Start Live Stream</button>
+                        <button id="stopReplay" class="danger" disabled>⏹ Stop</button>
                     </div>
-                    <div class="info-text" style="margin-top: 5px;">Replay uses WebSocket 🔌</div>
+                    <div class="info-text" style="margin-top: 5px;">Replay and Live Stream use WebSocket 🔌</div>
                     
                     <!-- Recording Controls -->
                     <h3 style="margin-top: 25px; margin-bottom: 10px;">Recording Controls</h3>
@@ -379,13 +387,6 @@
                         <button id="stopRecording" class="danger" disabled>⏹ Stop Recording</button>
                     </div>
                     
-                    <!-- Live Stream Controls -->
-                    <h3 style="margin-top: 25px; margin-bottom: 10px;">Live Stream Controls</h3>
-                    <div class="info-text" style="margin-bottom: 10px;">🔌 Uses WebSocket</div>
-                    <div class="button-group">
-                        <button id="startLiveStream" class="success">📹 Start Live Stream</button>
-                        <button id="stopLiveStream" class="danger" disabled>⏹ Stop Live Stream</button>
-                    </div>
                 </div>
             </div>
             
@@ -436,7 +437,6 @@
                 document.getElementById('startRecording').addEventListener('click', () => this.startRecording());
                 document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
                 document.getElementById('startLiveStream').addEventListener('click', () => this.startLiveStream());
-                document.getElementById('stopLiveStream').addEventListener('click', () => this.stopLiveStream());
                 document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
                 document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket());
                 document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket());
@@ -572,21 +572,34 @@
                 // Handle specific response types (excluding recording commands - now handled by REST API)
                 if (response.text && response.text.includes('Replay started')) {
                     this.isReplaying = true;
-                    document.getElementById('stopReplay').disabled = false;
+                    this.updateStopButton();
                     document.getElementById('startReplay').disabled = true;
-                } else if (response.text && response.text.includes('Replay stopped')) {
+                } else if (response.text && (response.text.includes('replay stopped') || response.text.includes('Replay stopped'))) {
                     this.isReplaying = false;
-                    document.getElementById('stopReplay').disabled = true;
+                    this.updateStopButton();
                     document.getElementById('startReplay').disabled = false;
                 } else if (response.text && response.text.includes('Live stream started')) {
                     this.isLiveStreaming = true;
+                    this.updateStopButton();
                     document.getElementById('startLiveStream').disabled = true;
-                    document.getElementById('stopLiveStream').disabled = false;
-                } else if (response.text && response.text.includes('Live stream stopped')) {
+                } else if (response.text && (response.text.includes('live stream stopped') || response.text.includes('Live stream stopped'))) {
                     this.isLiveStreaming = false;
+                    this.updateStopButton();
                     document.getElementById('startLiveStream').disabled = false;
-                    document.getElementById('stopLiveStream').disabled = true;
+                } else if (response.text && response.text.includes('replay and live stream stopped')) {
+                    // Both were stopped
+                    this.isReplaying = false;
+                    this.isLiveStreaming = false;
+                    this.updateStopButton();
+                    document.getElementById('startReplay').disabled = false;
+                    document.getElementById('startLiveStream').disabled = false;
                 }
+            }
+            
+            updateStopButton() {
+                // Enable stop button if either replay or live stream is active
+                const stopButton = document.getElementById('stopReplay');
+                stopButton.disabled = !(this.isReplaying || this.isLiveStreaming);
             }
             
             displayRecordings(recordings) {
@@ -689,6 +702,9 @@
                 } catch (error) {
                     this.logJson({ error: 'Network error fetching recordings', details: error.message });
                 }
+                
+                // Also check active recording status when refreshing
+                this.checkActiveRecording();
             }
             
             startReplay() {
@@ -701,7 +717,7 @@
                 }
                 
                 const command = {
-                    cmd: 'startreplay',
+                    cmd: 'start',
                     from: new Date(startTime).toISOString(),
                     to: new Date(endTime).toISOString()
                 };
@@ -710,7 +726,7 @@
             }
             
             stopReplay() {
-                this.sendCommand({ cmd: 'stopreplay' });
+                this.sendCommand({ cmd: 'stop' });
             }
             
             async startRecording() {
@@ -840,12 +856,9 @@
             }
             
             startLiveStream() {
-                this.sendCommand({ cmd: 'startlivestream' });
+                this.sendCommand({ cmd: 'live' });
             }
             
-            stopLiveStream() {
-                this.sendCommand({ cmd: 'stoplivestream' });
-            }
             
             clearOutput() {
                 document.getElementById('jsonOutput').textContent = 'Output cleared...';
@@ -857,7 +870,7 @@
                 
                 if (this.isReplaying) {
                     this.sendCommand({
-                        cmd: 'replayspeed',
+                        cmd: 'speed',
                         speed: this.currentSpeed
                     });
                 }

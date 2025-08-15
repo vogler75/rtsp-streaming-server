@@ -238,11 +238,11 @@ async fn main() -> Result<()> {
             )
         ));
 
-        // Live endpoint: /<camera_path>/live  
+        // Live endpoint: /<camera_path>/live (WebSocket only)
         let live_path = format!("{}/live", path);
         let live_info_clone = stream_info.clone();
         app = app.route(&live_path, axum::routing::get(
-            move |ws, query, addr| camera_handler(
+            move |ws, query, addr| camera_live_handler(
                 ws, query, addr, 
                 live_info_clone.frame_sender.clone(), 
                 live_info_clone.camera_id.clone(), 
@@ -359,6 +359,11 @@ async fn serve_control_page() -> axum::response::Html<String> {
     axum::response::Html(html)
 }
 
+async fn serve_stream_page() -> axum::response::Html<String> {
+    let html = include_str!("../static/stream.html").to_string();
+    axum::response::Html(html)
+}
+
 async fn serve_index_with_mode(is_full_mode: bool) -> axum::response::Html<String> {
     let mut html = include_str!("../static/index.html").to_string();
     
@@ -430,6 +435,49 @@ async fn camera_handler(
     }
 }
 
+async fn camera_live_handler(
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+    camera_id: String,
+    mqtt_handle: Option<MqttHandle>,
+    camera_config: config::CameraConfig,
+) -> axum::response::Response {
+    match ws {
+        Some(ws_upgrade) => {
+            // Check token authentication before upgrading WebSocket
+            if let Some(expected_token) = &camera_config.token {
+                // Get token from query parameters
+                if let Some(provided_token) = query.get("token") {
+                    if provided_token == expected_token {
+                        info!("Token authentication successful for camera {}", camera_id);
+                    } else {
+                        warn!("Invalid token provided for camera {}", camera_id);
+                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                    }
+                } else {
+                    warn!("Missing token for camera {} that requires authentication", camera_id);
+                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing token").into_response();
+                }
+            }
+            
+            if let Some(connect_info) = addr {
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
+            } else {
+                // Fallback with unknown IP
+                let fallback_addr = "127.0.0.1:0".parse().unwrap();
+                let connect_info = axum::extract::ConnectInfo(fallback_addr);
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
+            }
+        },
+        None => {
+            // No WebSocket upgrade - return error for /live endpoint
+            (axum::http::StatusCode::BAD_REQUEST, "Live endpoint only accepts WebSocket connections").into_response()
+        }
+    }
+}
+
 async fn camera_stream_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -467,9 +515,8 @@ async fn camera_stream_handler(
             }
         },
         None => {
-            // Check if 'full' parameter is present
-            let is_full_mode = query.contains_key("full");
-            serve_index_with_mode(is_full_mode).await.into_response()
+            // Serve the dedicated video stream page
+            serve_stream_page().await.into_response()
         }
     }
 }

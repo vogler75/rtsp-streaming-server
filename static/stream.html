@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        
+        #videoContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+        
+        #videoCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+        
+        #statusMessage {
+            position: absolute;
+            color: #fff;
+            text-align: center;
+            padding: 20px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 10px;
+            font-size: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .error {
+            color: #ff6b6b;
+        }
+        
+        .connecting {
+            color: #ffd93d;
+        }
+        
+        .connected {
+            color: #6bcf7f;
+        }
+    </style>
+</head>
+<body>
+    <div id="videoContainer">
+        <canvas id="videoCanvas"></canvas>
+        <div id="statusMessage" class="connecting">Connecting to video stream...</div>
+    </div>
+    
+    <script>
+        class VideoStream {
+            constructor() {
+                this.ws = null;
+                this.isConnected = false;
+                this.canvas = document.getElementById('videoCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.statusMessage = document.getElementById('statusMessage');
+                this.connectWebSocket();
+            }
+            
+            connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                
+                // Get token from URL parameters
+                const urlParams = new URLSearchParams(window.location.search);
+                const token = urlParams.get('token');
+                
+                // Build WebSocket URL
+                let wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
+                if (token) {
+                    wsUrl += `?token=${encodeURIComponent(token)}`;
+                }
+                
+                this.updateStatus('Connecting to video stream...', 'connecting');
+                
+                this.ws = new WebSocket(wsUrl);
+                this.ws.binaryType = 'arraybuffer';
+                
+                this.ws.onopen = () => {
+                    this.isConnected = true;
+                    this.updateStatus('Connected - Waiting for video...', 'connected');
+                };
+                
+                this.ws.onmessage = (event) => {
+                    if (event.data instanceof ArrayBuffer) {
+                        this.displayFrame(new Uint8Array(event.data));
+                    }
+                };
+                
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.updateStatus('Connection error', 'error');
+                };
+                
+                this.ws.onclose = (event) => {
+                    this.isConnected = false;
+                    
+                    if (event.code === 1006) {
+                        this.updateStatus('Connection lost - Reconnecting...', 'connecting');
+                    } else if (event.code === 1002 || event.code === 1003) {
+                        this.updateStatus('Authentication failed - Invalid token', 'error');
+                        return; // Don't attempt to reconnect on auth failure
+                    } else {
+                        this.updateStatus('Disconnected - Reconnecting...', 'connecting');
+                    }
+                    
+                    // Attempt to reconnect after 3 seconds
+                    setTimeout(() => this.connectWebSocket(), 3000);
+                };
+            }
+            
+            displayFrame(frameData) {
+                const blob = new Blob([frameData], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                
+                img.onload = () => {
+                    // Hide status message when displaying video
+                    this.statusMessage.style.display = 'none';
+                    
+                    // Resize canvas to match image aspect ratio
+                    const container = document.getElementById('videoContainer');
+                    const maxWidth = container.clientWidth;
+                    const maxHeight = container.clientHeight;
+                    
+                    const scale = Math.min(maxWidth / img.width, maxHeight / img.height);
+                    this.canvas.width = img.width * scale;
+                    this.canvas.height = img.height * scale;
+                    
+                    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+                    URL.revokeObjectURL(url);
+                };
+                
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    this.updateStatus('Error displaying video frame', 'error');
+                };
+                
+                img.src = url;
+            }
+            
+            updateStatus(text, className) {
+                this.statusMessage.textContent = text;
+                this.statusMessage.className = className;
+                this.statusMessage.style.display = 'block';
+            }
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            new VideoStream();
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            // Canvas will auto-resize on next frame
+        });
+    </script>
+</body>
+</html>
