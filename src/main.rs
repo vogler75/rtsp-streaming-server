@@ -263,12 +263,12 @@ async fn main() -> Result<()> {
             )
         ));
 
-        // REST API endpoints: /<camera_path>/api/*
+        // REST API endpoints: /<camera_path>/control/*
         if stream_info.recording_manager.is_some() {
             let api_info = stream_info.clone();
             
             // Start recording
-            let start_recording_path = format!("{}/api/recording/start", path);
+            let start_recording_path = format!("{}/control/recording/start", path);
             let start_info = api_info.clone();
             app = app.route(&start_recording_path, axum::routing::post(
                 move |headers, json| api_start_recording(
@@ -282,7 +282,7 @@ async fn main() -> Result<()> {
             ));
 
             // Stop recording
-            let stop_recording_path = format!("{}/api/recording/stop", path);
+            let stop_recording_path = format!("{}/control/recording/stop", path);
             let stop_info = api_info.clone();
             app = app.route(&stop_recording_path, axum::routing::post(
                 move |headers| api_stop_recording(
@@ -294,7 +294,7 @@ async fn main() -> Result<()> {
             ));
 
             // List recordings
-            let list_recordings_path = format!("{}/api/recordings", path);
+            let list_recordings_path = format!("{}/control/recordings", path);
             let list_info = api_info.clone();
             app = app.route(&list_recordings_path, axum::routing::get(
                 move |headers, query| api_list_recordings(
@@ -307,7 +307,7 @@ async fn main() -> Result<()> {
             ));
 
             // Get recorded frames
-            let frames_path = format!("{}/api/recordings/:session_id/frames", path);
+            let frames_path = format!("{}/control/recordings/:session_id/frames", path);
             let frames_info = api_info.clone();
             app = app.route(&frames_path, axum::routing::get(
                 move |headers, path, query| api_get_recorded_frames(
@@ -320,7 +320,7 @@ async fn main() -> Result<()> {
             ));
 
             // Get active recording
-            let active_recording_path = format!("{}/api/recording/active", path);
+            let active_recording_path = format!("{}/control/recording/active", path);
             let active_info = api_info.clone();
             app = app.route(&active_recording_path, axum::routing::get(
                 move |headers| api_get_active_recording(

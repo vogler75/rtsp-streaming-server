@@ -531,7 +531,7 @@ Authorization: Bearer your-token-here
 
 ##### Start Recording
 ```http
-POST /<camera_path>/api/recording/start
+POST /<camera_path>/control/recording/start
 Content-Type: application/json
 
 {
@@ -541,22 +541,22 @@ Content-Type: application/json
 
 ##### Stop Recording
 ```http
-POST /<camera_path>/api/recording/stop
+POST /<camera_path>/control/recording/stop
 ```
 
 ##### List Recordings
 ```http
-GET /<camera_path>/api/recordings?from=2025-08-15T00:00:00.000Z&to=2025-08-15T23:59:59.999Z
+GET /<camera_path>/control/recordings?from=2025-08-15T00:00:00.000Z&to=2025-08-15T23:59:59.999Z
 ```
 
 ##### Get Recorded Frames
 ```http
-GET /<camera_path>/api/recordings/<session_id>/frames?from=2025-08-15T10:00:00.000Z&to=2025-08-15T11:00:00.000Z
+GET /<camera_path>/control/recordings/<session_id>/frames?from=2025-08-15T10:00:00.000Z&to=2025-08-15T11:00:00.000Z
 ```
 
 ##### Get Active Recording
 ```http
-GET /<camera_path>/api/recording/active
+GET /<camera_path>/control/recording/active
 ```
 
 #### Response Format
