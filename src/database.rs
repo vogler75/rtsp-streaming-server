@@ -122,10 +122,7 @@ impl DatabaseProvider for SqliteDatabase {
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP,
                 reason TEXT,
-                requested_duration INTEGER,
-                client_id TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                status TEXT NOT NULL DEFAULT 'active'
             )
             "#,
         )
@@ -135,12 +132,9 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS recorded_frames (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER NOT NULL,
                 timestamp TIMESTAMP NOT NULL,
-                frame_number INTEGER NOT NULL,
                 frame_data BLOB NOT NULL,
-                frame_size INTEGER NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES recording_sessions(id)
             )
             "#,
@@ -218,25 +212,22 @@ impl DatabaseProvider for SqliteDatabase {
         &self,
         session_id: i64,
         timestamp: DateTime<Utc>,
-        frame_number: i64,
+        _frame_number: i64,
         frame_data: &[u8],
     ) -> Result<i64> {
-        let frame_size = frame_data.len() as i64;
         let result = sqlx::query(
             r#"
-            INSERT INTO recorded_frames (session_id, timestamp, frame_number, frame_data, frame_size)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO recorded_frames (session_id, timestamp, frame_data)
+            VALUES (?, ?, ?)
             "#,
         )
         .bind(session_id)
         .bind(timestamp)
-        .bind(frame_number)
         .bind(frame_data)
-        .bind(frame_size)
         .execute(&self.pool)
         .await?;
 
-        Ok(result.last_insert_rowid())
+        Ok(result.rows_affected() as i64)
     }
 
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>> {

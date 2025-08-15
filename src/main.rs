@@ -4,8 +4,11 @@ use tracing::{info, warn, error};
 use std::fs::File;
 use std::io::BufReader;
 use axum::response::IntoResponse;
-use axum::extract::State;
+use axum::extract::{State, Path, Query};
+use axum::Json;
 use clap::Parser;
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
 
 mod config;
 mod errors;
@@ -259,6 +262,75 @@ async fn main() -> Result<()> {
                 legacy_info_clone.camera_config.clone()
             )
         ));
+
+        // REST API endpoints: /<camera_path>/api/*
+        if stream_info.recording_manager.is_some() {
+            let api_info = stream_info.clone();
+            
+            // Start recording
+            let start_recording_path = format!("{}/api/recording/start", path);
+            let start_info = api_info.clone();
+            app = app.route(&start_recording_path, axum::routing::post(
+                move |headers, json| api_start_recording(
+                    headers,
+                    json,
+                    start_info.camera_id.clone(),
+                    start_info.camera_config.clone(),
+                    start_info.recording_manager.clone().unwrap(),
+                    start_info.frame_sender.clone()
+                )
+            ));
+
+            // Stop recording
+            let stop_recording_path = format!("{}/api/recording/stop", path);
+            let stop_info = api_info.clone();
+            app = app.route(&stop_recording_path, axum::routing::post(
+                move |headers| api_stop_recording(
+                    headers,
+                    stop_info.camera_id.clone(),
+                    stop_info.camera_config.clone(),
+                    stop_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // List recordings
+            let list_recordings_path = format!("{}/api/recordings", path);
+            let list_info = api_info.clone();
+            app = app.route(&list_recordings_path, axum::routing::get(
+                move |headers, query| api_list_recordings(
+                    headers,
+                    query,
+                    list_info.camera_id.clone(),
+                    list_info.camera_config.clone(),
+                    list_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // Get recorded frames
+            let frames_path = format!("{}/api/recordings/:session_id/frames", path);
+            let frames_info = api_info.clone();
+            app = app.route(&frames_path, axum::routing::get(
+                move |headers, path, query| api_get_recorded_frames(
+                    headers,
+                    path,
+                    query,
+                    frames_info.camera_config.clone(),
+                    frames_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // Get active recording
+            let active_recording_path = format!("{}/api/recording/active", path);
+            let active_info = api_info.clone();
+            app = app.route(&active_recording_path, axum::routing::get(
+                move |headers| api_get_active_recording(
+                    headers,
+                    active_info.camera_id.clone(),
+                    active_info.camera_config.clone(),
+                    active_info.recording_manager.clone().unwrap()
+                )
+            ));
+        }
     }
     
     app = app.layer(cors_layer);
@@ -482,6 +554,254 @@ async fn camera_control_handler(
             // Serve the control HTML page
             serve_control_page().await.into_response()
         }
+    }
+}
+
+// API Request/Response structs
+#[derive(Deserialize)]
+struct StartRecordingRequest {
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GetRecordingsQuery {
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+}
+
+#[derive(Deserialize)]
+struct GetFramesQuery {
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+struct ApiResponse<T> {
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<u16>,
+}
+
+impl<T> ApiResponse<T> {
+    fn success(data: T) -> Self {
+        Self {
+            status: "success".to_string(),
+            data: Some(data),
+            error: None,
+            code: None,
+        }
+    }
+
+    fn error(message: &str, code: u16) -> ApiResponse<()> {
+        ApiResponse {
+            status: "error".to_string(),
+            data: None,
+            error: Some(message.to_string()),
+            code: Some(code),
+        }
+    }
+}
+
+// Authentication helper
+fn check_api_auth(headers: &axum::http::HeaderMap, camera_config: &config::CameraConfig) -> std::result::Result<(), axum::response::Response> {
+    if let Some(expected_token) = &camera_config.token {
+        if let Some(auth_header) = headers.get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                    if token == expected_token {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        return Err((axum::http::StatusCode::UNAUTHORIZED, 
+                   Json(ApiResponse::<()>::error("Invalid or missing Authorization header", 401)))
+                   .into_response());
+    }
+    Ok(())
+}
+
+// API Handlers
+async fn api_start_recording(
+    headers: axum::http::HeaderMap,
+    Json(request): Json<StartRecordingRequest>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    // Check if already recording
+    if recording_manager.is_recording(&camera_id).await {
+        return (axum::http::StatusCode::CONFLICT, 
+                Json(ApiResponse::<()>::error("Recording already in progress for this camera", 409)))
+                .into_response();
+    }
+
+    match recording_manager.start_recording(
+        &camera_id,
+        "api_client",
+        request.reason.as_deref(),
+        None,
+        frame_sender,
+    ).await {
+        Ok(session_id) => {
+            let data = serde_json::json!({
+                "session_id": session_id,
+                "message": "Recording started",
+                "camera_id": camera_id
+            });
+            Json(ApiResponse::success(data)).into_response()
+        }
+        Err(_) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error("Failed to start recording", 500)))
+             .into_response()
+        }
+    }
+}
+
+async fn api_stop_recording(
+    headers: axum::http::HeaderMap,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    match recording_manager.stop_recording(&camera_id).await {
+        Ok(was_recording) => {
+            if was_recording {
+                let data = serde_json::json!({
+                    "message": "Recording stopped",
+                    "camera_id": camera_id
+                });
+                Json(ApiResponse::success(data)).into_response()
+            } else {
+                (axum::http::StatusCode::NOT_FOUND,
+                 Json(ApiResponse::<()>::error("No active recording found", 404)))
+                 .into_response()
+            }
+        }
+        Err(_) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error("Failed to stop recording", 500)))
+             .into_response()
+        }
+    }
+}
+
+async fn api_list_recordings(
+    headers: axum::http::HeaderMap,
+    Query(query): Query<GetRecordingsQuery>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    match recording_manager.list_recordings(Some(&camera_id), query.from, query.to).await {
+        Ok(recordings) => {
+            let recordings_data: Vec<serde_json::Value> = recordings
+                .into_iter()
+                .map(|r| serde_json::json!({
+                    "id": r.id,
+                    "camera_id": r.camera_id,
+                    "start_time": r.start_time,
+                    "end_time": r.end_time,
+                    "reason": r.reason,
+                    "status": format!("{:?}", r.status).to_lowercase(),
+                    "duration_seconds": r.end_time
+                        .map(|end| end.signed_duration_since(r.start_time).num_seconds())
+                }))
+                .collect();
+
+            let data = serde_json::json!({
+                "recordings": recordings_data,
+                "count": recordings_data.len(),
+                "camera_id": camera_id
+            });
+            Json(ApiResponse::success(data)).into_response()
+        }
+        Err(_) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error("Failed to list recordings", 500)))
+             .into_response()
+        }
+    }
+}
+
+async fn api_get_recorded_frames(
+    headers: axum::http::HeaderMap,
+    Path(session_id): Path<i64>,
+    Query(query): Query<GetFramesQuery>,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    match recording_manager.get_recorded_frames(session_id, query.from, query.to).await {
+        Ok(frames) => {
+            let frames_data: Vec<serde_json::Value> = frames
+                .into_iter()
+                .map(|f| serde_json::json!({
+                    "timestamp": f.timestamp,
+                    "frame_size": f.frame_data.len()
+                    // Note: Not including actual frame_data in JSON response due to size
+                }))
+                .collect();
+
+            let data = serde_json::json!({
+                "session_id": session_id,
+                "frames": frames_data,
+                "count": frames_data.len(),
+                "note": "Frame data not included in response due to size - use binary WebSocket for frame streaming"
+            });
+            Json(ApiResponse::success(data)).into_response()
+        }
+        Err(_) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error("Failed to get recorded frames", 500)))
+             .into_response()
+        }
+    }
+}
+
+async fn api_get_active_recording(
+    headers: axum::http::HeaderMap,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    if let Some(active_recording) = recording_manager.get_active_recording(&camera_id).await {
+        let data = serde_json::json!({
+            "session_id": active_recording.session_id,
+            "start_time": active_recording.start_time,
+            "frame_count": active_recording.frame_count,
+            "camera_id": camera_id
+        });
+        Json(ApiResponse::success(data)).into_response()
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("No active recording found", 404)))
+         .into_response()
     }
 }
 

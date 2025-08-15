@@ -402,6 +402,198 @@ With debug logging enabled, you'll see camera-specific messages:
 
 This makes it easy to identify issues with specific cameras.
 
+## Control API
+
+The server provides both WebSocket and HTTP REST APIs for controlling camera recordings and playback.
+
+### WebSocket Control API
+
+Each camera has a control WebSocket endpoint at `/<camera_path>/control` that provides real-time control functionality.
+
+#### Connection
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/cam1/control');
+// For cameras with token authentication:
+const ws = new WebSocket('ws://localhost:8080/cam1/control?token=your-token');
+```
+
+#### Authentication
+
+For cameras configured with tokens, include the token as a query parameter or send an `Authorization: Bearer <token>` header.
+
+#### WebSocket Commands
+
+Send JSON commands to control recording, playback, and live streaming:
+
+##### Start Recording
+```json
+{
+  "cmd": "startrecording",
+  "reason": "Security event detected"
+}
+```
+
+##### Stop Recording
+```json
+{
+  "cmd": "stoprecording"
+}
+```
+
+##### List Recordings
+```json
+{
+  "cmd": "listrecordings",
+  "from": "2025-08-15T00:00:00.000Z",
+  "to": "2025-08-15T23:59:59.999Z"
+}
+```
+
+##### Start Replay
+```json
+{
+  "cmd": "startreplay",
+  "from": "2025-08-15T10:00:00.000Z",
+  "to": "2025-08-15T11:00:00.000Z"
+}
+```
+
+##### Stop Replay
+```json
+{
+  "cmd": "stopreplay"
+}
+```
+
+##### Adjust Replay Speed
+```json
+{
+  "cmd": "replayspeed",
+  "speed": 2.0
+}
+```
+
+##### Start Live Stream
+```json
+{
+  "cmd": "startlivestream"
+}
+```
+
+##### Stop Live Stream
+```json
+{
+  "cmd": "stoplivestream"
+}
+```
+
+#### WebSocket Responses
+
+All commands return JSON responses:
+
+```json
+{
+  "code": 200,
+  "text": "Recording started (session 123)",
+  "data": {
+    "session_id": 123
+  }
+}
+```
+
+Error responses:
+```json
+{
+  "code": 404,
+  "text": "No active recording found"
+}
+```
+
+#### Binary Data
+
+The WebSocket connection also receives binary data:
+- **Video frames** (type `0x00`): JPEG frame data for live streams and replay
+- **JSON responses** (type `0x01`): Command responses and status updates
+
+### HTTP REST API
+
+HTTP endpoints provide programmatic access to recording management functionality.
+
+#### Authentication
+
+For cameras with token authentication, include the token in the Authorization header:
+```
+Authorization: Bearer your-token-here
+```
+
+#### Endpoints
+
+##### Start Recording
+```http
+POST /<camera_path>/api/recording/start
+Content-Type: application/json
+
+{
+  "reason": "Security event detected"
+}
+```
+
+##### Stop Recording
+```http
+POST /<camera_path>/api/recording/stop
+```
+
+##### List Recordings
+```http
+GET /<camera_path>/api/recordings?from=2025-08-15T00:00:00.000Z&to=2025-08-15T23:59:59.999Z
+```
+
+##### Get Recorded Frames
+```http
+GET /<camera_path>/api/recordings/<session_id>/frames?from=2025-08-15T10:00:00.000Z&to=2025-08-15T11:00:00.000Z
+```
+
+##### Get Active Recording
+```http
+GET /<camera_path>/api/recording/active
+```
+
+#### Response Format
+
+All REST API responses follow this format:
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "session_id": 123,
+    "message": "Recording started"
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "status": "error",
+  "error": "No active recording found",
+  "code": 404
+}
+```
+
+### Control Interface
+
+The server includes a web-based control interface accessible at `/<camera_path>/control` (without WebSocket upgrade). This provides:
+
+- **Recording Controls**: Start/stop recording with optional reason
+- **Day Selection**: Easy filtering of recordings by date
+- **Time Range Selection**: Precise time range for playback
+- **Live Streaming**: Start/stop live video streaming to the control interface
+- **Replay Controls**: Playback recorded footage with speed control
+- **Recording List**: Browse and select from available recordings
+
 ## Development
 
 ### Building

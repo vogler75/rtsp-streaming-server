@@ -254,4 +254,13 @@ impl RecordingManager {
         let active_recordings = self.active_recordings.read().await;
         active_recordings.get(camera_id).cloned()
     }
+
+    pub async fn get_recorded_frames(
+        &self,
+        session_id: i64,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+    ) -> Result<Vec<RecordedFrame>> {
+        self.database.get_recorded_frames(session_id, from, to).await
+    }
 }
