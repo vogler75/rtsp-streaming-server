@@ -15,7 +15,6 @@ pub struct CameraStatus {
     pub id: String,
     pub connected: bool,
     pub capture_fps: f32,
-    pub send_fps: f32,
     pub clients_connected: usize,
     pub last_frame_time: Option<String>,
     pub ffmpeg_running: bool,

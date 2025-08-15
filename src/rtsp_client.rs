@@ -24,7 +24,6 @@ pub struct RtspClient {
     _debug_sending: bool,
     mqtt_handle: Option<MqttHandle>,
     capture_fps: Arc<RwLock<f32>>,
-    send_fps: Arc<RwLock<f32>>,
     last_picture_time: Arc<RwLock<Option<u128>>>, // Timestamp in milliseconds
 }
 
@@ -50,7 +49,6 @@ impl RtspClient {
             _debug_sending: debug_sending,
             mqtt_handle,
             capture_fps: Arc::new(RwLock::new(0.0)),
-            send_fps: Arc::new(RwLock::new(0.0)),
             last_picture_time: Arc::new(RwLock::new(None)),
         }
     }
@@ -71,7 +69,6 @@ impl RtspClient {
                             id: self.camera_id.clone(),
                             connected: false,
                             capture_fps: 0.0,
-                            send_fps: 0.0,
                             clients_connected: self.frame_sender.receiver_count(),
                             last_frame_time: None,
                             ffmpeg_running: false,
@@ -555,7 +552,6 @@ impl RtspClient {
                                         id: self.camera_id.clone(),
                                         connected: true,
                                         capture_fps: fps,
-                                        send_fps: *self.send_fps.read().await,
                                         clients_connected: self.frame_sender.receiver_count(),
                                         last_frame_time: Some(Utc::now().to_rfc3339()),
                                         ffmpeg_running: true,
