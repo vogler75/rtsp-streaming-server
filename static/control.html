@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Control Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .panel h2 {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        #videoContainer {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #videoCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+        }
+        
+        #statusMessage {
+            position: absolute;
+            color: #fff;
+            text-align: center;
+            padding: 10px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 5px;
+        }
+        
+        .recordings-list {
+            max-height: 400px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 5px;
+            padding: 10px;
+        }
+        
+        .recording-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .recording-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(5px);
+        }
+        
+        .recording-item.selected {
+            background: rgba(76, 175, 80, 0.3);
+            border: 1px solid #4CAF50;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .control-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .control-group input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        button {
+            flex: 1;
+            padding: 10px 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        button.danger {
+            background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+        }
+        
+        button.success {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        }
+        
+        .speed-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .speed-display {
+            min-width: 60px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        #jsonOutput {
+            width: 100%;
+            height: 200px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            padding: 10px;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .status-indicator.connected {
+            background: #4CAF50;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.disconnected {
+            background: #f44336;
+        }
+        
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
+        }
+        
+        .info-text {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📹 Camera Control Interface</h1>
+        
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span class="status-indicator" id="connectionStatus"></span>
+            <span id="connectionText">Disconnected</span>
+        </div>
+        
+        <div class="main-grid">
+            <!-- Video Display Panel -->
+            <div class="panel">
+                <h2>Video Stream</h2>
+                <div id="videoContainer">
+                    <canvas id="videoCanvas"></canvas>
+                    <div id="statusMessage">Not connected</div>
+                </div>
+                
+                <!-- Playback Controls -->
+                <div class="speed-controls">
+                    <button id="decreaseSpeed">➖ Slower</button>
+                    <div class="speed-display" id="speedDisplay">1.0x</div>
+                    <button id="increaseSpeed">➕ Faster</button>
+                    <button id="stopReplay" class="danger" disabled>⏹ Stop Replay</button>
+                </div>
+            </div>
+            
+            <!-- Control Panel -->
+            <div class="panel">
+                <h2>Recording Controls</h2>
+                
+                <!-- Time Range Selection -->
+                <div class="control-group">
+                    <label>Start Time:</label>
+                    <input type="datetime-local" id="startTime" />
+                </div>
+                
+                <div class="control-group">
+                    <label>End Time:</label>
+                    <input type="datetime-local" id="endTime" />
+                </div>
+                
+                <div class="button-group">
+                    <button id="refreshRecordings">🔄 Refresh List</button>
+                    <button id="startReplay" class="success">▶️ Start Replay</button>
+                </div>
+                
+                <!-- Recording Controls -->
+                <h3 style="margin-top: 25px; margin-bottom: 10px;">Recording Controls</h3>
+                <div class="control-group">
+                    <label>Recording Reason:</label>
+                    <input type="text" id="recordingReason" placeholder="e.g., Security event, Motion detected..." />
+                </div>
+                
+                <div class="control-group">
+                    <label>Duration (seconds, optional):</label>
+                    <input type="number" id="recordingDuration" placeholder="Leave empty for manual stop" min="1" />
+                </div>
+                
+                <div class="button-group">
+                    <button id="startRecording" class="success">🔴 Start Recording</button>
+                    <button id="stopRecording" class="danger" disabled>⏹ Stop Recording</button>
+                </div>
+                
+                <!-- Live Stream Controls -->
+                <h3 style="margin-top: 25px; margin-bottom: 10px;">Live Stream Controls</h3>
+                <div class="button-group">
+                    <button id="startLiveStream" class="success">📹 Start Live Stream</button>
+                    <button id="stopLiveStream" class="danger" disabled>⏹ Stop Live Stream</button>
+                </div>
+                
+                <!-- Recordings List -->
+                <h3 style="margin-top: 20px; margin-bottom: 10px;">Available Recordings</h3>
+                <div class="recordings-list" id="recordingsList">
+                    <div class="info-text">Click "Refresh List" to load recordings</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- JSON Output Panel -->
+        <div class="panel">
+            <h2>Command Responses</h2>
+            <div id="jsonOutput">Waiting for responses...</div>
+        </div>
+    </div>
+    
+    <script>
+        class CameraControl {
+            constructor() {
+                this.ws = null;
+                this.isConnected = false;
+                this.currentSpeed = 1.0;
+                this.selectedRecording = null;
+                this.isReplaying = false;
+                this.isRecording = false;
+                this.isLiveStreaming = false;
+                this.canvas = document.getElementById('videoCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.setupEventListeners();
+                this.connectWebSocket();
+            }
+            
+            setupEventListeners() {
+                document.getElementById('refreshRecordings').addEventListener('click', () => this.fetchRecordings());
+                document.getElementById('startReplay').addEventListener('click', () => this.startReplay());
+                document.getElementById('stopReplay').addEventListener('click', () => this.stopReplay());
+                document.getElementById('increaseSpeed').addEventListener('click', () => this.changeSpeed(0.5));
+                document.getElementById('decreaseSpeed').addEventListener('click', () => this.changeSpeed(-0.5));
+                document.getElementById('startRecording').addEventListener('click', () => this.startRecording());
+                document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
+                document.getElementById('startLiveStream').addEventListener('click', () => this.startLiveStream());
+                document.getElementById('stopLiveStream').addEventListener('click', () => this.stopLiveStream());
+                
+                // Set default time range (last 24 hours)
+                const now = new Date();
+                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                document.getElementById('startTime').value = this.formatDateTimeLocal(yesterday);
+                document.getElementById('endTime').value = this.formatDateTimeLocal(now);
+            }
+            
+            formatDateTimeLocal(date) {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${year}-${month}-${day}T${hours}:${minutes}`;
+            }
+            
+            connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
+                
+                this.updateStatus('Connecting...', false);
+                
+                this.ws = new WebSocket(wsUrl);
+                this.ws.binaryType = 'arraybuffer';
+                
+                this.ws.onopen = () => {
+                    this.isConnected = true;
+                    this.updateStatus('Connected', true);
+                    this.logJson({ status: 'Connected to control WebSocket' });
+                    // Fetch recordings on connect
+                    setTimeout(() => this.fetchRecordings(), 500);
+                };
+                
+                this.ws.onmessage = (event) => {
+                    if (event.data instanceof ArrayBuffer) {
+                        const view = new Uint8Array(event.data);
+                        const contentType = view[0];
+                        const data = view.slice(1);
+                        
+                        if (contentType === 0x00) {
+                            // Video frame
+                            this.displayFrame(data);
+                        } else if (contentType === 0x01) {
+                            // JSON response
+                            const json = new TextDecoder().decode(data);
+                            try {
+                                const response = JSON.parse(json);
+                                this.handleJsonResponse(response);
+                            } catch (e) {
+                                this.logJson({ error: 'Invalid JSON', data: json });
+                            }
+                        }
+                    }
+                };
+                
+                this.ws.onerror = (error) => {
+                    this.logJson({ error: 'WebSocket error', details: error });
+                };
+                
+                this.ws.onclose = () => {
+                    this.isConnected = false;
+                    this.updateStatus('Disconnected', false);
+                    this.logJson({ status: 'Disconnected from WebSocket' });
+                    // Attempt to reconnect after 3 seconds
+                    setTimeout(() => this.connectWebSocket(), 3000);
+                };
+            }
+            
+            displayFrame(frameData) {
+                const blob = new Blob([frameData], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                
+                img.onload = () => {
+                    // Clear status message when displaying video
+                    document.getElementById('statusMessage').style.display = 'none';
+                    
+                    // Resize canvas to match image aspect ratio
+                    const container = document.getElementById('videoContainer');
+                    const maxWidth = container.clientWidth;
+                    const maxHeight = container.clientHeight;
+                    
+                    const scale = Math.min(maxWidth / img.width, maxHeight / img.height);
+                    this.canvas.width = img.width * scale;
+                    this.canvas.height = img.height * scale;
+                    
+                    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+                    URL.revokeObjectURL(url);
+                };
+                
+                img.src = url;
+            }
+            
+            handleJsonResponse(response) {
+                this.logJson(response);
+                
+                // Handle specific response types
+                if (response.data && response.data.recordings) {
+                    this.displayRecordings(response.data.recordings);
+                } else if (response.text && response.text.includes('Replay started')) {
+                    this.isReplaying = true;
+                    document.getElementById('stopReplay').disabled = false;
+                    document.getElementById('startReplay').disabled = true;
+                } else if (response.text && response.text.includes('Replay stopped')) {
+                    this.isReplaying = false;
+                    document.getElementById('stopReplay').disabled = true;
+                    document.getElementById('startReplay').disabled = false;
+                } else if (response.text && response.text.includes('Recording started')) {
+                    this.isRecording = true;
+                    document.getElementById('startRecording').disabled = true;
+                    document.getElementById('stopRecording').disabled = false;
+                } else if (response.text && response.text.includes('Recording stopped')) {
+                    this.isRecording = false;
+                    document.getElementById('startRecording').disabled = false;
+                    document.getElementById('stopRecording').disabled = true;
+                    // Auto-refresh recordings list
+                    setTimeout(() => this.fetchRecordings(), 1000);
+                } else if (response.text && response.text.includes('Live stream started')) {
+                    this.isLiveStreaming = true;
+                    document.getElementById('startLiveStream').disabled = true;
+                    document.getElementById('stopLiveStream').disabled = false;
+                } else if (response.text && response.text.includes('Live stream stopped')) {
+                    this.isLiveStreaming = false;
+                    document.getElementById('startLiveStream').disabled = false;
+                    document.getElementById('stopLiveStream').disabled = true;
+                }
+            }
+            
+            displayRecordings(recordings) {
+                const container = document.getElementById('recordingsList');
+                container.innerHTML = '';
+                
+                if (recordings.length === 0) {
+                    container.innerHTML = '<div class="info-text">No recordings found in selected time range</div>';
+                    return;
+                }
+                
+                recordings.forEach(recording => {
+                    const item = document.createElement('div');
+                    item.className = 'recording-item';
+                    
+                    const startTime = new Date(recording.start_time).toLocaleString();
+                    const endTime = recording.end_time ? new Date(recording.end_time).toLocaleString() : 'In Progress';
+                    const duration = recording.duration_seconds ? `${recording.duration_seconds}s` : 'N/A';
+                    
+                    item.innerHTML = `
+                        <strong>Session ${recording.id}</strong><br>
+                        Camera: ${recording.camera_id}<br>
+                        Start: ${startTime}<br>
+                        End: ${endTime}<br>
+                        Duration: ${duration}<br>
+                        ${recording.reason ? `Reason: ${recording.reason}<br>` : ''}
+                        Status: <span style="color: ${recording.status === 'active' ? '#4CAF50' : '#FFC107'}">${recording.status}</span>
+                    `;
+                    
+                    item.addEventListener('click', () => {
+                        // Remove previous selection
+                        document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
+                        item.classList.add('selected');
+                        
+                        this.selectedRecording = recording;
+                        
+                        // Update time inputs
+                        document.getElementById('startTime').value = this.formatDateTimeLocal(new Date(recording.start_time));
+                        if (recording.end_time) {
+                            document.getElementById('endTime').value = this.formatDateTimeLocal(new Date(recording.end_time));
+                        }
+                    });
+                    
+                    container.appendChild(item);
+                });
+            }
+            
+            sendCommand(command) {
+                if (!this.isConnected || !this.ws) {
+                    this.logJson({ error: 'Not connected to WebSocket' });
+                    return;
+                }
+                
+                const json = JSON.stringify(command);
+                this.ws.send(json);
+                this.logJson({ sent: command });
+            }
+            
+            fetchRecordings() {
+                const startTime = document.getElementById('startTime').value;
+                const endTime = document.getElementById('endTime').value;
+                
+                const command = {
+                    cmd: 'listrecordings'
+                };
+                
+                if (startTime) {
+                    command.from = new Date(startTime).toISOString();
+                }
+                if (endTime) {
+                    command.to = new Date(endTime).toISOString();
+                }
+                
+                this.sendCommand(command);
+            }
+            
+            startReplay() {
+                const startTime = document.getElementById('startTime').value;
+                const endTime = document.getElementById('endTime').value;
+                
+                if (!startTime || !endTime) {
+                    alert('Please select both start and end times');
+                    return;
+                }
+                
+                const command = {
+                    cmd: 'startreplay',
+                    from: new Date(startTime).toISOString(),
+                    to: new Date(endTime).toISOString()
+                };
+                
+                this.sendCommand(command);
+            }
+            
+            stopReplay() {
+                this.sendCommand({ cmd: 'stopreplay' });
+            }
+            
+            startRecording() {
+                const reason = document.getElementById('recordingReason').value;
+                const duration = document.getElementById('recordingDuration').value;
+                
+                const command = {
+                    cmd: 'startrecording'
+                };
+                
+                if (reason.trim()) {
+                    command.reason = reason.trim();
+                }
+                
+                if (duration && parseInt(duration) > 0) {
+                    command.seconds = parseInt(duration);
+                }
+                
+                this.sendCommand(command);
+            }
+            
+            stopRecording() {
+                this.sendCommand({ cmd: 'stoprecording' });
+            }
+            
+            startLiveStream() {
+                this.sendCommand({ cmd: 'startlivestream' });
+            }
+            
+            stopLiveStream() {
+                this.sendCommand({ cmd: 'stoplivestream' });
+            }
+            
+            changeSpeed(delta) {
+                this.currentSpeed = Math.max(0.5, Math.min(5.0, this.currentSpeed + delta));
+                document.getElementById('speedDisplay').textContent = `${this.currentSpeed.toFixed(1)}x`;
+                
+                if (this.isReplaying) {
+                    this.sendCommand({
+                        cmd: 'replayspeed',
+                        speed: this.currentSpeed
+                    });
+                }
+            }
+            
+            updateStatus(text, connected) {
+                const indicator = document.getElementById('connectionStatus');
+                const textElement = document.getElementById('connectionText');
+                
+                indicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+                textElement.textContent = text;
+                
+                if (!connected) {
+                    document.getElementById('statusMessage').style.display = 'block';
+                    document.getElementById('statusMessage').textContent = text;
+                }
+            }
+            
+            logJson(obj) {
+                const output = document.getElementById('jsonOutput');
+                const timestamp = new Date().toLocaleTimeString();
+                const formatted = JSON.stringify(obj, null, 2);
+                
+                output.textContent = `[${timestamp}] ${formatted}\n${output.textContent}`;
+                
+                // Limit output to last 50 entries
+                const lines = output.textContent.split('\n');
+                if (lines.length > 100) {
+                    output.textContent = lines.slice(0, 100).join('\n');
+                }
+            }
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            new CameraControl();
+        });
+    </script>
+</body>
+</html>

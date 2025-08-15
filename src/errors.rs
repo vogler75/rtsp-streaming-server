@@ -54,6 +54,12 @@ pub enum StreamError {
         #[from]
         source: rumqttc::ClientError,
     },
+    
+    #[error("Database error: {source}")]
+    Database {
+        #[from]
+        source: sqlx::Error,
+    },
 }
 
 impl StreamError {

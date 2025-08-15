@@ -15,6 +15,9 @@ mod websocket;
 mod transcoder;
 mod video_stream;
 mod mqtt;
+mod database;
+mod recording;
+mod control;
 
 use config::Config;
 use errors::{Result, StreamError};
@@ -22,6 +25,9 @@ use video_stream::VideoStream;
 use websocket::websocket_handler;
 use std::collections::HashMap;
 use mqtt::{MqttPublisher, MqttHandle};
+use database::SqliteDatabase;
+use recording::{RecordingManager, RecordingConfig};
+use control::handle_control_websocket;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -83,6 +89,44 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize recording manager if enabled
+    let recording_manager: Option<Arc<RecordingManager>> = if let Some(recording_config) = &config.recording {
+        if recording_config.enabled {
+            info!("Initializing recording system with database: {}", recording_config.database_path);
+            
+            match SqliteDatabase::new(&recording_config.database_path).await {
+                Ok(database) => {
+                    let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
+                    
+                    let recording_config = RecordingConfig {
+                        database_path: recording_config.database_path.clone(),
+                        max_frame_size: recording_config.max_frame_size.unwrap_or(10 * 1024 * 1024),
+                    };
+                    
+                    match RecordingManager::new(recording_config, database).await {
+                        Ok(manager) => {
+                            info!("Recording system initialized successfully");
+                            Some(Arc::new(manager))
+                        }
+                        Err(e) => {
+                            error!("Failed to initialize recording manager: {}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to initialize database: {}", e);
+                    None
+                }
+            }
+        } else {
+            info!("Recording system disabled in configuration");
+            None
+        }
+    } else {
+        None
+    };
+
     // Create video streams for each camera
     #[derive(Clone)]
     struct CameraStreamInfo {
@@ -90,6 +134,7 @@ async fn main() -> Result<()> {
         frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
         mqtt_handle: Option<MqttHandle>,
         camera_config: config::CameraConfig,
+        recording_manager: Option<Arc<RecordingManager>>,
     }
     let mut camera_streams: HashMap<String, CameraStreamInfo> = HashMap::new();
     
@@ -116,6 +161,7 @@ async fn main() -> Result<()> {
                     frame_sender: video_stream.frame_sender.clone(),
                     mqtt_handle: mqtt_handle.clone(),
                     camera_config: camera_config.clone(),
+                    recording_manager: recording_manager.clone(),
                 });
                 
                 // Start the video stream
@@ -159,12 +205,60 @@ async fn main() -> Result<()> {
         .route("/", axum::routing::get(index_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"));
     
-    // Add a route for each camera
+    // Add routes for each camera (both stream and control endpoints)
     for (path, stream_info) in camera_streams {
-        info!("Adding route for camera at path: {}", path);
-        let info = stream_info.clone();
+        info!("Adding routes for camera at path: {}", path);
+        
+        // Stream endpoint: /<camera_path>/stream
+        let stream_path = format!("{}/stream", path);
+        let stream_info_clone = stream_info.clone();
+        app = app.route(&stream_path, axum::routing::get(
+            move |ws, query, addr| camera_stream_handler(
+                ws, query, addr, 
+                stream_info_clone.frame_sender.clone(), 
+                stream_info_clone.camera_id.clone(), 
+                stream_info_clone.mqtt_handle.clone(), 
+                stream_info_clone.camera_config.clone()
+            )
+        ));
+
+        // Control endpoint: /<camera_path>/control
+        let control_path = format!("{}/control", path);
+        let control_info_clone = stream_info.clone();
+        app = app.route(&control_path, axum::routing::get(
+            move |ws, query, addr| camera_control_handler(
+                ws, query, addr,
+                control_info_clone.frame_sender.clone(),
+                control_info_clone.camera_id.clone(),
+                control_info_clone.mqtt_handle.clone(),
+                control_info_clone.camera_config.clone(),
+                control_info_clone.recording_manager.clone()
+            )
+        ));
+
+        // Live endpoint: /<camera_path>/live  
+        let live_path = format!("{}/live", path);
+        let live_info_clone = stream_info.clone();
+        app = app.route(&live_path, axum::routing::get(
+            move |ws, query, addr| camera_handler(
+                ws, query, addr, 
+                live_info_clone.frame_sender.clone(), 
+                live_info_clone.camera_id.clone(), 
+                live_info_clone.mqtt_handle.clone(), 
+                live_info_clone.camera_config.clone()
+            )
+        ));
+
+        // Keep legacy endpoint for backward compatibility (redirects to /live)
+        let legacy_info_clone = stream_info.clone();
         app = app.route(&path, axum::routing::get(
-            move |ws, query, addr| camera_handler(ws, query, addr, info.frame_sender.clone(), info.camera_id.clone(), info.mqtt_handle.clone(), info.camera_config.clone())
+            move |ws, query, addr| camera_handler(
+                ws, query, addr, 
+                legacy_info_clone.frame_sender.clone(), 
+                legacy_info_clone.camera_id.clone(), 
+                legacy_info_clone.mqtt_handle.clone(), 
+                legacy_info_clone.camera_config.clone()
+            )
         ));
     }
     
@@ -187,6 +281,11 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn serve_control_page() -> axum::response::Html<String> {
+    let html = include_str!("../static/control.html").to_string();
+    axum::response::Html(html)
 }
 
 async fn serve_index_with_mode(is_full_mode: bool) -> axum::response::Html<String> {
@@ -256,6 +355,103 @@ async fn camera_handler(
             // Check if 'full' parameter is present
             let is_full_mode = query.contains_key("full");
             serve_index_with_mode(is_full_mode).await.into_response()
+        }
+    }
+}
+
+async fn camera_stream_handler(
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+    camera_id: String,
+    mqtt_handle: Option<MqttHandle>,
+    camera_config: config::CameraConfig,
+) -> axum::response::Response {
+    match ws {
+        Some(ws_upgrade) => {
+            // Check token authentication before upgrading WebSocket
+            if let Some(expected_token) = &camera_config.token {
+                // Get token from query parameters
+                if let Some(provided_token) = query.get("token") {
+                    if provided_token == expected_token {
+                        info!("Token authentication successful for camera {}", camera_id);
+                    } else {
+                        warn!("Invalid token provided for camera {}", camera_id);
+                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                    }
+                } else {
+                    warn!("Missing token for camera {} that requires authentication", camera_id);
+                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing token").into_response();
+                }
+            }
+            
+            if let Some(connect_info) = addr {
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
+            } else {
+                // Fallback with unknown IP
+                let fallback_addr = "127.0.0.1:0".parse().unwrap();
+                let connect_info = axum::extract::ConnectInfo(fallback_addr);
+                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
+            }
+        },
+        None => {
+            // Check if 'full' parameter is present
+            let is_full_mode = query.contains_key("full");
+            serve_index_with_mode(is_full_mode).await.into_response()
+        }
+    }
+}
+
+async fn camera_control_handler(
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    _addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+    camera_id: String,
+    _mqtt_handle: Option<MqttHandle>,
+    camera_config: config::CameraConfig,
+    recording_manager: Option<Arc<RecordingManager>>,
+) -> axum::response::Response {
+    match ws {
+        Some(ws_upgrade) => {
+            // Check token authentication before upgrading WebSocket
+            if let Some(expected_token) = &camera_config.token {
+                // Get token from query parameters
+                if let Some(provided_token) = query.get("token") {
+                    if provided_token == expected_token {
+                        info!("Token authentication successful for camera {} control", camera_id);
+                    } else {
+                        warn!("Invalid token provided for camera {} control", camera_id);
+                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                    }
+                } else {
+                    warn!("Missing token for camera {} control that requires authentication", camera_id);
+                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing token").into_response();
+                }
+            }
+
+            // Check if recording is enabled
+            if recording_manager.is_none() {
+                warn!("Recording not enabled, control endpoint unavailable");
+                return (axum::http::StatusCode::SERVICE_UNAVAILABLE, "Recording system not enabled").into_response();
+            }
+            
+            let client_id = uuid::Uuid::new_v4().to_string();
+            let socket = ws_upgrade.on_upgrade(move |socket| {
+                handle_control_websocket(
+                    socket,
+                    camera_id,
+                    client_id,
+                    recording_manager.unwrap(),
+                    frame_sender,
+                )
+            });
+            socket.into_response()
+        },
+        None => {
+            // Serve the control HTML page
+            serve_control_page().await.into_response()
         }
     }
 }

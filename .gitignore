@@ -31,3 +31,4 @@ Thumbs.db
 # Others
 ffmpeg.exe
 *.log
+recordings.db

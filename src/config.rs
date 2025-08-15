@@ -9,6 +9,7 @@ pub struct Config {
     pub cameras: HashMap<String, CameraConfig>,
     pub transcoding: TranscodingConfig,
     pub mqtt: Option<MqttConfig>,
+    pub recording: Option<RecordingConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +116,13 @@ pub struct CameraMqttConfig {
     pub topic_name: Option<String>, // Optional custom topic name, defaults to <base_topic>/cameras/<cam-name>/jpg
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingConfig {
+    pub enabled: bool,
+    pub database_path: String,
+    pub max_frame_size: Option<usize>, // Maximum frame size in bytes for database storage
+}
+
 impl Default for Config {
     fn default() -> Self {
         let cameras = HashMap::new(); // No default cameras - must be configured
@@ -140,6 +148,11 @@ impl Default for Config {
                 debug_duplicate_frames: Some(false),
             },
             mqtt: None,
+            recording: Some(RecordingConfig {
+                enabled: false,
+                database_path: "recordings.db".to_string(),
+                max_frame_size: Some(10 * 1024 * 1024), // 10MB
+            }),
         }
     }
 }

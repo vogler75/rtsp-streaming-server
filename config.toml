@@ -23,6 +23,12 @@ publish_interval_secs = 1  # How often to publish status updates
 publish_picture_arrival = true  # Enable/disable picture arrival publishing (default: true)
 max_packet_size = 268435456  # Maximum MQTT packet size in bytes (256MB, adjust based on your broker limits)
 
+# Recording Configuration
+[recording]
+enabled = true
+database_path = "recordings.db"
+max_frame_size = 10485760  # 10MB max frame size for database storage
+
 # Global transcoding settings (can be overridden per camera)
 [transcoding]
 output_format = "mjpeg"
