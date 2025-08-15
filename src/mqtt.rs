@@ -140,6 +140,7 @@ impl MqttPublisher {
                 let cameras = camera_status_clone.read().await.clone();
                 let clients = client_status_clone.read().await.clone();
                 
+                // Publish server status
                 let status = ServerStatus {
                     uptime_secs: start_time.elapsed().as_secs(),
                     total_clients: clients.len(),
@@ -160,7 +161,28 @@ impl MqttPublisher {
                         config_clone.retain,
                         payload.as_bytes(),
                     ).await {
-                        error!("Failed to publish status: {}", e);
+                        error!("Failed to publish server status: {}", e);
+                    }
+                }
+                
+                // Also publish individual camera status updates at the same interval
+                for (camera_id, camera_status) in &cameras {
+                    if let Ok(payload) = serde_json::to_string(&camera_status) {
+                        let topic = format!("{}/cameras/{}/status", config_clone.base_topic, camera_id);
+                        let qos = match config_clone.qos {
+                            0 => QoS::AtMostOnce,
+                            1 => QoS::AtLeastOnce,
+                            _ => QoS::ExactlyOnce,
+                        };
+                        
+                        if let Err(e) = client_clone.publish(
+                            topic,
+                            qos,
+                            config_clone.retain,
+                            payload.as_bytes(),
+                        ).await {
+                            error!("Failed to publish camera status for {}: {}", camera_id, e);
+                        }
                     }
                 }
             }
@@ -188,24 +210,8 @@ impl MqttHandle {
         let mut cameras = self.camera_status.write().await;
         cameras.insert(camera_id.clone(), status.clone());
         
-        // Publish immediate update for this camera
-        if let Ok(payload) = serde_json::to_string(&status) {
-            let topic = format!("{}/cameras/{}/status", self.config.base_topic, camera_id);
-            let qos = match self.config.qos {
-                0 => QoS::AtMostOnce,
-                1 => QoS::AtLeastOnce,
-                _ => QoS::ExactlyOnce,
-            };
-            
-            if let Err(e) = self.client.publish(
-                topic,
-                qos,
-                self.config.retain,
-                payload.as_bytes(),
-            ).await {
-                error!("Failed to publish camera status: {}", e);
-            }
-        }
+        // Only store the status - publishing will be handled by the interval timer
+        // This respects the configured publish_interval_secs for all status updates
     }
     
     pub async fn add_client(&self, client: ClientStatus) {
