@@ -106,86 +106,17 @@ impl RtspClient {
     }
 
     async fn connect_real_rtsp(&self) -> Result<()> {
-        info!("[{}] Attempting to connect to RTSP camera: {}", self.camera_id, self.config.url);
-        debug!("Parsing RTSP URL");
+        info!("[{}] Connecting to stream: {}", self.camera_id, self.config.url);
         
-        let original_url = url::Url::parse(&self.config.url).map_err(|e| {
-            error!("[{}] Invalid RTSP URL format: {}", self.camera_id, e);
-            e
+        // Validate URL format
+        let _url = url::Url::parse(&self.config.url).map_err(|e| {
+            error!("[{}] Invalid URL format: {}", self.camera_id, e);
+            StreamError::rtsp_connection(format!("Invalid URL: {}", e))
         })?;
         
-        // Extract credentials and create URL without them for retina
-        let creds = if !original_url.username().is_empty() {
-            let username = original_url.username().to_string();
-            let password = original_url.password().unwrap_or("").to_string();
-            info!("[{}] Using credentials - username: {}, password: [{}] chars", self.camera_id, username, password.len());
-            Some(retina::client::Credentials { username, password })
-        } else {
-            info!("[{}] No authentication credentials found in URL", self.camera_id);
-            None
-        };
-
-        // Create URL without credentials for retina
-        let mut url = original_url.clone();
-        url.set_username("").unwrap();
-        url.set_password(None).unwrap();
-        info!("[{}] Cleaned URL for retina: {}", self.camera_id, url);
-
-        info!("[{}] Creating RTSP session...", self.camera_id);
-        let session_group = Arc::new(retina::client::SessionGroup::default());
-        
-        // Try to connect to RTSP stream
-        info!("[{}] Connecting to RTSP server at {}:{}", self.camera_id, 
-            url.host_str().unwrap_or("unknown"), 
-            url.port().unwrap_or(554));
-            
-        match tokio::time::timeout(
-            Duration::from_secs(10),
-            retina::client::Session::describe(
-                url.clone(),
-                retina::client::SessionOptions::default()
-                    .creds(creds)
-                    .session_group(session_group)
-                    .user_agent("RTSP-Streaming-Server/1.0".to_string()),
-            )
-        ).await {
-            Ok(Ok(session)) => {
-                info!("[{}] ✅ Successfully connected to RTSP server!", self.camera_id);
-                info!("[{}] Available streams: {}", self.camera_id, session.streams().len());
-                
-                for (i, stream) in session.streams().iter().enumerate() {
-                    info!("[{}] Stream {}: media={}, codec={:?}", self.camera_id, 
-                        i, stream.media(), stream.encoding_name());
-                }
-
-                let video_stream_i = session.streams()
-                    .iter()
-                    .position(|s| s.media() == "video")
-                    .ok_or_else(|| StreamError::rtsp_stream("No video stream found in RTSP response"))?;
-
-                info!("[{}] ✅ Found video stream at index {} with codec {:?}", self.camera_id, 
-                    video_stream_i, session.streams()[video_stream_i].encoding_name());
-
-                info!("[{}] 🎬 Starting real H.264 packet reception from camera", self.camera_id);
-                
-                // Now we need to properly setup and receive packets from the session
-                // The retina library requires proper session setup for packet reception
-                
-                // For now, let's implement a more realistic approach:
-                // We'll use direct RTSP streaming via FFmpeg instead of individual packet processing
-                info!("🔄 Switching to direct RTSP to MJPEG transcoding via FFmpeg");
-                
-                return self.stream_rtsp_via_ffmpeg().await;
-            }
-            Ok(Err(e)) => {
-                error!("[{}] ❌ Failed to connect to RTSP server: {}", self.camera_id, e);
-                return Err(StreamError::rtsp_connection(format!("Connection error: {}", e)));
-            }
-            Err(_) => {
-                error!("❌ Timeout connecting to RTSP server (10 seconds)");
-                return Err(StreamError::rtsp_connection("Connection timeout"));
-            }
-        }
+        // Use FFmpeg directly for all stream types (RTSP, HTTP, HTTPS, etc.)
+        info!("[{}] Starting stream capture via FFmpeg", self.camera_id);
+        return self.stream_rtsp_via_ffmpeg().await;
     }
 
     async fn generate_test_frames(&self) -> Result<()> {
@@ -365,17 +296,24 @@ impl RtspClient {
             }
             // No default values - only use what's explicitly configured
             
-            // Add RTSP buffer size if configured (in KB)
-            if let Some(buffer_size) = ffmpeg.and_then(|c| c.rtbufsize) {
-                let buffer_size_str = format!("{}k", buffer_size / 1024);
-                ffmpeg_args.push("-rtbufsize".to_string());
-                ffmpeg_args.push(buffer_size_str.clone());
-                info!("FFmpeg RTSP buffer size set to: {}", buffer_size_str);
+            // Check if URL is RTSP to add RTSP-specific options
+            let is_rtsp_url = self.config.url.to_lowercase().starts_with("rtsp://");
+            
+            // Add RTSP buffer size if configured (in KB) and URL is RTSP
+            if is_rtsp_url {
+                if let Some(buffer_size) = ffmpeg.and_then(|c| c.rtbufsize) {
+                    let buffer_size_str = format!("{}k", buffer_size / 1024);
+                    ffmpeg_args.push("-rtbufsize".to_string());
+                    ffmpeg_args.push(buffer_size_str.clone());
+                    info!("FFmpeg RTSP buffer size set to: {}", buffer_size_str);
+                }
+                
+                // Add RTSP transport option only for RTSP URLs
+                ffmpeg_args.push("-rtsp_transport".to_string());
+                ffmpeg_args.push(self.config.transport.clone());
             }
             
-            // Add basic arguments
-            ffmpeg_args.push("-rtsp_transport".to_string());
-            ffmpeg_args.push(self.config.transport.clone());
+            // Add input URL
             ffmpeg_args.push("-i".to_string());
             ffmpeg_args.push(self.config.url.clone());
         

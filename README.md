@@ -70,38 +70,61 @@ debug_sending = false      # Show sending rate debug info
 
 ### Multi-Camera Configuration
 
-Configure multiple cameras, each with its own path and settings:
+Configure multiple cameras, each with its own path and settings. The server supports both RTSP and HTTP/HTTPS stream sources:
 
 ```toml
-# Camera 1
+# RTSP Camera Example
 [cameras.cam1]
+enabled = false  # Optional: Enable/disable this camera (default: true)
 path = "/cam1"
-url = "rtsp://username:password@192.168.1.182:554/stream1"
+url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
 transport = "tcp"
 reconnect_interval = 5
-chunk_read_size = 32768
-ffmpeg_buffer_size = 65536
+chunk_read_size = 8192 # 32768
+token = "secure-cam1-token"  # Optional: Token required for WebSocket authentication
 
-# Camera 2
-[cameras.cam2]
-path = "/cam2"
-url = "rtsp://username:password@192.168.1.171:554/stream1"
-transport = "tcp"
-reconnect_interval = 5
-chunk_read_size = 32768
-ffmpeg_buffer_size = 65536
+# FFmpeg configuration for cam1
+[cameras.cam1.ffmpeg]
+log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
 
-# Camera 3 with custom transcoding settings
-[cameras.cam3]
-path = "/cam3"
-url = "rtsp://username:password@192.168.1.188:554/stream2"
-transport = "tcp"
+# Command override - if set, replaces all other FFmpeg options with a custom command
+# Placeholder: $url = camera RTSP URL
+#command = "-use_wallclock_as_timestamps 1 -rtsp_transport tcp -i $url -an -c:v mjpeg -q:v 4 -vf fps=15 -f mjpeg -"
+
+use_wallclock_as_timestamps = true  # Adds "-use_wallclock_as_timestamps 1" as first option
+
+scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
+
+#output_format = "mjpeg"  # Output format: MJPEG for streaming
+#output_framerate = 5  # Output framerate (fps)
+
+#video_codec = "mjpeg"  # Video codec: mjpeg is default for MJPEG format
+#video_bitrate = "200k"  # Video bitrate: "200k", "1M", "2000k", etc.
+#gop_size = 10  # GOP size (keyframe interval) - frames between keyframes
+
+# FFmpeg advanced options for low latency
+#rtbufsize = 65536  # RTSP buffer size in bytes
+#fflags = "+nobuffer+discardcorrupt"
+#flags = "low_delay"
+#avioflags = "direct"
+#fps_mode = "cfr"  # Use "cfr" for constant framerate, "vfr" for variable, "passthrough" to keep original
+#flush_packets = "1"
+#extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
+#extra_output_args = []
+
+# HTTP/ASF Stream Example
+[cameras.cam4]
+enabled = true  # Optional: Enable/disable this camera (default: true)
+path = "/cam4"
+# For HTTP streams with authentication, use Basic Auth format:
+# Note: Special characters in password must be URL-encoded (e.g., # = %23)
+url = "http://Admin007:Admin007%23%23@outdoor2:80/videostream.asf?resolution=64&rate=0"
+transport = "tcp"  # Ignored for HTTP streams
 reconnect_interval = 5
-chunk_read_size = 32768
-ffmpeg_buffer_size = 65536
-# Optional: Override global transcoding settings for this camera
-# quality = 30
-# send_framerate = 5
+
+[cameras.cam4.ffmpeg]
+log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
+scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 ```
 
 ### Configuration Options
@@ -304,47 +327,6 @@ openssl pkcs12 -in certificate.p12 -clcerts -nokeys -out server.crt
 openssl pkcs12 -in certificate.p12 -nocerts -nodes -out server.key
 ```
 
-## Architecture
-
-```
-Multiple RTSP Cameras → Rust Server → WebSocket → Browser
-         ↓                    ↓
-    [Camera 1]          [Transcoding]
-    [Camera 2]               ↓
-    [Camera 3]          MJPEG Frames
-         ↓                    ↓
-   Individual Paths     Individual WebSocket
-   (/cam1, /cam2)         Connections
-```
-
-### Components
-
-- **Video Stream Manager** (`src/video_stream.rs`): Manages individual camera streams
-- **RTSP Client** (`src/rtsp_client.rs`): Handles RTSP connections and frame reception
-- **Transcoder** (`src/transcoder.rs`): Converts video frames to JPEG format
-- **WebSocket Server** (`src/websocket.rs`): Manages WebSocket connections and frame broadcasting
-- **Web Interface** (`static/index.html`): Browser-based video player
-
-## Current Status
-
-This is a working implementation with the following features:
-
-✅ **Working**:
-- Multi-camera support with individual paths
-- Basic server architecture
-- WebSocket streaming 
-- MJPEG frame generation
-- Web interface with real-time stats
-- Configuration management
-- Auto-reconnection logic
-- Per-camera debug logging
-- WinCC Unified integration support
-
-🚧 **In Progress**:
-- Real RTSP integration with retina crate
-- H.264 to JPEG transcoding
-- FFmpeg integration for advanced transcoding
-
 ## Usage
 
 ### Starting the Server
@@ -395,16 +377,6 @@ With debug logging enabled, you'll see camera-specific messages:
 
 This makes it easy to identify issues with specific cameras.
 
-## Performance
-
-Current implementation characteristics:
-
-- **Latency**: ~100-200ms per camera
-- **CPU Usage**: Low (multi-threaded, one thread per camera)
-- **Memory Usage**: ~50MB base + ~10MB per camera + ~10MB per client
-- **Concurrent Cameras**: Limited by system resources
-- **Concurrent Clients**: Multiple viewers per camera supported
-
 ## Development
 
 ### Building
@@ -419,47 +391,3 @@ RUST_LOG=debug cargo run
 # Build optimized release
 cargo build --release
 ```
-
-### Project Structure
-
-```
-rtsp-streaming-server/
-├── src/
-│   ├── main.rs          # Entry point and server setup
-│   ├── config.rs        # Configuration management
-│   ├── video_stream.rs  # Video stream manager
-│   ├── rtsp_client.rs   # RTSP connection handling
-│   ├── transcoder.rs    # Video transcoding logic
-│   └── websocket.rs     # WebSocket server
-├── static/
-│   └── index.html       # Web interface
-├── config.toml          # Configuration file
-└── Cargo.toml           # Dependencies
-```
-
-### Dependencies
-
-- **tokio**: Async runtime
-- **axum**: Web server framework
-- **retina**: RTSP client library
-- **image**: JPEG encoding
-- **tokio-tungstenite**: WebSocket implementation
-
-## Next Steps
-
-To make this production-ready, consider implementing:
-
-1. **Dashboard View**: Single page showing all cameras
-2. **H.264 Processing**: Direct H.264 to browser streaming
-3. **FFmpeg Integration**: Advanced transcoding options
-4. **WebRTC Support**: Ultra-low latency streaming
-5. **Authentication**: User management and access control
-6. **Recording**: Save streams to disk
-7. **Motion Detection**: Alert on motion events
-8. **Mobile Support**: Responsive design and mobile app
-9. **Camera Management API**: Add/remove cameras dynamically
-10. **Health Monitoring**: Camera status and diagnostics endpoint
-
-## License
-
-This project is open source. Feel free to modify and use as needed.

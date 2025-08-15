@@ -8,8 +8,6 @@ pub enum StreamError {
     #[error("RTSP connection failed: {message}")]
     RtspConnection { message: String },
     
-    #[error("RTSP stream error: {message}")]
-    RtspStream { message: String },
     
     #[error("MQTT error: {message}")]
     Mqtt { message: String },
@@ -67,9 +65,6 @@ impl StreamError {
         Self::RtspConnection { message: message.into() }
     }
     
-    pub fn rtsp_stream(message: impl Into<String>) -> Self {
-        Self::RtspStream { message: message.into() }
-    }
     
     pub fn mqtt(message: impl Into<String>) -> Self {
         Self::Mqtt { message: message.into() }
