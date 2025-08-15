@@ -330,9 +330,10 @@
                 <!-- Video Display Panel -->
                 <div class="panel">
                     <h2>Video Stream</h2>
+                    <div class="info-text" style="margin-bottom: 10px;">🎥 Live Stream or Replay will appear here</div>
                     <div id="videoContainer">
                         <canvas id="videoCanvas"></canvas>
-                        <div id="statusMessage">Not connected</div>
+                        <div id="statusMessage">Ready for commands - Start Live Stream or Replay to view video</div>
                     </div>
                     
                     <!-- Playback Controls -->
@@ -488,7 +489,7 @@
                     wsUrl += `?token=${encodeURIComponent(token)}`;
                 }
                 
-                this.updateStatus('Connecting...', false);
+                this.updateStatus('Connecting to control interface...', false);
                 this.logJson({ status: 'Attempting to connect', url: wsUrl.replace(/token=[^&]*/, 'token=***') });
                 
                 this.ws = new WebSocket(wsUrl);
@@ -496,8 +497,11 @@
                 
                 this.ws.onopen = () => {
                     this.isConnected = true;
-                    this.updateStatus('Connected', true);
+                    this.updateStatus('Control interface ready', true);
                     this.logJson({ status: 'Connected to control WebSocket' });
+                    // Update the video status message to be more informative
+                    document.getElementById('statusMessage').textContent = 'Ready for commands - Start Live Stream or Replay to view video';
+                    document.getElementById('statusMessage').style.display = 'block';
                     // Fetch recordings and check active recording status on connect
                     setTimeout(() => {
                         this.fetchRecordings();
@@ -533,8 +537,11 @@
                 
                 this.ws.onclose = () => {
                     this.isConnected = false;
-                    this.updateStatus('Disconnected', false);
+                    this.updateStatus('Control interface disconnected', false);
                     this.logJson({ status: 'Disconnected from WebSocket' });
+                    // Show disconnected message in video area
+                    document.getElementById('statusMessage').textContent = 'Control interface disconnected - Reconnecting...';
+                    document.getElementById('statusMessage').style.display = 'block';
                     // Attempt to reconnect after 3 seconds
                     setTimeout(() => this.connectWebSocket(), 3000);
                 };
