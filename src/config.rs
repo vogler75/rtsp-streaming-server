@@ -28,13 +28,14 @@ pub struct CameraConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FfmpegConfig {
     // Output format and codec settings
-    pub output_format: Option<String>,    // -f (e.g., "mjpeg", "mpegts")
+    pub output_format: Option<String>,    // -f (e.g., "mjpeg", "mpegts", "mp4")
     pub video_codec: Option<String>,      // -codec:v (e.g., "mpeg1video", "libx264")
     pub video_bitrate: Option<String>,    // -b:v (e.g., "200k", "1M")
     pub quality: Option<u8>,              // -q:v (JPEG quality 1-100)
     pub output_framerate: Option<u32>,    // -r (output framerate)
     pub gop_size: Option<u32>,            // -g (GOP size, keyframe interval)
     pub scale: Option<String>,            // -vf scale (e.g., "640:480", "1280:-1")
+    pub movflags: Option<String>,         // -movflags (e.g., "frag_keyframe+empty_moov+default_base_moof" for fMP4)
     
     // Buffer and performance settings
     pub rtbufsize: Option<usize>,         // -rtbufsize (RTSP buffer size in bytes)

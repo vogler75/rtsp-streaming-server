@@ -18,12 +18,10 @@ pub struct RtspClient {
     frame_sender: Arc<broadcast::Sender<Bytes>>,
     transcoder: FrameTranscoder,
     capture_framerate: u32,
-    send_framerate: u32,
+    _send_framerate: u32,
     ffmpeg_config: Option<FfmpegConfig>,
-    latest_frame: Arc<RwLock<Option<Bytes>>>,
-    allow_duplicate_frames: bool,
     debug_capture: bool,
-    debug_sending: bool,
+    _debug_sending: bool,
     mqtt_handle: Option<MqttHandle>,
     capture_fps: Arc<RwLock<f32>>,
     send_fps: Arc<RwLock<f32>>,
@@ -31,7 +29,7 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
@@ -42,12 +40,10 @@ impl RtspClient {
                     .unwrap_or(75)
             ).await,
             capture_framerate,
-            send_framerate,
+            _send_framerate: send_framerate,
             ffmpeg_config,
-            latest_frame: Arc::new(RwLock::new(None)),
-            allow_duplicate_frames,
             debug_capture,
-            debug_sending,
+            _debug_sending: debug_sending,
             mqtt_handle,
             capture_fps: Arc::new(RwLock::new(0.0)),
             send_fps: Arc::new(RwLock::new(0.0)),
@@ -56,20 +52,6 @@ impl RtspClient {
     }
 
     pub async fn start(&self) -> Result<()> {
-        // Spawn the frame sender thread
-        let frame_sender = self.frame_sender.clone();
-        let latest_frame = self.latest_frame.clone();
-        let send_framerate = self.send_framerate;
-        let allow_duplicate_frames = self.allow_duplicate_frames;
-        let debug_sending = self.debug_sending;
-        let camera_id = self.camera_id.clone();
-        let send_fps = self.send_fps.clone();
-        let mqtt_handle = self.mqtt_handle.clone();
-        
-        tokio::spawn(async move {
-            Self::frame_sender_task(camera_id, frame_sender, latest_frame, send_framerate, allow_duplicate_frames, debug_sending, send_fps, mqtt_handle).await;
-        });
-        
         // Main capture loop
         loop {
             match self.connect_and_stream().await {
@@ -100,68 +82,6 @@ impl RtspClient {
         }
     }
     
-    async fn frame_sender_task(
-        camera_id: String,
-        frame_sender: Arc<broadcast::Sender<Bytes>>,
-        latest_frame: Arc<RwLock<Option<Bytes>>>,
-        send_framerate: u32,
-        allow_duplicate_frames: bool,
-        debug_sending: bool,
-        send_fps: Arc<RwLock<f32>>,
-        _mqtt_handle: Option<MqttHandle>,
-    ) {
-        info!("[{}] Starting frame sender task at {} FPS (duplicates: {})", camera_id, send_framerate, allow_duplicate_frames);
-        let frame_duration = Duration::from_millis(1000 / send_framerate as u64);
-        let mut last_send_time = tokio::time::Instant::now();
-        let mut sent_count = 0u64;
-        let mut skipped_count = 0u64;
-        let mut last_log_time = tokio::time::Instant::now();
-        
-        loop {
-            // Wait for the next frame time
-            let next_frame_time = last_send_time + frame_duration;
-            tokio::time::sleep_until(next_frame_time).await;
-            last_send_time = next_frame_time;
-            
-            // Get the latest frame (and optionally clear it)
-            let frame = if allow_duplicate_frames {
-                // Just read the frame, allow sending duplicates
-                let guard = latest_frame.read().await;
-                guard.clone()
-            } else {
-                // Take the frame and clear it (no duplicates)
-                let mut guard = latest_frame.write().await;
-                guard.take()  // This removes and returns the frame
-            };
-            
-            // Send the frame if we have one, otherwise send empty ping
-            if let Some(frame_data) = frame {
-                // Send real frame data
-                let _ = frame_sender.send(frame_data);
-                sent_count += 1;
-            } else {
-                // No new frame available (when allow_duplicate_frames = false)
-                // Send empty frame as ping to maintain connection and timing
-                let _ = frame_sender.send(Bytes::new()); // Empty frame
-                skipped_count += 1;
-            }
-            
-            // Log statistics every second if enabled
-            let now = tokio::time::Instant::now();
-            if now.duration_since(last_log_time) >= Duration::from_secs(1) {
-                let fps = sent_count as f32;
-                *send_fps.write().await = fps;
-                
-                if debug_sending {
-                    debug!("[{}] SENDING: {:2}/s Pings : {:2}/s", 
-                           camera_id, sent_count, skipped_count);
-                }
-                sent_count = 0;
-                skipped_count = 0;
-                last_log_time = now;
-            }
-        }
-    }
 
     async fn connect_and_stream(&self) -> Result<()> {
         info!("[{}] Connecting to RTSP stream: {}", self.camera_id, self.config.url);
@@ -274,11 +194,8 @@ impl RtspClient {
 
             let jpeg_data = self.transcoder.create_test_frame().await?;
             
-            // Store the frame in the latest frame store
-            {
-                let mut guard = self.latest_frame.write().await;
-                *guard = Some(jpeg_data);
-            }
+            // Send frame directly to broadcast
+            let _ = self.frame_sender.send(jpeg_data);
             
             // Track picture arrival time for MQTT publishing (non-blocking)
             if let Some(ref mqtt) = self.mqtt_handle {
@@ -493,6 +410,11 @@ impl RtspClient {
             ffmpeg_args.extend_from_slice(&["-g", gop]);
         }
         
+        // Add movflags if specified (important for fMP4 streaming)
+        if let Some(ref movflags) = ffmpeg.and_then(|c| c.movflags.as_ref()) {
+            ffmpeg_args.extend_from_slice(&["-movflags", movflags]);
+        }
+        
         // Build video filter chain if needed
         let mut video_filters = Vec::new();
         
@@ -651,20 +573,17 @@ impl RtspClient {
                     return Err(anyhow::anyhow!("FFmpeg process died"));
                 }
                 
-                // Read frames from stdout
+                // Read frame data from stdout (MJPEG or other format)
                 frame_result = self.read_mjpeg_frame(&mut reader, &mut buffer) => {
                     match frame_result {
-                        Ok(jpeg_data) => {
+                        Ok(frame_data) => {
                             frame_count += 1;
                             
                             // Measure frame processing time for diagnostics
                             let frame_start_time = std::time::Instant::now();
                             
-                            // Store the frame in the latest frame store
-                            {
-                                let mut guard = self.latest_frame.write().await;
-                                *guard = Some(Bytes::from(jpeg_data));
-                            }
+                            // Send frame directly to broadcast
+                            let _ = self.frame_sender.send(Bytes::from(frame_data));
                             
                             // Track picture arrival time for MQTT publishing (non-blocking)
                             if let Some(ref mqtt) = self.mqtt_handle {
@@ -729,7 +648,7 @@ impl RtspClient {
                             }
                         }
                         Err(e) => {
-                            error!("[{}] Error reading MJPEG frame: {}", self.camera_id, e);
+                            error!("[{}] Error reading frame data: {}", self.camera_id, e);
                             return Err(e);
                         }
                     }
@@ -741,56 +660,53 @@ impl RtspClient {
     async fn read_mjpeg_frame(&self, reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>, buffer: &mut Vec<u8>) -> Result<Vec<u8>> {
         use tokio::io::AsyncReadExt;
         
+        // JPEG frames start with 0xFF 0xD8 and end with 0xFF 0xD9
+        const JPEG_START: [u8; 2] = [0xFF, 0xD8];
+        const JPEG_END: [u8; 2] = [0xFF, 0xD9];
+        
+        // Clear the buffer for a new frame
         buffer.clear();
-        buffer.reserve(100_000); // Pre-allocate for typical JPEG size
         
-        // Use configured chunk size or default to 8KB for efficiency
-        let chunk_size = self.config.chunk_read_size.unwrap_or(8192);
-        let mut chunk = vec![0u8; chunk_size];
-        let mut found_start = false;
+        // Read until we find the start of a JPEG frame
+        let mut byte = [0u8; 1];
+        let mut prev_byte = 0u8;
         
-        // Look for JPEG start marker (0xFF, 0xD8)
-        while !found_start {
-            let n = reader.read(&mut chunk).await?;
-            if n == 0 {
-                return Err(anyhow::anyhow!("EOF while looking for JPEG start"));
-            }
-            
-            for i in 0..n-1 {
-                if chunk[i] == 0xFF && chunk[i+1] == 0xD8 {
-                    // Found JPEG start, add everything from this point
-                    buffer.extend_from_slice(&chunk[i..n]);
-                    found_start = true;
-                    break;
-                }
-            }
-        }
-        
-        // Read until JPEG end marker (0xFF, 0xD9)
+        // Skip to the start of the next JPEG frame
         loop {
-            let n = reader.read(&mut chunk).await?;
-            if n == 0 {
-                return Err(anyhow::anyhow!("EOF while looking for JPEG end"));
+            if reader.read_exact(&mut byte).await.is_err() {
+                return Err(anyhow::anyhow!("EOF while searching for JPEG start"));
             }
             
-            // Check if we have the end marker
-            for i in 0..n-1 {
-                if chunk[i] == 0xFF && chunk[i+1] == 0xD9 {
-                    // Found JPEG end, add everything up to and including the marker
-                    buffer.extend_from_slice(&chunk[0..=i+1]);
-                    return Ok(std::mem::take(buffer)); // Move buffer content, not clone
-                }
+            if prev_byte == JPEG_START[0] && byte[0] == JPEG_START[1] {
+                // Found start of JPEG, add the start marker to buffer
+                buffer.extend_from_slice(&JPEG_START);
+                break;
             }
-            
-            // Check boundary case: 0xFF at end of previous chunk, 0xD9 at start of this chunk
-            if buffer.len() > 0 && buffer[buffer.len()-1] == 0xFF && chunk[0] == 0xD9 {
-                buffer.push(0xD9);
-                return Ok(std::mem::take(buffer)); // Move buffer content, not clone
-            }
-            
-            // Add entire chunk to buffer
-            buffer.extend_from_slice(&chunk[0..n]);
+            prev_byte = byte[0];
         }
+        
+        // Read until we find the end of the JPEG frame
+        prev_byte = 0;
+        loop {
+            if reader.read_exact(&mut byte).await.is_err() {
+                return Err(anyhow::anyhow!("EOF while reading JPEG data"));
+            }
+            
+            buffer.push(byte[0]);
+            
+            if prev_byte == JPEG_END[0] && byte[0] == JPEG_END[1] {
+                // Found end of JPEG
+                break;
+            }
+            prev_byte = byte[0];
+            
+            // Sanity check: if frame is too large, something is wrong
+            if buffer.len() > 10 * 1024 * 1024 { // 10MB max
+                return Err(anyhow::anyhow!("JPEG frame too large, likely corrupted"));
+            }
+        }
+        
+        Ok(buffer.clone())
     }
 }
 
