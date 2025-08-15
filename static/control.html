@@ -304,6 +304,19 @@
             <span id="connectionText">Disconnected</span>
         </div>
         
+        <!-- Authentication Panel -->
+        <div class="panel" style="margin-bottom: 20px;">
+            <h2>Authentication</h2>
+            <div class="control-group">
+                <label>Bearer Token (if required):</label>
+                <input type="password" id="bearerToken" placeholder="Enter token if camera requires authentication" />
+            </div>
+            <div class="button-group">
+                <button id="connectWithToken">🔗 Connect with Token</button>
+                <button id="reconnect">🔄 Reconnect</button>
+            </div>
+        </div>
+        
         <div class="main-grid">
             <!-- Left Column: Video Display and Controls -->
             <div class="left-column">
@@ -418,6 +431,8 @@
                 document.getElementById('startLiveStream').addEventListener('click', () => this.startLiveStream());
                 document.getElementById('stopLiveStream').addEventListener('click', () => this.stopLiveStream());
                 document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
+                document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket());
+                document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket());
                 
                 // Set default time range (last 24 hours)
                 const now = new Date();
@@ -437,9 +452,16 @@
             
             connectWebSocket() {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
+                let wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
+                
+                // Add token as query parameter if provided
+                const token = document.getElementById('bearerToken').value.trim();
+                if (token) {
+                    wsUrl += `?token=${encodeURIComponent(token)}`;
+                }
                 
                 this.updateStatus('Connecting...', false);
+                this.logJson({ status: 'Attempting to connect', url: wsUrl.replace(/token=[^&]*/, 'token=***') });
                 
                 this.ws = new WebSocket(wsUrl);
                 this.ws.binaryType = 'arraybuffer';

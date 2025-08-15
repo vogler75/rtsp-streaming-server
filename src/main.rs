@@ -225,8 +225,8 @@ async fn main() -> Result<()> {
         let control_path = format!("{}/control", path);
         let control_info_clone = stream_info.clone();
         app = app.route(&control_path, axum::routing::get(
-            move |ws, query, addr| camera_control_handler(
-                ws, query, addr,
+            move |headers, ws, query, addr| camera_control_handler(
+                headers, ws, query, addr,
                 control_info_clone.frame_sender.clone(),
                 control_info_clone.camera_id.clone(),
                 control_info_clone.mqtt_handle.clone(),
@@ -403,6 +403,7 @@ async fn camera_stream_handler(
 }
 
 async fn camera_control_handler(
+    headers: axum::http::HeaderMap,
     ws: Option<axum::extract::WebSocketUpgrade>,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
     _addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
@@ -416,17 +417,46 @@ async fn camera_control_handler(
         Some(ws_upgrade) => {
             // Check token authentication before upgrading WebSocket
             if let Some(expected_token) = &camera_config.token {
-                // Get token from query parameters
-                if let Some(provided_token) = query.get("token") {
-                    if provided_token == expected_token {
-                        info!("Token authentication successful for camera {} control", camera_id);
+                let mut token_valid = false;
+                
+                // First try Authorization header for Bearer token
+                if let Some(auth_header) = headers.get("authorization") {
+                    if let Ok(auth_str) = auth_header.to_str() {
+                        if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                            if token == expected_token {
+                                info!("Bearer token authentication successful for camera {} control", camera_id);
+                                token_valid = true;
+                            } else {
+                                warn!("Invalid Bearer token provided for camera {} control", camera_id);
+                                return (axum::http::StatusCode::UNAUTHORIZED, "Invalid Bearer token").into_response();
+                            }
+                        } else {
+                            warn!("Authorization header does not contain Bearer token for camera {} control", camera_id);
+                            return (axum::http::StatusCode::UNAUTHORIZED, "Authorization header must contain Bearer token").into_response();
+                        }
                     } else {
-                        warn!("Invalid token provided for camera {} control", camera_id);
-                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                        warn!("Invalid Authorization header format for camera {} control", camera_id);
+                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid Authorization header format").into_response();
                     }
-                } else {
-                    warn!("Missing token for camera {} control that requires authentication", camera_id);
-                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing token").into_response();
+                }
+                
+                // If no valid Authorization header, try query parameter (fallback for WebSocket clients)
+                if !token_valid {
+                    if let Some(provided_token) = query.get("token") {
+                        if provided_token == expected_token {
+                            info!("Query parameter token authentication successful for camera {} control", camera_id);
+                            token_valid = true;
+                        } else {
+                            warn!("Invalid query parameter token provided for camera {} control", camera_id);
+                            return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                        }
+                    }
+                }
+                
+                // If neither authentication method provided valid token
+                if !token_valid {
+                    warn!("Missing or invalid authentication for camera {} control that requires authentication", camera_id);
+                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing or invalid authentication - provide Bearer token in Authorization header or ?token= query parameter").into_response();
                 }
             }
 
