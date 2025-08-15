@@ -1,7 +1,7 @@
 [server]
 host = "0.0.0.0"
 port = 8080
-cors_allow_origin = "null"
+cors_allow_origin = "*"
 
 [server.tls]
 enabled = false
@@ -25,13 +25,10 @@ publish_picture_arrival = true  # Enable/disable picture arrival publishing (def
 # Global transcoding settings (can be overridden per camera)
 [transcoding]
 output_format = "mjpeg"
-capture_framerate = 0  # FPS to capture from camera (0 = max available)
-send_framerate = 10    # FPS to send to clients
+capture_framerate = 10  # FPS to capture from camera (0 = max available)
 channel_buffer_size = 10 # Number of frames to buffer (1 = only latest frame)
-allow_duplicate_frames = false # If false, each frame is sent only once
-debug_capture = false    # Enable debug output for capture rate
-debug_sending = false   # Enable debug output for sending rate
-debug_duplicate_frames = true # Enable/disable duplicate frame warnings
+debug_capture = true    # Enable debug output for capture rate
+debug_duplicate_frames = false # Enable/disable duplicate frame warnings
 
 # Camera configurations
 # Each camera has a unique ID and configurable path

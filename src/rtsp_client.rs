@@ -20,10 +20,8 @@ pub struct RtspClient {
     frame_sender: Arc<broadcast::Sender<Bytes>>,
     transcoder: FrameTranscoder,
     capture_framerate: u32,
-    _send_framerate: u32,
     ffmpeg_config: Option<FfmpegConfig>,
     debug_capture: bool,
-    _debug_sending: bool,
     debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
     capture_fps: Arc<RwLock<f32>>,
@@ -33,11 +31,11 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
-        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, capture_framerate, send_framerate, _allow_duplicate_frames, debug_capture, debug_sending, debug_duplicate_frames, mqtt_handle).await
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle).await
     }
 
-    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, send_framerate: u32, _allow_duplicate_frames: bool, debug_capture: bool, debug_sending: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>) -> Self {
         Self {
             camera_id,
             config,
@@ -48,10 +46,8 @@ impl RtspClient {
                     .unwrap_or(75)
             ).await,
             capture_framerate,
-            _send_framerate: send_framerate,
             ffmpeg_config,
             debug_capture,
-            _debug_sending: debug_sending,
             debug_duplicate_frames,
             mqtt_handle,
             capture_fps: Arc::new(RwLock::new(0.0)),

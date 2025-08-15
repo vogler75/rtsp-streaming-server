@@ -87,11 +87,8 @@ pub struct RtspConfig {
 pub struct TranscodingConfig {
     pub output_format: String,
     pub capture_framerate: u32,  // FFmpeg capture rate from camera
-    pub send_framerate: u32,     // Rate at which we send frames to clients
     pub channel_buffer_size: Option<usize>, // Number of frames to buffer (1 = only latest)
-    pub allow_duplicate_frames: Option<bool>, // Whether to send same frame multiple times
     pub debug_capture: Option<bool>, // Enable/disable capture rate debug output
-    pub debug_sending: Option<bool>, // Enable/disable sending rate debug output
     pub debug_duplicate_frames: Option<bool>, // Enable/disable duplicate frame warnings
 }
 
@@ -129,11 +126,8 @@ impl Default for Config {
             transcoding: TranscodingConfig {
                 output_format: "mjpeg".to_string(),
                 capture_framerate: 30,
-                send_framerate: 10,
                 channel_buffer_size: Some(1),
-                allow_duplicate_frames: Some(false),
                 debug_capture: Some(true),
-                debug_sending: Some(true),
                 debug_duplicate_frames: Some(false),
             },
             mqtt: None,

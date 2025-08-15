@@ -54,10 +54,7 @@ impl VideoStream {
             frame_tx.clone(),
             camera_config.ffmpeg.clone(),
             transcoding.capture_framerate,
-            transcoding.send_framerate,
-            transcoding.allow_duplicate_frames.unwrap_or(false),
             transcoding.debug_capture.unwrap_or(true),
-            transcoding.debug_sending.unwrap_or(true),
             transcoding.debug_duplicate_frames.unwrap_or(false),
             mqtt_handle,
         ).await;

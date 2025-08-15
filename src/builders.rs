@@ -16,10 +16,7 @@ pub struct RtspClientBuilder {
     frame_sender: Option<Arc<broadcast::Sender<Bytes>>>,
     ffmpeg_config: Option<FfmpegConfig>,
     capture_framerate: u32,
-    send_framerate: u32,
-    allow_duplicate_frames: bool,
     debug_capture: bool,
-    debug_sending: bool,
     debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
 }
@@ -33,10 +30,7 @@ impl RtspClientBuilder {
             frame_sender: None,
             ffmpeg_config: None,
             capture_framerate: 0,
-            send_framerate: 10,
-            allow_duplicate_frames: false,
             debug_capture: false,
-            debug_sending: false,
             debug_duplicate_frames: false,
             mqtt_handle: None,
         }
@@ -67,25 +61,13 @@ impl RtspClientBuilder {
         self
     }
 
-    pub fn send_framerate(mut self, framerate: u32) -> Self {
-        self.send_framerate = framerate;
-        self
-    }
 
-    pub fn allow_duplicate_frames(mut self, allow: bool) -> Self {
-        self.allow_duplicate_frames = allow;
-        self
-    }
 
     pub fn debug_capture(mut self, debug: bool) -> Self {
         self.debug_capture = debug;
         self
     }
 
-    pub fn debug_sending(mut self, debug: bool) -> Self {
-        self.debug_sending = debug;
-        self
-    }
 
     pub fn mqtt_handle(mut self, mqtt_handle: Option<MqttHandle>) -> Self {
         self.mqtt_handle = mqtt_handle;
@@ -103,10 +85,7 @@ impl RtspClientBuilder {
             frame_sender,
             self.ffmpeg_config,
             self.capture_framerate,
-            self.send_framerate,
-            self.allow_duplicate_frames,
             self.debug_capture,
-            self.debug_sending,
             self.debug_duplicate_frames,
             self.mqtt_handle,
         ).await)
