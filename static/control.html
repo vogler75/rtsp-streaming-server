@@ -353,6 +353,7 @@
                         <div style="display: flex; gap: 10px; align-items: center;">
                             <input type="date" id="selectedDay" style="flex: 1;" />
                             <button id="setTodayButton" style="flex: none; padding: 5px 10px; font-size: 12px;">Today</button>
+                            <button id="refreshRecordings" style="flex: none; padding: 5px 10px; font-size: 12px;">🔄 Refresh List</button>
                         </div>
                     </div>
                     
@@ -367,7 +368,6 @@
                     </div>
                     
                     <div class="button-group">
-                        <button id="refreshRecordings">🔄 Refresh List</button>
                         <button id="startReplay" class="success">▶️ Start Replay</button>
                         <button id="startLiveStream" class="success">📹 Start Live Stream</button>
                         <button id="stopReplay" class="danger" disabled>⏹ Stop</button>
@@ -466,7 +466,6 @@
             setToday() {
                 const now = new Date();
                 document.getElementById('selectedDay').value = this.formatDateLocal(now);
-                this.updateTimeRangeFromDay();
             }
             
             updateTimeRangeFromDay() {
@@ -659,13 +658,26 @@
             }
             
             async fetchRecordings() {
-                const startTime = document.getElementById('startTime').value;
-                const endTime = document.getElementById('endTime').value;
+                // Always use selected day as time range for fetching
+                const selectedDay = document.getElementById('selectedDay').value;
+                let startTime, endTime;
+                
+                if (selectedDay) {
+                    // Use selected day as full day range
+                    const startOfDay = new Date(selectedDay + 'T00:00');
+                    const endOfDay = new Date(selectedDay + 'T23:59');
+                    startTime = this.formatDateTimeLocal(startOfDay);
+                    endTime = this.formatDateTimeLocal(endOfDay);
+                } else {
+                    // Fall back to manual time range inputs if no day selected
+                    startTime = document.getElementById('startTime').value;
+                    endTime = document.getElementById('endTime').value;
+                }
                 
                 // Build API URL with query parameters
                 const baseUrl = `${window.location.origin}${window.location.pathname}/recordings`;
                 
-                this.logJson({ debug: 'Fetching recordings', baseUrl: baseUrl });
+                this.logJson({ debug: 'Fetching recordings', baseUrl: baseUrl, selectedDay: selectedDay });
                 const params = new URLSearchParams();
                 
                 if (startTime) {
