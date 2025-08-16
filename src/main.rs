@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use std::fs::File;
 use std::io::BufReader;
 use axum::response::IntoResponse;
@@ -654,11 +654,13 @@ async fn camera_live_handler(
             }
             
             if let Some(connect_info) = addr {
+                debug!("Starting live WebSocket handler for camera {} from {}", camera_id, connect_info.0);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             } else {
                 // Fallback with unknown IP
                 let fallback_addr = "127.0.0.1:0".parse().unwrap();
                 let connect_info = axum::extract::ConnectInfo(fallback_addr);
+                debug!("Starting live WebSocket handler for camera {} (fallback addr)", camera_id);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             }
         },
@@ -697,11 +699,13 @@ async fn camera_stream_handler(
             }
             
             if let Some(connect_info) = addr {
+                debug!("Starting stream WebSocket handler for camera {} from {}", camera_id, connect_info.0);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             } else {
                 // Fallback with unknown IP
                 let fallback_addr = "127.0.0.1:0".parse().unwrap();
                 let connect_info = axum::extract::ConnectInfo(fallback_addr);
+                debug!("Starting stream WebSocket handler for camera {} (fallback addr)", camera_id);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             }
         },
@@ -777,6 +781,7 @@ async fn camera_control_handler(
             }
             
             let client_id = uuid::Uuid::new_v4().to_string();
+            debug!("Starting control WebSocket handler for camera {} with client {}", camera_id, client_id);
             let socket = ws_upgrade.on_upgrade(move |socket| {
                 handle_control_websocket(
                     socket,

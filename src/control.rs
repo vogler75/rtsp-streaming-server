@@ -10,6 +10,9 @@ use futures_util::{stream::StreamExt, SinkExt};
 use crate::recording::RecordingManager;
 use crate::database::RecordedFrame;
 
+// Import the same global mutex from websocket module
+use crate::websocket::WEBSOCKET_CONNECTION_MUTEX;
+
 // Custom deserializer for timestamps that supports both string (ISO format) and number (ms since epoch)
 fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
 where
@@ -259,10 +262,17 @@ impl ControlHandler {
     }
 
     pub async fn handle_websocket(&mut self, socket: WebSocket) {
+        // Acquire the global connection mutex to ensure exclusive access during setup
+        debug!("[{}] Control WebSocket waiting for connection mutex...", self.client_id);
+        let _connection_guard = WEBSOCKET_CONNECTION_MUTEX.lock().await;
+        debug!("[{}] Control WebSocket acquired connection mutex", self.client_id);
+        
         let (sender, mut receiver) = socket.split();
         let sender = Arc::new(tokio::sync::Mutex::new(sender));
         info!("Control WebSocket connected for camera '{}' client '{}'", self.camera_id, self.client_id);
 
+        // Create a channel to signal cleanup when connection closes
+        let (cleanup_tx, _cleanup_rx) = broadcast::channel::<()>(1);
 
         // Handle incoming commands
         let recording_manager = self.recording_manager.clone();
@@ -329,10 +339,24 @@ impl ControlHandler {
                 }
             }
             info!("Control WebSocket receive task ended");
+            
+            // Stop any active streams when disconnecting
+            Self::handle_stop(&mut replay_state, &mut live_stream_state).await;
         });
+
+        // Release the connection mutex now that critical setup is complete
+        drop(_connection_guard);
+        debug!("[{}] Control WebSocket released connection mutex", self.client_id);
 
         // Wait for tasks to complete
         let _ = recv_task.await;
+        
+        // Send cleanup signal to any running tasks
+        let _ = cleanup_tx.send(());
+        
+        // Give tasks a moment to clean up
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
         info!("Control WebSocket handler ended for camera '{}'", self.camera_id);
     }
 
@@ -535,11 +559,18 @@ impl ControlHandler {
 
         // Create stop signal channel
         let (stop_sender, mut stop_receiver) = broadcast::channel::<()>(1);
+        
+        let subscriber_count_before = frame_sender.receiver_count();
+        debug!("Control live stream: Subscriber count before subscribe: {}", subscriber_count_before);
+        
         let mut frame_receiver = frame_sender.subscribe();
+        
+        let subscriber_count_after = frame_sender.receiver_count();
+        debug!("Control live stream: Subscriber count after subscribe: {}", subscriber_count_after);
 
         // Start the live streaming task
         let sender_clone = sender.clone();
-        let stream_task = tokio::spawn(async move {
+        let _stream_task = tokio::spawn(async move {
             info!("Starting live stream forwarding");
             
             loop {
@@ -609,11 +640,8 @@ impl ControlHandler {
         live_stream_state.active = true;
         live_stream_state.stop_sender = Some(stop_sender);
 
-        // Store task handle to clean up later if needed
-        tokio::spawn(async move {
-            let _ = stream_task.await;
-        });
-
+        // No need for nested spawn - the task will clean itself up
+        
         CommandResponse::success("Live stream started")
     }
     

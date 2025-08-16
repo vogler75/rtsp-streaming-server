@@ -14,6 +14,9 @@ use chrono::Utc;
 use uuid::Uuid;
 use std::net::SocketAddr;
 
+// Global mutex to ensure exclusive WebSocket connection handling
+pub static WEBSOCKET_CONNECTION_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(frame_sender): State<Arc<broadcast::Sender<Bytes>>>,
@@ -34,11 +37,35 @@ async fn handle_socket(
     mqtt_handle: Option<MqttHandle>,
     client_addr: SocketAddr,
 ) {
-    let (mut sender, mut receiver) = socket.split();
-    let mut frame_receiver = frame_sender.subscribe();
-    
     let client_id = Uuid::new_v4().to_string();
     let client_ip = client_addr.ip().to_string();
+    
+    debug!("[{}] Starting WebSocket connection setup for camera {}", client_id, camera_id);
+    
+    // Acquire the global connection mutex to ensure exclusive access during setup
+    debug!("[{}] Waiting for WebSocket connection mutex...", client_id);
+    let _connection_guard = WEBSOCKET_CONNECTION_MUTEX.lock().await;
+    debug!("[{}] Acquired WebSocket connection mutex", client_id);
+    
+    let (mut sender, mut receiver) = socket.split();
+    debug!("[{}] WebSocket split completed", client_id);
+    
+    let subscriber_count_before = frame_sender.receiver_count();
+    debug!("[{}] Subscriber count before subscribe: {}", client_id, subscriber_count_before);
+    
+    // Critical section: add detailed logging around the subscribe operation
+    debug!("[{}] About to call frame_sender.subscribe()", client_id);
+    let subscription_start = std::time::Instant::now();
+    
+    let mut frame_receiver = frame_sender.subscribe();
+    
+    let subscription_duration = subscription_start.elapsed();
+    debug!("[{}] Subscribe completed in {:?}", client_id, subscription_duration);
+    
+    let subscriber_count_after = frame_sender.receiver_count();
+    debug!("[{}] Subscriber count after subscribe: {} (delta: +{})", 
+           client_id, subscriber_count_after, subscriber_count_after.saturating_sub(subscriber_count_before));
+    
     info!("New WebSocket client {} ({}) connected to camera {}", client_id, client_ip, camera_id);
     debug!("Frame sender has {} subscribers", frame_sender.receiver_count());
     
@@ -58,17 +85,29 @@ async fn handle_socket(
     let mqtt_handle_clone = mqtt_handle.clone();
     let client_id_clone = client_id.clone();
     
+    debug!("[{}] About to spawn send_task", client_id);
+    let task_spawn_start = std::time::Instant::now();
+    
     let send_task = tokio::spawn(async move {
+        debug!("[{}] Send_task started", client_id_clone);
+        let task_start_time = std::time::Instant::now();
         let mut frame_count = 0u64;
         let mut dropped_frames = 0u64;
         let mut total_frames_sent = 0u64;
         let mut last_stats_time = tokio::time::Instant::now();
         let mut fps_frame_count = 0u64;
         
+        debug!("[{}] Starting frame receive loop", client_id_clone);
+        
         loop {
             match frame_receiver.recv().await {
                 Ok(frame_data) => {
                     frame_count += 1;
+                    
+                    // Log first frame received
+                    if frame_count == 1 {
+                        debug!("[{}] First frame received at {:?}", client_id_clone, task_start_time.elapsed());
+                    }
                     fps_frame_count += 1;
                     
                     // Use timeout for non-blocking send - drop frame if it takes too long
@@ -146,10 +185,21 @@ async fn handle_socket(
         }
         info!("WebSocket receive task ended");
     });
+    
+    let spawn_duration = task_spawn_start.elapsed();
+    debug!("[{}] Both tasks spawned in {:?}", client_id, spawn_duration);
+    
+    // Release the connection mutex now that critical setup is complete
+    drop(_connection_guard);
+    debug!("[{}] Released WebSocket connection mutex", client_id);
 
     tokio::select! {
-        _ = send_task => {},
-        _ = recv_task => {},
+        send_result = send_task => {
+            debug!("[{}] Send task completed with result: {:?}", client_id, send_result);
+        },
+        recv_result = recv_task => {
+            debug!("[{}] Recv task completed with result: {:?}", client_id, recv_result);
+        },
     }
 
     info!("WebSocket client {} disconnected", client_id);
