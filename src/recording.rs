@@ -472,4 +472,17 @@ impl RecordingManager {
         
         Ok(())
     }
+    
+    /// Get the database size for a specific camera
+    pub async fn get_database_size(&self, camera_id: &str) -> Result<i64> {
+        let databases = self.databases.read().await;
+        
+        if let Some(database) = databases.get(camera_id) {
+            database.get_database_size().await
+        } else {
+            Err(crate::errors::StreamError::database(format!(
+                "No database found for camera '{}'", camera_id
+            )))
+        }
+    }
 }

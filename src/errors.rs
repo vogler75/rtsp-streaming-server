@@ -84,6 +84,12 @@ impl StreamError {
     pub fn server(message: impl Into<String>) -> Self {
         Self::Server { message: message.into() }
     }
+    
+    pub fn database(message: impl Into<String>) -> Self {
+        // Create a custom sqlx error for the message
+        let custom_error = sqlx::Error::Configuration(message.into().into());
+        Self::Database { source: custom_error }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, StreamError>;

@@ -103,6 +103,8 @@ pub trait DatabaseProvider: Send + Sync {
         camera_id: &str,
         timestamp: DateTime<Utc>,
     ) -> Result<Option<RecordedFrame>>;
+    
+    async fn get_database_size(&self) -> Result<i64>;
 }
 
 pub struct SqliteDatabase {
@@ -491,5 +493,18 @@ impl DatabaseProvider for SqliteDatabase {
         } else {
             Ok(None)
         }
+    }
+    
+    async fn get_database_size(&self) -> Result<i64> {
+        let row = sqlx::query(
+            r#"
+            SELECT (page_count * page_size) AS size_bytes
+            FROM pragma_page_count(), pragma_page_size()
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        
+        Ok(row.get("size_bytes"))
     }
 }

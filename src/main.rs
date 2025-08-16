@@ -460,6 +460,18 @@ async fn main() -> Result<()> {
                     active_info.recording_manager.clone().unwrap()
                 )
             ));
+
+            // Get recording database size
+            let size_recording_path = format!("{}/control/recording/size", path);
+            let size_info = api_info.clone();
+            app = app.route(&size_recording_path, axum::routing::get(
+                move |headers| api_get_recording_size(
+                    headers,
+                    size_info.camera_id.clone(),
+                    size_info.camera_config.clone(),
+                    size_info.recording_manager.clone().unwrap()
+                )
+            ));
         }
     }
     
@@ -1082,6 +1094,34 @@ async fn api_get_active_recording(
             "active": false
         });
         Json(ApiResponse::success(data)).into_response()
+    }
+}
+
+async fn api_get_recording_size(
+    headers: axum::http::HeaderMap,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    match recording_manager.get_database_size(&camera_id).await {
+        Ok(size_bytes) => {
+            let data = serde_json::json!({
+                "camera_id": camera_id,
+                "size_bytes": size_bytes,
+                "size_mb": (size_bytes as f64) / (1024.0 * 1024.0),
+                "size_gb": (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0)
+            });
+            Json(ApiResponse::success(data)).into_response()
+        }
+        Err(_) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error("Failed to get database size", 500)))
+             .into_response()
+        }
     }
 }
 

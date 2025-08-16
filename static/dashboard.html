@@ -185,7 +185,7 @@
 
         .camera-stats {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
             gap: 10px;
             margin-bottom: 15px;
         }
@@ -519,8 +519,11 @@
             cameras.sort((a, b) => a.id.localeCompare(b.id));
             
             const camerasHtml = await Promise.all(cameras.map(async camera => {
-                const recordingStatus = await getRecordingStatus(camera.path, camera.id);
-                return createCameraCard(camera, recordingStatus);
+                const [recordingStatus, databaseSize] = await Promise.all([
+                    getRecordingStatus(camera.path, camera.id),
+                    getDatabaseSize(camera.path, camera.id)
+                ]);
+                return createCameraCard(camera, recordingStatus, databaseSize);
             }));
             
             container.innerHTML = '<div class="cameras-grid">' + camerasHtml.join('') + '</div>';
@@ -554,9 +557,48 @@
             }
         }
 
-        function createCameraCard(camera, recordingStatus) {
+        async function getDatabaseSize(cameraPath, cameraId) {
+            try {
+                const response = await fetch(`${cameraPath}/control/recording/size`);
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // Token required but not provided
+                        return { size_mb: 0, requires_auth: true };
+                    }
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const result = await response.json();
+                if (result.status === 'success') {
+                    return result.data;
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error(`Failed to get database size for ${cameraId}:`, error);
+                // Return default size
+                return {
+                    size_bytes: 0,
+                    size_mb: 0,
+                    size_gb: 0
+                };
+            }
+        }
+
+        function createCameraCard(camera, recordingStatus, databaseSize) {
             const lastFrameTime = camera.last_frame_time ? 
                 new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
+            
+            // Format database size for display
+            const formatSize = (sizeData) => {
+                if (sizeData.size_gb > 1) {
+                    return `${sizeData.size_gb.toFixed(2)} GB`;
+                } else if (sizeData.size_mb > 1) {
+                    return `${sizeData.size_mb.toFixed(1)} MB`;
+                } else {
+                    return `${(sizeData.size_bytes / 1024).toFixed(0)} KB`;
+                }
+            };
+            const dbSizeFormatted = formatSize(databaseSize);
             
             const recordingHtml = camera.connected ? `
                 <div class="recording-section">
@@ -620,6 +662,10 @@
                         <div class="camera-stat">
                             <strong>${lastFrameTime}</strong><br>
                             <small>Last Frame</small>
+                        </div>
+                        <div class="camera-stat">
+                            <strong>${dbSizeFormatted}</strong><br>
+                            <small>DB Size</small>
                         </div>
                     </div>
                     
