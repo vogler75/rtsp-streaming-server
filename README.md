@@ -23,7 +23,10 @@ A high-performance, low-latency video streaming server built in Rust that connec
 
 2. **Open your web browser** and navigate to:
    ```
-   # For specific cameras
+   # Dashboard (overview of all cameras)
+   http://localhost:8080/
+   
+   # Individual camera test pages
    http://localhost:8080/cam1
    http://localhost:8080/cam2
    http://localhost:8080/cam3
@@ -31,10 +34,45 @@ A high-performance, low-latency video streaming server built in Rust that connec
    
    For HTTPS (if TLS is enabled):
    ```
+   https://localhost:8080/
    https://localhost:8080/cam1
    ```
 
 3. **Configure cameras** by editing `config.toml` (see Configuration section)
+
+## URL Structure
+
+The server provides different endpoints for various functionality:
+
+### Main Endpoints
+- **`/`** - Dashboard (overview of all cameras with status, controls, and monitoring)
+- **`/dashboard`** - Alternative route to dashboard
+
+### Camera Endpoints
+For each camera configured with `path = "/cam1"`:
+
+- **`/cam1`** - Camera test page (also serves WebSocket connection for streaming)
+- **`/cam1/test`** - Explicit camera test page 
+- **`/cam1/stream`** - Video streaming page (WebSocket streaming interface)
+- **`/cam1/control`** - Camera control interface (recording, playback, live streaming)
+
+### CWC Integration
+
+For **Siemens WinCC Unified (CWC)** integration, use the appropriate streaming endpoint:
+
+- **Simple Streaming**: Use `/<cam-name>/stream` as the URL in CWC
+  ```
+  https://your-server/cam1/stream
+  https://your-server/cam2/stream
+  ```
+
+- **Control Interface**: If you need recording/playback controls in CWC, use `/<cam-name>/control` as the URL
+  ```
+  https://your-server/cam1/control
+  https://your-server/cam2/control
+  ```
+
+The **`/stream`** endpoint provides a clean video streaming interface optimized for embedding in CWC, while **`/control`** provides full recording and playback functionality.
 
 ## Configuration
 
@@ -211,9 +249,15 @@ To integrate the video streaming server with Siemens WinCC Unified, you need to 
 
 3. **Access cameras through WinCC Unified** using:
    ```
-   https://your-wincc-server/video/cam1
-   https://your-wincc-server/video/cam2
-   https://your-wincc-server/video/cam3
+   # For simple streaming (recommended for CWC):
+   https://your-wincc-server/video/cam1/stream
+   https://your-wincc-server/video/cam2/stream
+   https://your-wincc-server/video/cam3/stream
+   
+   # For control interface (recording/playback):
+   https://your-wincc-server/video/cam1/control
+   https://your-wincc-server/video/cam2/control
+   https://your-wincc-server/video/cam3/control
    ```
 
 ### Example: Complete IIS Rewrite Section
@@ -376,18 +420,22 @@ cargo build --release
 
 ### Viewing the Streams
 
-Open your browser to the specific camera path:
-- `http://localhost:8080/cam1` - Camera 1
-- `http://localhost:8080/cam2` - Camera 2
-- `http://localhost:8080/cam3` - Camera 3
+Open your browser to access different interfaces:
 
-The interface shows:
-- Live video feed
-- Connection status indicator  
-- Real-time FPS counter
-- Frame count
-- Processing latency
-- Fullscreen toggle
+**Dashboard (recommended starting point):**
+- `http://localhost:8080/` - Overview of all cameras with status and controls
+
+**Individual Camera Pages:**
+- `http://localhost:8080/cam1` - Camera 1 test page (WebSocket streaming)
+- `http://localhost:8080/cam1/stream` - Camera 1 streaming interface  
+- `http://localhost:8080/cam1/control` - Camera 1 control interface
+
+**Features by Interface:**
+
+- **Dashboard**: Server status, camera tiles, recording controls, database sizes
+- **Test pages** (`/cam1`, `/cam1/test`): Live video feed, connection status, FPS counter, frame count, processing latency, fullscreen toggle
+- **Stream pages** (`/cam1/stream`): Clean video streaming interface optimized for embedding
+- **Control pages** (`/cam1/control`): Full recording controls, playback, timeline navigation, live streaming
 
 ## Monitoring and Debugging
 
