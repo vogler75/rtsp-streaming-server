@@ -32,25 +32,41 @@ pub struct ActiveRecording {
 #[derive(Clone)]
 pub struct RecordingManager {
     config: RecordingConfig,
-    database: Arc<dyn DatabaseProvider>,
+    databases: Arc<RwLock<HashMap<String, Arc<dyn DatabaseProvider>>>>, // camera_id -> database
     active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>, // camera_id -> recording
     frame_subscribers: Arc<RwLock<HashMap<String, broadcast::Receiver<Bytes>>>>, // camera_id -> receiver
 }
 
 impl RecordingManager {
-    pub async fn new(
-        config: RecordingConfig,
-        database: Arc<dyn DatabaseProvider>,
-    ) -> Result<Self> {
-        // Initialize database
-        database.initialize().await?;
-
+    pub async fn new(config: RecordingConfig) -> Result<Self> {
         Ok(Self {
             config,
-            database,
+            databases: Arc::new(RwLock::new(HashMap::new())),
             active_recordings: Arc::new(RwLock::new(HashMap::new())),
             frame_subscribers: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Add a database for a specific camera
+    pub async fn add_camera_database(
+        &self,
+        camera_id: &str,
+        database: Arc<dyn DatabaseProvider>,
+    ) -> Result<()> {
+        // Initialize the database
+        database.initialize().await?;
+        
+        // Add to the databases map
+        let mut databases = self.databases.write().await;
+        databases.insert(camera_id.to_string(), database);
+        
+        Ok(())
+    }
+
+    /// Get the database for a specific camera
+    async fn get_camera_database(&self, camera_id: &str) -> Option<Arc<dyn DatabaseProvider>> {
+        let databases = self.databases.read().await;
+        databases.get(camera_id).cloned()
     }
 
     pub async fn start_recording(
@@ -61,11 +77,15 @@ impl RecordingManager {
         requested_duration: Option<i64>,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
     ) -> Result<i64> {
+        // Get the database for this camera
+        let database = self.get_camera_database(camera_id).await
+            .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
+
         // Stop any existing recording for this camera
         self.stop_camera_recordings(camera_id).await?;
 
         // Create new recording session in database
-        let session_id = self.database.create_recording_session(
+        let session_id = database.create_recording_session(
             camera_id,
             reason,
         ).await?;
@@ -102,7 +122,13 @@ impl RecordingManager {
         session_id: i64,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
     ) {
-        let database = self.database.clone();
+        let database = match self.get_camera_database(&camera_id).await {
+            Some(db) => db,
+            None => {
+                error!("No database found for camera '{}', cannot start recording task", camera_id);
+                return;
+            }
+        };
         let config = self.config.clone();
         let active_recordings = self.active_recordings.clone();
 
@@ -190,8 +216,12 @@ impl RecordingManager {
         if let Some(recording) = active_recordings.remove(camera_id) {
             drop(active_recordings);
             
-            // Stop the recording in database
-            self.database.stop_recording_session(recording.session_id).await?;
+            // Get the database for this camera and stop the recording
+            if let Some(database) = self.get_camera_database(camera_id).await {
+                database.stop_recording_session(recording.session_id).await?;
+            } else {
+                error!("No database found for camera '{}', cannot stop recording session", camera_id);
+            }
             
             info!("Stopped recording for camera '{}' (session {})", camera_id, recording.session_id);
             Ok(true)
@@ -201,12 +231,16 @@ impl RecordingManager {
     }
 
     async fn stop_camera_recordings(&self, camera_id: &str) -> Result<()> {
+        // Get the database for this camera
+        let database = self.get_camera_database(camera_id).await
+            .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
+
         // Get active recordings from database and stop them
-        let active_sessions = self.database.get_active_recordings(camera_id).await?;
+        let active_sessions = database.get_active_recordings(camera_id).await?;
         let session_count = active_sessions.len();
         
         for session in active_sessions {
-            self.database.stop_recording_session(session.id).await?;
+            database.stop_recording_session(session.id).await?;
         }
 
         // Remove from active recordings map
@@ -233,7 +267,29 @@ impl RecordingManager {
             to,
         };
 
-        self.database.list_recordings(&query).await
+        if let Some(cam_id) = camera_id {
+            // Query specific camera's database
+            if let Some(database) = self.get_camera_database(cam_id).await {
+                database.list_recordings(&query).await
+            } else {
+                Ok(Vec::new()) // No database for this camera
+            }
+        } else {
+            // Query all camera databases and combine results
+            let mut all_recordings = Vec::new();
+            let databases = self.databases.read().await;
+            
+            for (_, database) in databases.iter() {
+                match database.list_recordings(&query).await {
+                    Ok(recordings) => all_recordings.extend(recordings),
+                    Err(e) => error!("Failed to query recordings from database: {}", e),
+                }
+            }
+            
+            // Sort by start time
+            all_recordings.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+            Ok(all_recordings)
+        }
     }
 
     pub async fn get_replay_frames(
@@ -242,9 +298,13 @@ impl RecordingManager {
         from: DateTime<Utc>,
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>> {
+        // Get the database for this camera
+        let database = self.get_camera_database(camera_id).await
+            .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
+
         // If no end time specified, use current time
         let end_time = to.unwrap_or_else(|| Utc::now());
-        self.database.get_frames_in_range(camera_id, from, end_time).await
+        database.get_frames_in_range(camera_id, from, end_time).await
     }
 
     pub async fn is_recording(&self, camera_id: &str) -> bool {
@@ -263,7 +323,25 @@ impl RecordingManager {
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>> {
-        self.database.get_recorded_frames(session_id, from, to).await
+        // Since we don't know which camera this session belongs to, search all databases
+        let databases = self.databases.read().await;
+        
+        for (_camera_id, database) in databases.iter() {
+            match database.get_recorded_frames(session_id, from, to).await {
+                Ok(frames) => {
+                    if !frames.is_empty() {
+                        return Ok(frames);
+                    }
+                }
+                Err(_) => {
+                    // Continue to next database if this one doesn't have the session
+                    continue;
+                }
+            }
+        }
+        
+        // No frames found in any database
+        Ok(Vec::new())
     }
     
     pub async fn cleanup_old_recordings(
@@ -271,16 +349,41 @@ impl RecordingManager {
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
-        let deleted_sessions = self.database.delete_old_recordings(camera_id, older_than).await?;
-        if deleted_sessions > 0 {
-            info!(
-                "Cleaned up {} completed recording sessions and old frames{} older than {}",
-                deleted_sessions,
-                camera_id.map(|c| format!(" for camera '{}'", c)).unwrap_or_default(),
-                older_than
-            );
+        let mut total_deleted = 0;
+        
+        if let Some(cam_id) = camera_id {
+            // Clean up specific camera's database
+            if let Some(database) = self.get_camera_database(cam_id).await {
+                let deleted_sessions = database.delete_old_recordings(Some(cam_id), older_than).await?;
+                total_deleted += deleted_sessions;
+                if deleted_sessions > 0 {
+                    info!(
+                        "Cleaned up {} completed recording sessions and old frames for camera '{}' older than {}",
+                        deleted_sessions, cam_id, older_than
+                    );
+                }
+            }
+        } else {
+            // Clean up all camera databases
+            let databases = self.databases.read().await;
+            
+            for (cam_id, database) in databases.iter() {
+                match database.delete_old_recordings(Some(cam_id), older_than).await {
+                    Ok(deleted_sessions) => {
+                        total_deleted += deleted_sessions;
+                        if deleted_sessions > 0 {
+                            info!(
+                                "Cleaned up {} completed recording sessions and old frames for camera '{}' older than {}",
+                                deleted_sessions, cam_id, older_than
+                            );
+                        }
+                    }
+                    Err(e) => error!("Failed to cleanup recordings for camera '{}': {}", cam_id, e),
+                }
+            }
         }
-        Ok(deleted_sessions)
+        
+        Ok(total_deleted)
     }
     
     pub async fn get_frame_at_timestamp(
@@ -288,7 +391,11 @@ impl RecordingManager {
         camera_id: &str,
         timestamp: DateTime<Utc>,
     ) -> Result<Option<RecordedFrame>> {
-        self.database.get_frame_at_timestamp(camera_id, timestamp).await
+        // Get the database for this camera
+        let database = self.get_camera_database(camera_id).await
+            .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
+
+        database.get_frame_at_timestamp(camera_id, timestamp).await
     }
 
     /// Check for active recordings at startup and restart them
@@ -301,8 +408,17 @@ impl RecordingManager {
         let mut restarted_count = 0;
         
         for (camera_id, frame_sender) in camera_frame_senders {
+            // Get the database for this camera
+            let database = match self.get_camera_database(camera_id).await {
+                Some(db) => db,
+                None => {
+                    error!("No database found for camera '{}', skipping restart check", camera_id);
+                    continue;
+                }
+            };
+
             // Check database for active recording sessions for this camera
-            match self.database.get_active_recordings(camera_id).await {
+            match database.get_active_recordings(camera_id).await {
                 Ok(active_sessions) => {
                     for session in active_sessions {
                         info!(

@@ -385,6 +385,18 @@ function connectToControlWebSocket(url) {
     controlWebSocket.onopen = function() {
       console.log('[CWC DEBUG] ✅ Control WebSocket connected successfully');
       updateConnectionStatus(true);
+      
+      // Auto-enable live mode when connection is established
+      console.log('[CWC DEBUG] 📺 Auto-enabling live mode after connection established');
+      
+      // Update internal state and WebCC properties
+      currentLive = true;
+      currentPlay = false;
+      WebCC.Properties.live = true;
+      WebCC.Properties.play = false;
+      
+      // Send live command to start streaming
+      sendControlCommand({ cmd: 'live' });
     };
     
     controlWebSocket.onmessage = function(event) {
@@ -551,7 +563,9 @@ function connectToControlWebSocket(url) {
 }
 
 function sendControlCommand(command) {
-  if (!controlWebSocket || controlWebSocket.readyState !== WebSocket.OPEN) {
+  if (!controlWebSocket) return;
+  
+  if (controlWebSocket.readyState !== WebSocket.OPEN) {
     console.error('[CWC DEBUG] Control WebSocket not connected - cannot send command:', command);
     return;
   }
@@ -655,12 +669,18 @@ function setProperty(data) {
         reconnectAttempts = 0;
         if (currentURL) {
           connectToWebSocket(currentURL);
+          
+          // Live mode will be auto-enabled after connection is established
         }
       } else {
         // Disconnect and show blank screen
         if (websocket) {
           websocket.close();
           websocket = null;
+        }
+        if (controlWebSocket) {
+          controlWebSocket.close();
+          controlWebSocket = null;
         }
         if (reconnectTimer) {
           clearTimeout(reconnectTimer);

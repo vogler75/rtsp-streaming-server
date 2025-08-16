@@ -96,20 +96,21 @@ async fn main() -> Result<()> {
     // Initialize recording manager if enabled
     let recording_manager: Option<Arc<RecordingManager>> = if let Some(recording_config) = &config.recording {
         if recording_config.enabled {
-            info!("Initializing recording system with database: {}", recording_config.database_path);
+            info!("Initializing recording system with database directory: {}", recording_config.database_path);
             
-            match SqliteDatabase::new(&recording_config.database_path).await {
-                Ok(database) => {
-                    let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
-                    
-                    let recording_config_internal = RecordingConfig {
-                        max_frame_size: recording_config.max_frame_size.unwrap_or(10 * 1024 * 1024),
-                    };
-                    
-                    match RecordingManager::new(recording_config_internal, database).await {
-                        Ok(manager) => {
-                            info!("Recording system initialized successfully");
-                            let manager = Arc::new(manager);
+            // Ensure the database directory exists
+            if let Err(e) = std::fs::create_dir_all(&recording_config.database_path) {
+                error!("Failed to create database directory '{}': {}", recording_config.database_path, e);
+                None
+            } else {
+                let recording_config_internal = RecordingConfig {
+                    max_frame_size: recording_config.max_frame_size.unwrap_or(10 * 1024 * 1024),
+                };
+                
+                match RecordingManager::new(recording_config_internal).await {
+                    Ok(manager) => {
+                        info!("Recording system initialized successfully");
+                        let manager = Arc::new(manager);
                             
                             // Start cleanup task if max_recording_age is configured
                             if let Some(max_age_str) = &recording_config.max_recording_age {
@@ -176,17 +177,12 @@ async fn main() -> Result<()> {
                                 }
                             }
                             
-                            Some(manager)
-                        }
-                        Err(e) => {
-                            error!("Failed to initialize recording manager: {}", e);
-                            None
-                        }
+                        Some(manager)
                     }
-                }
-                Err(e) => {
-                    error!("Failed to initialize database: {}", e);
-                    None
+                    Err(e) => {
+                        error!("Failed to initialize recording manager: {}", e);
+                        None
+                    }
                 }
             }
         } else {
@@ -225,6 +221,28 @@ async fn main() -> Result<()> {
             mqtt_handle.clone(),
         ).await {
             Ok(video_stream) => {
+                // Create database for this camera if recording is enabled
+                if let Some(ref recording_manager_ref) = recording_manager {
+                    if let Some(recording_config) = &config.recording {
+                        let camera_db_path = format!("{}/{}.db", recording_config.database_path, camera_id);
+                        info!("Creating database for camera '{}' at '{}'", camera_id, camera_db_path);
+                        
+                        match SqliteDatabase::new(&camera_db_path).await {
+                            Ok(database) => {
+                                let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
+                                if let Err(e) = recording_manager_ref.add_camera_database(&camera_id, database).await {
+                                    error!("Failed to add database for camera '{}': {}", camera_id, e);
+                                } else {
+                                    info!("Database created successfully for camera '{}'", camera_id);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to create database for camera '{}': {}", camera_id, e);
+                            }
+                        }
+                    }
+                }
+
                 // Store the camera stream info for this camera's path
                 camera_streams.insert(camera_config.path.clone(), CameraStreamInfo {
                     camera_id: camera_id.clone(),
