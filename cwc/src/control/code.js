@@ -35,6 +35,27 @@ let currentLive = false;
 let currentRecordingReason = '';
 let currentRecordingActive = false;
 let currentGoto = '';
+let debugEnabled = false;
+
+////////////////////////////////////////////
+// Debug helper function
+function debugLog(...args) {
+  if (debugEnabled) {
+    console.log('[DEBUG]', ...args);
+  }
+}
+
+function debugError(...args) {
+  if (debugEnabled) {
+    console.error('[DEBUG]', ...args);
+  }
+}
+
+function debugWarn(...args) {
+  if (debugEnabled) {
+    console.warn('[DEBUG]', ...args);
+  }
+}
 
 ////////////////////////////////////////////
 // VideoPlayer functions
@@ -47,20 +68,20 @@ function initializeVideoPlayer() {
   videoElement.onerror = function(e) {
     // Only log video errors if we're actually using the video element
     if (videoElement.style.display !== 'none') {
-      console.error('Video error:', e);
+      debugError('Video error:', e);
       updateConnectionStatus(false);
     }
   };
   
   videoElement.onloadstart = function() {
     if (videoElement.style.display !== 'none') {
-      console.log('Video loading started');
+      debugLog('Video loading started');
     }
   };
   
   videoElement.oncanplay = function() {
     if (videoElement.style.display !== 'none') {
-      console.log('Video can start playing');
+      debugLog('Video can start playing');
     }
   };
 }
@@ -99,7 +120,7 @@ function updateConnectionStatus(connected) {
     }
   }
   
-  console.log('Connection status:', connected);
+  // Connection status updated
 }
 
 function scheduleReconnect() {
@@ -110,17 +131,17 @@ function scheduleReconnect() {
   // Only reconnect if shouldConnect is true (endless reconnection)
   if (shouldConnect && currentURL) {
     reconnectAttempts++;
-    console.log(`Scheduling reconnect attempt ${reconnectAttempts} in ${reconnectInterval}ms`);
+    debugLog(`Scheduling reconnect attempt ${reconnectAttempts} in ${reconnectInterval}ms`);
     updateConnectionStatus(false);
     
     reconnectTimer = setTimeout(() => {
       if (shouldConnect) { // Check again in case it changed during timeout
-        console.log(`Attempting to reconnect (${reconnectAttempts})`);
+        debugLog(`Attempting to reconnect (${reconnectAttempts})`);
         connectToWebSocket(currentURL);
       }
     }, reconnectInterval);
   } else {
-    console.log('Not reconnecting: shouldConnect =', shouldConnect, 'currentURL =', currentURL);
+    debugLog('Not reconnecting: shouldConnect =', shouldConnect, 'currentURL =', currentURL);
   }
 }
 
@@ -139,7 +160,7 @@ function showBlankScreen() {
 
 function connectToWebSocket(url) {
   if (!url || url.trim() === '' || !shouldConnect) {
-    console.log('No URL provided or connection disabled');
+    debugLog('No URL provided or connection disabled');
     updateConnectionStatus(false);
     return;
   }
@@ -161,31 +182,31 @@ function connectToWebSocket(url) {
   }
   
   try {
-    console.log('Attempting WebSocket connection...');
-    console.log('URL:', url);
-    console.log('Protocol:', url.startsWith('wss://') ? 'Secure WebSocket (WSS)' : 'WebSocket (WS)');
+    debugLog('Attempting WebSocket connection...');
+    debugLog('URL:', url);
+    debugLog('Protocol:', url.startsWith('wss://') ? 'Secure WebSocket (WSS)' : 'WebSocket (WS)');
     
     // Add token to URL if provided
     let connectUrl = url;
     if (currentToken && currentToken.trim() !== '') {
       const separator = url.includes('?') ? '&' : '?';
       connectUrl = url + separator + 'token=' + encodeURIComponent(currentToken);
-      console.log('Using authentication token');
+      debugLog('Using authentication token');
     }
     
     // For WSS with self-signed certificates, try different approaches
     if (connectUrl.startsWith('wss://')) {
-      console.log('Attempting WSS connection (ignoring certificate errors where possible)');
+      debugLog('Attempting WSS connection (ignoring certificate errors where possible)');
       
       // Try to create WebSocket with additional error handling for certificate issues
       try {
         websocket = new WebSocket(connectUrl);
       } catch (certError) {
-        console.warn('WSS connection failed, possibly due to certificate issues:', certError);
+        debugWarn('WSS connection failed, possibly due to certificate issues:', certError);
         
         // Fallback: try converting WSS to WS for testing
         const wsUrl = connectUrl.replace('wss://', 'ws://');
-        console.log('Attempting fallback to WS:', wsUrl);
+        debugLog('Attempting fallback to WS:', wsUrl);
         websocket = new WebSocket(wsUrl);
       }
     } else {
@@ -193,7 +214,7 @@ function connectToWebSocket(url) {
     }
     
     websocket.onopen = function() {
-      console.log('WebSocket connected');
+      debugLog('WebSocket connected');
       updateConnectionStatus(true);
     };
     
@@ -282,26 +303,26 @@ function connectToWebSocket(url) {
             }
           }
         } catch (e) {
-          console.log('Received text data:', event.data);
+          debugLog('Received text data:', event.data);
         }
       }
     };
     
     websocket.onerror = function(error) {
-      console.error('WebSocket error occurred');
-      console.error('URL:', currentURL);
-      console.error('ReadyState:', websocket ? websocket.readyState : 'null');
-      console.error('Error event:', error);
+      debugError('WebSocket error occurred');
+      debugError('URL:', currentURL);
+      debugError('ReadyState:', websocket ? websocket.readyState : 'null');
+      debugError('Error event:', error);
       
       // Provide specific guidance for WSS certificate issues
       if (currentURL.startsWith('wss://')) {
-        console.error('====== WSS CONNECTION TROUBLESHOOTING ======');
-        console.error('If this is a self-signed certificate error:');
-        console.error('1. Open the server URL in a browser: ' + currentURL.replace('wss://', 'https://'));
-        console.error('2. Accept the security warning to trust the certificate');
-        console.error('3. Or disable TLS in server config.toml and use ws:// instead');
-        console.error('4. Or add the certificate to the system trust store');
-        console.error('============================================');
+        debugError('====== WSS CONNECTION TROUBLESHOOTING ======');
+        debugError('If this is a self-signed certificate error:');
+        debugError('1. Open the server URL in a browser: ' + currentURL.replace('wss://', 'https://'));
+        debugError('2. Accept the security warning to trust the certificate');
+        debugError('3. Or disable TLS in server config.toml and use ws:// instead');
+        debugError('4. Or add the certificate to the system trust store');
+        debugError('============================================');
       }
       
       updateConnectionStatus(false);
@@ -309,11 +330,11 @@ function connectToWebSocket(url) {
     };
     
     websocket.onclose = function(event) {
-      console.log('WebSocket closed');
-      console.log('Code:', event.code);
-      console.log('Reason:', event.reason || 'No reason provided');
-      console.log('Was clean:', event.wasClean);
-      console.log('URL was:', currentURL);
+      debugLog('WebSocket closed');
+      debugLog('Code:', event.code);
+      debugLog('Reason:', event.reason || 'No reason provided');
+      debugLog('Was clean:', event.wasClean);
+      debugLog('URL was:', currentURL);
       
       // Common WebSocket close codes
       const closeReasons = {
@@ -331,7 +352,7 @@ function connectToWebSocket(url) {
       };
       
       const closeDescription = closeReasons[event.code] || 'Unknown';
-      console.log('Close description:', closeDescription);
+      debugLog('Close description:', closeDescription);
       
       updateConnectionStatus(false);
       websocket = null;
@@ -342,17 +363,17 @@ function connectToWebSocket(url) {
     };
     
   } catch (error) {
-    console.error('Failed to create WebSocket:', error);
+    debugError('Failed to create WebSocket:', error);
     updateConnectionStatus(false);
     scheduleReconnect();
   }
 }
 
 function connectToControlWebSocket(url) {
-  console.log('[CWC DEBUG] 🔗 Connecting to control WebSocket...');
+  debugLog('🔗 Connecting to control WebSocket...');
   
   if (controlWebSocket) {
-    console.log('[CWC DEBUG] Closing existing control WebSocket');
+    debugLog('Closing existing control WebSocket');
     controlWebSocket.close();
     controlWebSocket = null;
   }
@@ -376,18 +397,18 @@ function connectToControlWebSocket(url) {
     if (currentToken && currentToken.trim() !== '') {
       const separator = controlUrl.includes('?') ? '&' : '?';
       controlUrl += separator + 'token=' + encodeURIComponent(currentToken);
-      console.log('[CWC DEBUG] Adding token to control URL');
+      debugLog('Adding token to control URL');
     }
     
-    console.log('[CWC DEBUG] 🔗 Control URL:', controlUrl);
+    debugLog('🔗 Control URL:', controlUrl);
     controlWebSocket = new WebSocket(controlUrl);
     
     controlWebSocket.onopen = function() {
-      console.log('[CWC DEBUG] ✅ Control WebSocket connected successfully');
+      debugLog('✅ Control WebSocket connected successfully');
       updateConnectionStatus(true);
       
       // Auto-enable live mode when connection is established
-      console.log('[CWC DEBUG] 📺 Auto-enabling live mode after connection established');
+      debugLog('📺 Auto-enabling live mode after connection established');
       
       // Update internal state and WebCC properties
       currentLive = true;
@@ -411,7 +432,7 @@ function connectToControlWebSocket(url) {
           const dataView = new DataView(buffer);
           
           if (buffer.byteLength < 9) {
-            console.warn('Control message too short, expected at least 9 bytes');
+            debugWarn('Control message too short, expected at least 9 bytes');
             return;
           }
           
@@ -494,69 +515,69 @@ function connectToControlWebSocket(url) {
             
             try {
               const response = JSON.parse(jsonString);
-              console.log('[CWC DEBUG] ⬅ RECEIVED JSON RESPONSE:', response);
+              debugLog('⬅ RECEIVED JSON RESPONSE:', response);
               
               // Handle command responses
               if (response.code) {
                 if (response.code === 200) {
-                  console.log('[CWC DEBUG] ✅ Control command successful:', response.text);
+                  debugLog('✅ Control command successful:', response.text);
                   if (response.data) {
-                    console.log('[CWC DEBUG] Response data:', response.data);
+                    debugLog('Response data:', response.data);
                   }
                 } else {
-                  console.error('[CWC DEBUG] ❌ Control command failed:', response.text, 'Code:', response.code);
+                  debugError('❌ Control command failed:', response.text, 'Code:', response.code);
                 }
               }
             } catch (e) {
-              console.error('[CWC DEBUG] ⬅ Failed to parse JSON response:', e);
-              console.log('[CWC DEBUG] Raw JSON data:', jsonString);
+              debugError('⬅ Failed to parse JSON response:', e);
+              debugLog('Raw JSON data:', jsonString);
             }
           } else {
-            console.warn('[CWC DEBUG] ⬅ UNKNOWN MESSAGE TYPE:', messageType, 'Buffer size:', buffer.byteLength);
+            debugWarn('⬅ UNKNOWN MESSAGE TYPE:', messageType, 'Buffer size:', buffer.byteLength);
           }
         }).catch(error => {
-          console.error('[CWC DEBUG] ⬅ Error reading binary data:', error);
+          debugError('⬅ Error reading binary data:', error);
         });
         
       } else if (typeof event.data === 'string') {
         // Handle text messages (fallback)
         try {
           const response = JSON.parse(event.data);
-          console.log('[CWC DEBUG] ⬅ RECEIVED TEXT RESPONSE:', response);
+          debugLog('⬅ RECEIVED TEXT RESPONSE:', response);
           
           // Handle command responses
           if (response.code) {
             if (response.code === 200) {
-              console.log('[CWC DEBUG] ✅ Control command successful (text):', response.text);
+              debugLog('✅ Control command successful (text):', response.text);
             } else {
-              console.error('[CWC DEBUG] ❌ Control command failed (text):', response.text);
+              debugError('❌ Control command failed (text):', response.text);
             }
           }
         } catch (e) {
-          console.log('[CWC DEBUG] ⬅ RECEIVED TEXT MESSAGE (non-JSON):', event.data);
+          debugLog('⬅ RECEIVED TEXT MESSAGE (non-JSON):', event.data);
         }
       }
     };
     
     controlWebSocket.onerror = function(error) {
-      console.error('[CWC DEBUG] ❌ Control WebSocket error:', error);
+      debugError('❌ Control WebSocket error:', error);
       updateConnectionStatus(false);
       scheduleReconnect();
     };
     
     controlWebSocket.onclose = function(event) {
-      console.log('[CWC DEBUG] 🔌 Control WebSocket closed:', event.code, event.reason || 'No reason provided');
+      debugLog('🔌 Control WebSocket closed:', event.code, event.reason || 'No reason provided');
       updateConnectionStatus(false);
       controlWebSocket = null;
       
       if (event.code !== 1000) {
-        console.log('[CWC DEBUG] Scheduling reconnect due to abnormal close');
+        debugLog('Scheduling reconnect due to abnormal close');
         scheduleReconnect();
       }
     };
     
   } catch (error) {
-    console.error('[CWC DEBUG] ❌ Failed to create control WebSocket:', error);
+    debugError('❌ Failed to create control WebSocket:', error);
     updateConnectionStatus(false);
     scheduleReconnect();
   }
@@ -566,18 +587,18 @@ function sendControlCommand(command) {
   if (!controlWebSocket) return;
   
   if (controlWebSocket.readyState !== WebSocket.OPEN) {
-    console.error('[CWC DEBUG] Control WebSocket not connected - cannot send command:', command);
+    debugError('Control WebSocket not connected - cannot send command:', command);
     return;
   }
   
   const commandStr = JSON.stringify(command);
-  console.log('[CWC DEBUG] ➤ SENDING CONTROL COMMAND:', commandStr);
+  debugLog('➤ SENDING CONTROL COMMAND:', commandStr);
   controlWebSocket.send(commandStr);
 }
 
 function handleRecordingControl(active, reason) {
   if (!isControlMode || !currentURL) {
-    console.log('[CWC DEBUG] Recording control only available in control mode');
+    debugLog('Recording control only available in control mode');
     return;
   }
   
@@ -600,7 +621,7 @@ function handleRecordingControl(active, reason) {
   
   if (currentToken) {
     requestOptions.headers['Authorization'] = 'Bearer ' + currentToken;
-    console.log('[CWC DEBUG] Using token authentication for HTTP request');
+    debugLog('Using token authentication for HTTP request');
   }
   
   if (active) {
@@ -608,7 +629,7 @@ function handleRecordingControl(active, reason) {
     requestOptions.body = JSON.stringify({ reason: reason || '' });
   }
   
-  console.log('[CWC DEBUG] ➤ SENDING HTTP REQUEST:', {
+  debugLog('➤ SENDING HTTP REQUEST:', {
     method: 'POST',
     url: fullUrl,
     body: requestOptions.body || '(no body)',
@@ -617,14 +638,14 @@ function handleRecordingControl(active, reason) {
   
   fetch(fullUrl, requestOptions)
     .then(response => {
-      console.log('[CWC DEBUG] ⬅ HTTP RESPONSE STATUS:', response.status, response.statusText);
+      debugLog('⬅ HTTP RESPONSE STATUS:', response.status, response.statusText);
       return response.json();
     })
     .then(data => {
-      console.log('[CWC DEBUG] ⬅ HTTP RESPONSE DATA:', data);
+      debugLog('⬅ HTTP RESPONSE DATA:', data);
     })
     .catch(error => {
-      console.error('[CWC DEBUG] ⬅ HTTP REQUEST ERROR:', error);
+      debugError('⬅ HTTP REQUEST ERROR:', error);
     });
 }
 
@@ -640,7 +661,7 @@ function setProperty(data) {
         if (shouldConnect) {
           // Disconnect from old URL if connected
           if (websocket) {
-            console.log('URL changed from', oldURL, 'to', currentURL, '- reconnecting...');
+            debugLog('URL changed from', oldURL, 'to', currentURL, '- reconnecting...');
             websocket.close();
             websocket = null;
           }
@@ -698,12 +719,12 @@ function setProperty(data) {
     case 'token':
       if (data.value !== currentToken) {
         currentToken = data.value;
-        console.log('Token updated');
+        debugLog('Token updated');
         
         // If we're connected and token changed, reconnect with new token
         if (shouldConnect && currentURL) {
           if (websocket) {
-            console.log('Token changed - reconnecting with new authentication...');
+            debugLog('Token changed - reconnecting with new authentication...');
             websocket.close();
             websocket = null;
           }
@@ -721,11 +742,11 @@ function setProperty(data) {
       break;
     case 'control':
       isControlMode = data.value;
-      console.log('[CWC DEBUG] 🔧 Control mode changed to:', isControlMode);
+      debugLog('🔧 Control mode changed to:', isControlMode);
       
       // Reconnect if URL is available and we're supposed to be connected
       if (shouldConnect && currentURL) {
-        console.log('[CWC DEBUG] Reconnecting due to control mode change...');
+        debugLog('Reconnecting due to control mode change...');
         if (websocket) {
           websocket.close();
           websocket = null;
@@ -739,15 +760,15 @@ function setProperty(data) {
       break;
     case 'play_from':
       currentPlayFrom = data.value;
-      console.log('[CWC DEBUG] 🔧 Play from timestamp changed to:', currentPlayFrom);
+      debugLog('🔧 Play from timestamp changed to:', currentPlayFrom);
       break;
     case 'play_to':
       currentPlayTo = data.value;
-      console.log('[CWC DEBUG] 🔧 Play to timestamp changed to:', currentPlayTo);
+      debugLog('🔧 Play to timestamp changed to:', currentPlayTo);
       break;
     case 'play':
       currentPlay = data.value;
-      console.log('[CWC DEBUG] 🔧 Play control changed to:', currentPlay);
+      debugLog('🔧 Play control changed to:', currentPlay);
       
       if (isControlMode && controlWebSocket) {
         if (currentPlay) {
@@ -759,77 +780,81 @@ function setProperty(data) {
           if (currentPlayTo) {
             command.to = currentPlayTo;
           }
-          console.log('[CWC DEBUG] 🎬 Triggering playback start with timestamps from:', currentPlayFrom, 'to:', currentPlayTo || '(end)');
+          debugLog('🎬 Triggering playback start with timestamps from:', currentPlayFrom, 'to:', currentPlayTo || '(end)');
           sendControlCommand(command);
         } else {
           // Stop playback
-          console.log('[CWC DEBUG] ⏹️ Triggering playback stop');
+          debugLog('⏹️ Triggering playback stop');
           sendControlCommand({ cmd: 'stop' });
         }
       } else {
-        console.log('[CWC DEBUG] ⚠️ Play command ignored - not in control mode or WebSocket not connected');
+        debugWarn('⚠️ Play command ignored - not in control mode or WebSocket not connected');
       }
       break;
     case 'speed':
       currentSpeed = data.value;
-      console.log('[CWC DEBUG] 🔧 Playback speed changed to:', currentSpeed);
+      debugLog('🔧 Playback speed changed to:', currentSpeed);
       
       if (isControlMode && controlWebSocket) {
-        console.log('[CWC DEBUG] ⚡ Triggering speed change');
+        debugLog('⚡ Triggering speed change');
         sendControlCommand({
           cmd: 'speed',
           speed: currentSpeed
         });
       } else {
-        console.log('[CWC DEBUG] ⚠️ Speed command ignored - not in control mode or WebSocket not connected');
+        debugWarn('⚠️ Speed command ignored - not in control mode or WebSocket not connected');
       }
       break;
     case 'live':
       currentLive = data.value;
-      console.log('[CWC DEBUG] 🔧 Live stream control changed to:', currentLive);
+      debugLog('🔧 Live stream control changed to:', currentLive);
       
       if (isControlMode && controlWebSocket) {
         if (currentLive) {
-          console.log('[CWC DEBUG] 📺 Triggering live stream start');
+          debugLog('📺 Triggering live stream start');
           sendControlCommand({ cmd: 'live' });
         } else {
-          console.log('[CWC DEBUG] ⏹️ Triggering live stream stop');
+          debugLog('⏹️ Triggering live stream stop');
           sendControlCommand({ cmd: 'stop' });
         }
       } else {
-        console.log('[CWC DEBUG] ⚠️ Live command ignored - not in control mode or WebSocket not connected');
+        debugWarn('⚠️ Live command ignored - not in control mode or WebSocket not connected');
       }
       break;
     case 'recording_reason':
       currentRecordingReason = data.value;
-      console.log('[CWC DEBUG] 🔧 Recording reason changed to:', currentRecordingReason);
+      debugLog('🔧 Recording reason changed to:', currentRecordingReason);
       break;
     case 'recording_active':
       currentRecordingActive = data.value;
-      console.log('[CWC DEBUG] 🔧 Recording active changed to:', currentRecordingActive);
+      debugLog('🔧 Recording active changed to:', currentRecordingActive);
       
       if (isControlMode) {
-        console.log('[CWC DEBUG] 🔴 Triggering recording control - active:', currentRecordingActive, 'reason:', currentRecordingReason);
+        debugLog('🔴 Triggering recording control - active:', currentRecordingActive, 'reason:', currentRecordingReason);
         handleRecordingControl(currentRecordingActive, currentRecordingReason);
       } else {
-        console.log('[CWC DEBUG] ⚠️ Recording command ignored - not in control mode');
+        debugWarn('⚠️ Recording command ignored - not in control mode');
       }
       break;
     case 'goto':
       currentGoto = data.value;
-      console.log('[CWC DEBUG] 🔧 Goto timestamp changed to:', currentGoto);
+      debugLog('🔧 Goto timestamp changed to:', currentGoto);
       
       if (isControlMode && controlWebSocket && currentGoto) {
-        console.log('[CWC DEBUG] 🎯 Triggering goto command to timestamp:', currentGoto);
+        debugLog('🎯 Triggering goto command to timestamp:', currentGoto);
         sendControlCommand({
           cmd: 'goto',
           timestamp: currentGoto
         });
       } else if (!currentGoto) {
-        console.log('[CWC DEBUG] ⚠️ Goto command ignored - empty timestamp');
+        debugWarn('⚠️ Goto command ignored - empty timestamp');
       } else {
-        console.log('[CWC DEBUG] ⚠️ Goto command ignored - not in control mode or WebSocket not connected');
+        debugWarn('⚠️ Goto command ignored - not in control mode or WebSocket not connected');
       }
+      break;
+    case 'debug':
+      debugEnabled = data.value;
+      console.log('Debug logging:', debugEnabled ? 'enabled' : 'disabled');
       break;
   }
 }
@@ -839,7 +864,7 @@ function setProperty(data) {
 WebCC.start(
   function (result) {
     if (result) {
-      console.log('WebCC connected successfully');
+      console.log('WebCC: Connected successfully');
       initializeVideoPlayer();
       
       // Set initial properties
@@ -855,6 +880,7 @@ WebCC.start(
       currentRecordingReason = WebCC.Properties.recording_reason || '';
       currentRecordingActive = WebCC.Properties.recording_active || false;
       currentGoto = WebCC.Properties.goto || '';
+      debugEnabled = WebCC.Properties.debug || false;
       
       // Check version property at startup
       if (versionElement && WebCC.Properties.version) {
@@ -872,7 +898,7 @@ WebCC.start(
       // Subscribe for property changes
       WebCC.onPropertyChanged.subscribe(setProperty);
     } else {
-      console.log('WebCC connection failed');
+      console.error('WebCC: Connection failed');
       updateConnectionStatus(false);
     }
   },
@@ -897,7 +923,8 @@ WebCC.start(
       recording_reason: '',
       recording_active: false,
       goto: '',
-      timestamp: ''
+      timestamp: '',
+      debug: false
     }
   },
   // placeholder to include additional Unified dependencies

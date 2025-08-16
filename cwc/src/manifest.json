@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.19",
+			"version": "1.0.20",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -107,6 +107,11 @@
 						"type": "string",
 						"default": "",
 						"description": "Current video frame timestamp in ISO format (read-only, e.g., '2025-08-15T10:30:00.000Z')"
+					},
+					"debug": {
+						"type": "boolean",
+						"default": false,
+						"description": "Enable debug logging for troubleshooting"
 					}
 				}
 			}
