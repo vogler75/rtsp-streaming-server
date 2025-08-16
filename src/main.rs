@@ -41,6 +41,22 @@ struct Args {
     config: String,
 }
 
+#[derive(Clone)]
+struct CameraStreamInfo {
+    camera_id: String,
+    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
+    mqtt_handle: Option<MqttHandle>,
+    camera_config: config::CameraConfig,
+    recording_manager: Option<Arc<RecordingManager>>,
+}
+
+#[derive(Clone)]
+struct AppState {
+    camera_streams: Arc<tokio::sync::RwLock<HashMap<String, CameraStreamInfo>>>,
+    mqtt_handle: Option<MqttHandle>,
+    start_time: std::time::Instant,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -194,14 +210,6 @@ async fn main() -> Result<()> {
     };
 
     // Create video streams for each camera
-    #[derive(Clone)]
-    struct CameraStreamInfo {
-        camera_id: String,
-        frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
-        mqtt_handle: Option<MqttHandle>,
-        camera_config: config::CameraConfig,
-        recording_manager: Option<Arc<RecordingManager>>,
-    }
     let mut camera_streams: HashMap<String, CameraStreamInfo> = HashMap::new();
     
     for (camera_id, camera_config) in config.cameras.clone() {
@@ -308,13 +316,29 @@ async fn main() -> Result<()> {
         tower_http::cors::CorsLayer::permissive()
     };
 
+    // Collect camera streams for API access
+    
+    // Convert camera_streams to be accessible by camera_id
+    let mut camera_streams_by_id: HashMap<String, CameraStreamInfo> = HashMap::new();
+    let camera_streams_by_path = camera_streams.clone();
+    for (_, stream_info) in &camera_streams {
+        camera_streams_by_id.insert(stream_info.camera_id.clone(), stream_info.clone());
+    }
+    
+    let app_state = AppState {
+        camera_streams: Arc::new(tokio::sync::RwLock::new(camera_streams_by_id)),
+        mqtt_handle: mqtt_handle.clone(),
+        start_time: std::time::Instant::now(),
+    };
+
     // Build router with camera paths
     let mut app = axum::Router::new()
         .route("/", axum::routing::get(index_handler))
+        .route("/dashboard", axum::routing::get(dashboard_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"));
     
     // Add routes for each camera (both stream and control endpoints)
-    for (path, stream_info) in camera_streams {
+    for (path, stream_info) in camera_streams_by_path {
         info!("Adding routes for camera at path: {}", path);
         
         // Stream endpoint: /<camera_path>/stream
@@ -439,6 +463,96 @@ async fn main() -> Result<()> {
         }
     }
     
+    // Add API endpoints with captured state
+    let api_state = app_state.clone();
+    app = app.route("/api/status", axum::routing::get(move || {
+        let state = api_state.clone();
+        async move {
+            let uptime_secs = state.start_time.elapsed().as_secs();
+            let camera_streams = state.camera_streams.read().await;
+            let total_cameras = camera_streams.len();
+            drop(camera_streams); // Release lock before await
+            
+            // Calculate total clients by summing clients from all cameras
+            let mut total_clients = 0;
+            if let Some(mqtt_handle) = &state.mqtt_handle {
+                let all_camera_statuses = mqtt_handle.get_all_camera_status().await;
+                total_clients = all_camera_statuses.values()
+                    .map(|status| status.clients_connected)
+                    .sum();
+            }
+            
+            let status = serde_json::json!({
+                "uptime_secs": uptime_secs,
+                "total_clients": total_clients,
+                "total_cameras": total_cameras
+            });
+            
+            Json(ApiResponse::success(status)).into_response()
+        }
+    }));
+    
+    let api_state2 = app_state.clone();
+    app = app.route("/api/cameras", axum::routing::get(move || {
+        let state = api_state2.clone();
+        async move {
+            let camera_streams = state.camera_streams.read().await;
+            
+            let mut cameras = Vec::new();
+            
+            // Collect camera data first and sort by camera ID
+            let mut camera_data: Vec<(String, String, bool)> = camera_streams.iter()
+                .map(|(id, info)| (id.clone(), info.camera_config.path.clone(), info.camera_config.token.is_some()))
+                .collect();
+            camera_data.sort_by(|a, b| a.0.cmp(&b.0));
+            drop(camera_streams); // Release lock before async operations
+            
+            // Get all camera statuses at once for efficiency
+            let all_camera_statuses = if let Some(mqtt_handle) = &state.mqtt_handle {
+                mqtt_handle.get_all_camera_status().await
+            } else {
+                HashMap::new()
+            };
+            
+            for (camera_id, camera_path, token_required) in camera_data {
+                let camera_status = if let Some(real_status) = all_camera_statuses.get(&camera_id) {
+                    serde_json::json!({
+                        "id": real_status.id,
+                        "path": camera_path,
+                        "connected": real_status.connected,
+                        "capture_fps": real_status.capture_fps,
+                        "clients_connected": real_status.clients_connected,
+                        "last_frame_time": real_status.last_frame_time,
+                        "ffmpeg_running": real_status.ffmpeg_running,
+                        "duplicate_frames": real_status.duplicate_frames,
+                        "token_required": token_required
+                    })
+                } else {
+                    serde_json::json!({
+                        "id": camera_id,
+                        "path": camera_path,
+                        "connected": false,
+                        "capture_fps": 0.0,
+                        "clients_connected": 0,
+                        "last_frame_time": null,
+                        "ffmpeg_running": false,
+                        "duplicate_frames": 0,
+                        "token_required": token_required
+                    })
+                };
+                
+                cameras.push(camera_status);
+            }
+            
+            let response = serde_json::json!({
+                "cameras": cameras,
+                "count": cameras.len()
+            });
+            
+            Json(ApiResponse::success(response)).into_response()
+        }
+    }));
+    
     app = app.layer(cors_layer);
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
@@ -495,6 +609,11 @@ async fn index_handler(
     // Check if 'full' parameter is present
     let is_full_mode = query.contains_key("full");
     serve_index_with_mode(is_full_mode).await.into_response()
+}
+
+async fn dashboard_handler() -> axum::response::Html<String> {
+    let html = include_str!("../static/dashboard.html").to_string();
+    axum::response::Html(html)
 }
 
 async fn camera_handler(

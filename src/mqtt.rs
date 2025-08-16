@@ -407,4 +407,9 @@ impl MqttHandle {
         
         Ok(())
     }
+    
+    pub async fn get_all_camera_status(&self) -> HashMap<String, CameraStatus> {
+        let cameras = self.camera_status.read().await;
+        cameras.clone()
+    }
 }

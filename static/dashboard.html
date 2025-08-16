@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTSP Server Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .refresh-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.1);
+            padding: 10px 15px;
+            border-radius: 25px;
+            backdrop-filter: blur(10px);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        select {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 8px 12px;
+            border-radius: 15px;
+            font-size: 14px;
+        }
+
+        select option {
+            background: #2a5298;
+            color: white;
+        }
+
+        .server-status {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+
+        .server-status h2 {
+            margin-bottom: 15px;
+            text-align: center;
+            color: #ffd700;
+        }
+
+        .server-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #4ade80;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #cbd5e1;
+            margin-top: 5px;
+        }
+
+        .cameras-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .camera-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .camera-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .camera-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .camera-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-connected {
+            background-color: #4ade80;
+            box-shadow: 0 0 10px #4ade80;
+        }
+
+        .status-disconnected {
+            background-color: #ef4444;
+            box-shadow: 0 0 10px #ef4444;
+        }
+
+        .camera-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .camera-stat {
+            background: rgba(255,255,255,0.05);
+            padding: 8px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+
+        .recording-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .recording-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .recording-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .recording-active {
+            color: #ef4444;
+        }
+
+        .recording-inactive {
+            color: #6b7280;
+        }
+
+        .token-section {
+            margin-top: 10px;
+        }
+
+        .token-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .token-input::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+
+        .camera-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 15px;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .camera-links {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .camera-link {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: white;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .camera-link:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+            text-decoration: none;
+            color: white;
+        }
+
+        .last-update {
+            text-align: center;
+            margin-top: 20px;
+            color: #cbd5e1;
+            font-size: 0.9em;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #cbd5e1;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .loading::after {
+            content: '...';
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎥 RTSP Server Dashboard</h1>
+        </div>
+
+        <div class="controls">
+            <button onclick="refreshData()">🔄 Refresh Now</button>
+            <div class="refresh-section">
+                <label>Auto-refresh:</label>
+                <select id="autoRefreshSelect" onchange="updateAutoRefresh()">
+                    <option value="0">Off</option>
+                    <option value="1000">1 sec</option>
+                    <option value="3000" selected>3 sec</option>
+                    <option value="5000">5 sec</option>
+                    <option value="10000">10 sec</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+        <div class="server-status">
+            <h2>📊 Server Status</h2>
+            <div class="server-stats" id="serverStats">
+                <div class="loading">Loading server status</div>
+            </div>
+        </div>
+
+        <div id="camerasContainer">
+            <div class="loading">Loading camera information</div>
+        </div>
+
+        <div class="last-update">
+            Last updated: <span id="lastUpdate">Never</span>
+        </div>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+        let currentAutoRefreshRate = 3000; // Default 3 seconds
+
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshData();
+            updateAutoRefresh();
+        });
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+
+        function updateLastUpdate() {
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+
+        function updateAutoRefresh() {
+            const select = document.getElementById('autoRefreshSelect');
+            const rate = parseInt(select.value);
+            
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            
+            if (rate > 0) {
+                currentAutoRefreshRate = rate;
+                autoRefreshInterval = setInterval(refreshData, rate);
+            }
+        }
+
+        async function refreshData() {
+            hideError();
+            
+            try {
+                // Since we can't directly access MQTT from browser, we'll need to make HTTP requests
+                // to get the data. For now, we'll simulate the data structure based on what you mentioned.
+                
+                // This would need to be replaced with actual API endpoints on your server
+                await Promise.all([
+                    loadServerStatus(),
+                    loadCameraData()
+                ]);
+                
+                updateLastUpdate();
+            } catch (error) {
+                console.error('Error refreshing data:', error);
+                showError('Failed to refresh data: ' + error.message);
+            }
+        }
+
+        async function loadServerStatus() {
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const result = await response.json();
+                if (result.status === 'success') {
+                    displayServerStatus(result.data);
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error('Failed to load server status:', error);
+                // Fallback to placeholder data
+                const serverStatus = {
+                    uptime_secs: 0,
+                    total_clients: 0,
+                    total_cameras: 0
+                };
+                displayServerStatus(serverStatus);
+                throw error;
+            }
+        }
+
+        function displayServerStatus(status) {
+            const uptime = formatUptime(status.uptime_secs);
+            
+            const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-value">${uptime}</div>
+                    <div class="stat-label">Uptime</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${status.total_cameras}</div>
+                    <div class="stat-label">Total Cameras</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${status.total_clients}</div>
+                    <div class="stat-label">Connected Clients</div>
+                </div>
+            `;
+            
+            document.getElementById('serverStats').innerHTML = statsHtml;
+        }
+
+        function formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            
+            if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
+        }
+
+        async function loadCameraData() {
+            try {
+                const response = await fetch('/api/cameras');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const result = await response.json();
+                if (result.status === 'success') {
+                    await displayCameras(result.data.cameras);
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error('Failed to load camera data:', error);
+                // Fallback to placeholder
+                const fallbackCameras = [{
+                    id: 'unknown',
+                    path: '/unknown',
+                    connected: false,
+                    capture_fps: 0,
+                    clients_connected: 0,
+                    last_frame_time: null,
+                    ffmpeg_running: false,
+                    duplicate_frames: 0,
+                    token_required: false
+                }];
+                await displayCameras(fallbackCameras);
+                throw error;
+            }
+        }
+
+        async function displayCameras(cameras) {
+            const container = document.getElementById('camerasContainer');
+            
+            // Sort cameras by name/id
+            cameras.sort((a, b) => a.id.localeCompare(b.id));
+            
+            const camerasHtml = await Promise.all(cameras.map(async camera => {
+                const recordingStatus = await getRecordingStatus(camera.path, camera.id);
+                return createCameraCard(camera, recordingStatus);
+            }));
+            
+            container.innerHTML = '<div class="cameras-grid">' + camerasHtml.join('') + '</div>';
+        }
+
+        async function getRecordingStatus(cameraPath, cameraId) {
+            try {
+                const response = await fetch(`${cameraPath}/control/recording/active`);
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // Token required but not provided
+                        return { active: false, requires_auth: true };
+                    }
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const result = await response.json();
+                if (result.status === 'success') {
+                    return result.data;
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error(`Failed to get recording status for ${cameraId}:`, error);
+                // Return default inactive status
+                return {
+                    active: false,
+                    session_id: null,
+                    start_time: null,
+                    frame_count: 0
+                };
+            }
+        }
+
+        function createCameraCard(camera, recordingStatus) {
+            const lastFrameTime = camera.last_frame_time ? 
+                new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
+            
+            const recordingHtml = camera.connected ? `
+                <div class="recording-section">
+                    <div class="recording-status">
+                        <div class="recording-indicator ${recordingStatus.active ? 'recording-active' : 'recording-inactive'}">
+                            ${recordingStatus.active ? '🔴' : '⚫'} 
+                            ${recordingStatus.active ? 'Recording' : 'Not Recording'}
+                        </div>
+                        ${recordingStatus.active ? `<span>${recordingStatus.frame_count} frames</span>` : ''}
+                    </div>
+                    
+                    ${camera.token_required ? `
+                        <div class="token-section">
+                            <input type="password" class="token-input" placeholder="Enter camera token" 
+                                   id="token-${camera.id}">
+                        </div>
+                    ` : ''}
+                    
+                    <div class="camera-controls">
+                        <button class="btn-small btn-start" onclick="startRecording('${camera.id}', '${camera.path}')"
+                                ${recordingStatus.active ? 'disabled' : ''}>
+                            Start Recording
+                        </button>
+                        <button class="btn-small btn-stop" onclick="stopRecording('${camera.id}', '${camera.path}')"
+                                ${!recordingStatus.active ? 'disabled' : ''}>
+                            Stop Recording  
+                        </button>
+                    </div>
+                </div>
+            ` : '';
+
+            return `
+                <div class="camera-card">
+                    <div class="camera-header">
+                        <div class="camera-name">${camera.id}</div>
+                        <div class="status-indicator ${camera.connected ? 'status-connected' : 'status-disconnected'}"></div>
+                    </div>
+                    
+                    <div class="camera-links">
+                        <a href="${camera.path}/stream" target="_blank" class="camera-link">
+                            📹 Stream
+                        </a>
+                        <a href="${camera.path}/control" target="_blank" class="camera-link">
+                            🎛️ Control
+                        </a>
+                    </div>
+                    
+                    <div class="camera-stats">
+                        <div class="camera-stat">
+                            <strong>${camera.capture_fps.toFixed(1)}</strong><br>
+                            <small>Capture FPS</small>
+                        </div>
+                        <div class="camera-stat">
+                            <strong>${camera.clients_connected}</strong><br>
+                            <small>Clients</small>
+                        </div>
+                        <div class="camera-stat">
+                            <strong>${camera.ffmpeg_running ? '✅' : '❌'}</strong><br>
+                            <small>FFmpeg</small>
+                        </div>
+                        <div class="camera-stat">
+                            <strong>${lastFrameTime}</strong><br>
+                            <small>Last Frame</small>
+                        </div>
+                    </div>
+                    
+                    ${camera.duplicate_frames > 0 ? `
+                        <div style="text-align: center; color: #fbbf24; font-size: 0.9em;">
+                            ⚠️ ${camera.duplicate_frames} duplicate frames
+                        </div>
+                    ` : ''}
+                    
+                    ${recordingHtml}
+                </div>
+            `;
+        }
+
+        async function startRecording(cameraId, cameraPath) {
+            try {
+                const token = document.getElementById(`token-${cameraId}`)?.value;
+                const headers = {};
+                
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                
+                const response = await fetch(`${cameraPath}/control/recording/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...headers
+                    },
+                    body: JSON.stringify({
+                        reason: 'Dashboard initiated recording'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('Recording started:', result);
+                
+                // Refresh data to update UI
+                setTimeout(refreshData, 1000);
+                
+            } catch (error) {
+                console.error('Failed to start recording:', error);
+                showError(`Failed to start recording for ${cameraId}: ${error.message}`);
+            }
+        }
+
+        async function stopRecording(cameraId, cameraPath) {
+            try {
+                const token = document.getElementById(`token-${cameraId}`)?.value;
+                const headers = {};
+                
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                
+                const response = await fetch(`${cameraPath}/control/recording/stop`, {
+                    method: 'POST',
+                    headers: headers
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('Recording stopped:', result);
+                
+                // Refresh data to update UI
+                setTimeout(refreshData, 1000);
+                
+            } catch (error) {
+                console.error('Failed to stop recording:', error);
+                showError(`Failed to stop recording for ${cameraId}: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
