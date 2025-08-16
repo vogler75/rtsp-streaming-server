@@ -240,9 +240,11 @@ impl RecordingManager {
         &self,
         camera_id: &str,
         from: DateTime<Utc>,
-        to: DateTime<Utc>,
+        to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>> {
-        self.database.get_frames_in_range(camera_id, from, to).await
+        // If no end time specified, use current time
+        let end_time = to.unwrap_or_else(|| Utc::now());
+        self.database.get_frames_in_range(camera_id, from, end_time).await
     }
 
     pub async fn is_recording(&self, camera_id: &str) -> bool {
@@ -279,5 +281,13 @@ impl RecordingManager {
             );
         }
         Ok(deleted_sessions)
+    }
+    
+    pub async fn get_frame_at_timestamp(
+        &self,
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+    ) -> Result<Option<RecordedFrame>> {
+        self.database.get_frame_at_timestamp(camera_id, timestamp).await
     }
 }

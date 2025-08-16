@@ -500,7 +500,7 @@ Send JSON commands to control playback and live streaming:
 {
   "cmd": "start",
   "from": "2025-08-15T10:00:00.000Z",
-  "to": "2025-08-15T11:00:00.000Z"
+  "to": "2025-08-15T11:00:00.000Z"  // Optional - if omitted, plays until end
 }
 ```
 
@@ -523,6 +523,14 @@ Send JSON commands to control playback and live streaming:
 ```json
 {
   "cmd": "live"
+}
+```
+
+##### Go To Timestamp
+```json
+{
+  "cmd": "goto",
+  "timestamp": "2025-08-15T10:30:00.000Z"
 }
 ```
 
@@ -551,7 +559,9 @@ Error responses:
 #### Binary Data
 
 The WebSocket connection also receives binary data:
-- **Video frames** (type `0x00`): JPEG frame data for live streams and replay
+- **Video frames** (type `0x00`): JPEG frame data with timestamp for live streams and replay
+  - Format: `[0x00][8-byte timestamp][JPEG data]`
+  - Timestamp: Little-endian 64-bit integer (milliseconds since epoch)
 - **JSON responses** (type `0x01`): Command responses and status updates
 
 ### HTTP REST API
@@ -629,8 +639,22 @@ The server includes a web-based control interface accessible at `/<camera_path>/
 - **Day Selection**: Easy filtering of recordings by date
 - **Time Range Selection**: Precise time range for playback
 - **Live Streaming**: Start/stop live video streaming to the control interface
-- **Replay Controls**: Playback recorded footage with speed control
+- **Advanced Replay Controls**: Enhanced playback with:
+  - Timeline slider for seeking
+  - Frame-by-frame navigation with timestamps
+  - Rewind/forward buttons (5-second jumps)
+  - Play from current position
+  - Variable speed control
+  - Real-time timestamp display
 - **Recording List**: Browse and select from available recordings
+
+#### Enhanced Video Controls
+
+- **Timeline Scrubbing**: Interactive slider to seek to any point in a recording
+- **Timestamp Navigation**: Go to specific timestamps with frame-perfect accuracy
+- **Smart Seeking**: Automatically finds the nearest available frame when seeking
+- **Continuous Playback**: Play from any point to the end of recordings
+- **Real-time Feedback**: Live timestamp display during playback
 
 ## Development
 

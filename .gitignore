@@ -30,5 +30,6 @@ Thumbs.db
 
 # Others
 ffmpeg.exe
-*.log
+config.toml
 recordings.db
+*.log

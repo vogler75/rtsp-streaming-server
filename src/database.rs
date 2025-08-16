@@ -97,6 +97,12 @@ pub trait DatabaseProvider: Send + Sync {
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
     ) -> Result<usize>;
+    
+    async fn get_frame_at_timestamp(
+        &self,
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+    ) -> Result<Option<RecordedFrame>>;
 }
 
 pub struct SqliteDatabase {
@@ -454,5 +460,36 @@ impl DatabaseProvider for SqliteDatabase {
         
         // Return total number of sessions deleted
         Ok((deleted_sessions + deleted_orphaned) as usize)
+    }
+    
+    async fn get_frame_at_timestamp(
+        &self,
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+    ) -> Result<Option<RecordedFrame>> {
+        // Find the nearest frame before or at the given timestamp
+        let row = sqlx::query(
+            r#"
+            SELECT rf.timestamp, rf.frame_data
+            FROM recorded_frames rf
+            JOIN recording_sessions rs ON rf.session_id = rs.id
+            WHERE rs.camera_id = ? AND rf.timestamp <= ?
+            ORDER BY rf.timestamp DESC
+            LIMIT 1
+            "#
+        )
+        .bind(camera_id)
+        .bind(timestamp)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        if let Some(row) = row {
+            Ok(Some(RecordedFrame {
+                timestamp: row.get("timestamp"),
+                frame_data: row.get("frame_data"),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }

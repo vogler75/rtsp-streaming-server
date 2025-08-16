@@ -8,6 +8,7 @@ use axum::extract::ws::{WebSocket, Message};
 use futures_util::{stream::StreamExt, SinkExt};
 
 use crate::recording::RecordingManager;
+use crate::database::RecordedFrame;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd")]
@@ -15,7 +16,7 @@ pub enum ControlCommand {
     #[serde(rename = "start")]
     StartReplay {
         from: DateTime<Utc>,
-        to: DateTime<Utc>,
+        to: Option<DateTime<Utc>>,  // Optional - if None, play until end
     },
     #[serde(rename = "stop")]
     Stop,
@@ -25,6 +26,10 @@ pub enum ControlCommand {
     },
     #[serde(rename = "live")]
     StartLiveStream,
+    #[serde(rename = "goto")]
+    GoToTimestamp {
+        timestamp: DateTime<Utc>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -222,6 +227,9 @@ impl ControlHandler {
             ControlCommand::StartLiveStream => {
                 Self::handle_start_live_stream(frame_sender, replay_state, live_stream_state, sender).await
             }
+            ControlCommand::GoToTimestamp { timestamp } => {
+                Self::handle_goto_timestamp(camera_id, timestamp, recording_manager, sender).await
+            }
         }
     }
 
@@ -229,7 +237,7 @@ impl ControlHandler {
     async fn handle_start_replay(
         camera_id: &str,
         from: DateTime<Utc>,
-        to: DateTime<Utc>,
+        to: Option<DateTime<Utc>>,
         recording_manager: &RecordingManager,
         replay_state: &mut ReplayState,
         live_stream_state: &mut LiveStreamState,
@@ -296,9 +304,8 @@ impl ControlHandler {
                                 tokio::time::sleep(tokio::time::Duration::from_millis(adjusted_delay as u64)).await;
                             }
                             
-                            // Send frame with protocol byte
-                            let mut frame_bytes = vec![0x00]; // Video frame type
-                            frame_bytes.extend_from_slice(&frame.frame_data);
+                            // Send frame with timestamp
+                            let frame_bytes = Self::encode_frame_with_timestamp(&frame);
                             
                             let mut sender_guard = sender_clone.lock().await;
                             if let Err(e) = sender_guard.send(Message::Binary(frame_bytes)).await {
@@ -414,8 +421,17 @@ impl ControlHandler {
                     frame_result = frame_receiver.recv() => {
                         match frame_result {
                             Ok(frame_data) => {
-                                // Prepend frame type (0x00 for video)
-                                let mut message_data = vec![0x00];
+                                // Create frame with timestamp for live stream
+                                let mut message_data = Vec::new();
+                                
+                                // Protocol byte (0x00 for video frame)
+                                message_data.push(0x00);
+                                
+                                // Current timestamp as 8 bytes (i64 milliseconds since epoch)
+                                let timestamp_ms = chrono::Utc::now().timestamp_millis();
+                                message_data.extend_from_slice(&timestamp_ms.to_le_bytes());
+                                
+                                // Frame data
                                 message_data.extend_from_slice(&frame_data);
                                 
                                 let message = Message::Binary(message_data);
@@ -455,6 +471,58 @@ impl ControlHandler {
         });
 
         CommandResponse::success("Live stream started")
+    }
+    
+    // Helper function to encode frame with timestamp
+    fn encode_frame_with_timestamp(frame: &RecordedFrame) -> Vec<u8> {
+        let mut frame_bytes = Vec::new();
+        
+        // Protocol byte (0x00 for video frame)
+        frame_bytes.push(0x00);
+        
+        // Timestamp as 8 bytes (i64 milliseconds since epoch)
+        let timestamp_ms = frame.timestamp.timestamp_millis();
+        frame_bytes.extend_from_slice(&timestamp_ms.to_le_bytes());
+        
+        // Frame data
+        frame_bytes.extend_from_slice(&frame.frame_data);
+        
+        frame_bytes
+    }
+    
+    // Handle goto command - seek to specific timestamp
+    async fn handle_goto_timestamp(
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+        recording_manager: &RecordingManager,
+        sender: Arc<tokio::sync::Mutex<futures_util::stream::SplitSink<WebSocket, Message>>>,
+    ) -> CommandResponse {
+        match recording_manager.get_frame_at_timestamp(camera_id, timestamp).await {
+            Ok(Some(frame)) => {
+                // Send the frame with timestamp
+                let frame_bytes = Self::encode_frame_with_timestamp(&frame);
+                
+                let mut sender_guard = sender.lock().await;
+                if let Err(e) = sender_guard.send(Message::Binary(frame_bytes)).await {
+                    error!("Failed to send goto frame: {}", e);
+                    return CommandResponse::error(500, "Failed to send frame");
+                }
+                
+                let data = serde_json::json!({
+                    "requested_timestamp": timestamp,
+                    "actual_timestamp": frame.timestamp,
+                    "frame_size": frame.frame_data.len()
+                });
+                CommandResponse::success_with_data("Goto timestamp completed", data)
+            }
+            Ok(None) => {
+                CommandResponse::error(404, "No frame found at or before the specified timestamp")
+            }
+            Err(e) => {
+                error!("Failed to get frame at timestamp: {}", e);
+                CommandResponse::error(500, "Failed to retrieve frame")
+            }
+        }
     }
 
 }

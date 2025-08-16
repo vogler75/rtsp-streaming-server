@@ -336,7 +336,29 @@
                         <div id="statusMessage">Ready for commands - Start Live Stream or Replay to view video</div>
                     </div>
                     
-                    <!-- Playback Controls -->
+                    <!-- Video Timestamp Display -->
+                    <div style="text-align: center; margin: 10px 0; font-size: 14px; color: rgba(255, 255, 255, 0.8);">
+                        <span id="currentTimestamp">No timestamp</span>
+                    </div>
+                    
+                    <!-- Video Playback Controls -->
+                    <div class="video-controls" style="display: flex; justify-content: center; gap: 10px; margin: 15px 0;">
+                        <button id="rewindButton" title="Rewind 5 seconds">⏪</button>
+                        <button id="playButton" title="Play from current position">▶️</button>
+                        <button id="stopButton" title="Stop playback">⏹</button>
+                        <button id="forwardButton" title="Forward 5 seconds">⏩</button>
+                    </div>
+                    
+                    <!-- Timeline Slider -->
+                    <div class="timeline-container" style="margin: 15px 0;">
+                        <input type="range" id="timelineSlider" style="width: 100%;" min="0" max="100" value="0" disabled>
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; color: rgba(255, 255, 255, 0.6); margin-top: 5px;">
+                            <span id="timelineStart">00:00:00</span>
+                            <span id="timelineEnd">00:00:00</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Speed Controls -->
                     <div class="speed-controls">
                         <button id="decreaseSpeed">➖ Slower</button>
                         <div class="speed-display" id="speedDisplay">1.0x</div>
@@ -425,6 +447,9 @@
                 this.isLiveStreaming = false;
                 this.canvas = document.getElementById('videoCanvas');
                 this.ctx = this.canvas.getContext('2d');
+                this.currentTimestamp = null;
+                this.timelineStart = null;
+                this.timelineEnd = null;
                 this.setupEventListeners();
                 this.connectWebSocket();
             }
@@ -443,6 +468,16 @@
                 document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket());
                 document.getElementById('setTodayButton').addEventListener('click', () => this.setToday());
                 document.getElementById('selectedDay').addEventListener('change', () => this.updateTimeRangeFromDay());
+                
+                // Video playback controls
+                document.getElementById('rewindButton').addEventListener('click', () => this.rewind());
+                document.getElementById('forwardButton').addEventListener('click', () => this.forward());
+                document.getElementById('playButton').addEventListener('click', () => this.playFromCurrent());
+                document.getElementById('stopButton').addEventListener('click', () => this.stopReplay());
+                
+                // Timeline slider
+                document.getElementById('timelineSlider').addEventListener('input', (e) => this.seekToPosition(e.target.value));
+                document.getElementById('timelineSlider').addEventListener('change', (e) => this.seekToPosition(e.target.value));
                 
                 // Set default day and time range to today
                 this.setToday();
@@ -516,8 +551,8 @@
                         const data = view.slice(1);
                         
                         if (contentType === 0x00) {
-                            // Video frame
-                            this.displayFrame(data);
+                            // Video frame with timestamp
+                            this.displayFrameWithTimestamp(data);
                         } else if (contentType === 0x01) {
                             // JSON response
                             const json = new TextDecoder().decode(data);
@@ -570,6 +605,48 @@
                 };
                 
                 img.src = url;
+            }
+            
+            displayFrameWithTimestamp(data) {
+                // Extract timestamp (8 bytes after content type)
+                if (data.length < 8) {
+                    console.error('Frame data too short to contain timestamp');
+                    return;
+                }
+                
+                // Read timestamp as little-endian 64-bit integer (milliseconds since epoch)
+                const timestampBytes = data.slice(0, 8);
+                const timestampMs = new DataView(timestampBytes.buffer, timestampBytes.byteOffset).getBigInt64(0, true);
+                const timestamp = new Date(Number(timestampMs));
+                
+                // Extract frame data (everything after the timestamp)
+                const frameData = data.slice(8);
+                
+                // Update current timestamp
+                this.currentTimestamp = timestamp;
+                this.updateTimestampDisplay();
+                
+                // Display the frame
+                this.displayFrame(frameData);
+            }
+            
+            updateTimestampDisplay() {
+                const timestampElement = document.getElementById('currentTimestamp');
+                if (this.currentTimestamp) {
+                    timestampElement.textContent = this.currentTimestamp.toLocaleString();
+                    
+                    // Update slider position
+                    if (this.timelineStart && this.timelineEnd) {
+                        const slider = document.getElementById('timelineSlider');
+                        const startMs = this.timelineStart.getTime();
+                        const endMs = this.timelineEnd.getTime();
+                        const currentMs = this.currentTimestamp.getTime();
+                        const position = ((currentMs - startMs) / (endMs - startMs)) * 100;
+                        slider.value = Math.max(0, Math.min(100, position));
+                    }
+                } else {
+                    timestampElement.textContent = 'No timestamp';
+                }
             }
             
             handleJsonResponse(response) {
@@ -647,6 +724,9 @@
                         if (recording.end_time) {
                             document.getElementById('endTime').value = this.formatDateTimeLocal(new Date(recording.end_time));
                         }
+                        
+                        // Update timeline slider
+                        this.updateTimelineSlider();
                     });
                     
                     container.appendChild(item);
@@ -730,16 +810,20 @@
                 const startTime = document.getElementById('startTime').value;
                 const endTime = document.getElementById('endTime').value;
                 
-                if (!startTime || !endTime) {
-                    alert('Please select both start and end times');
+                if (!startTime) {
+                    alert('Please select a start time');
                     return;
                 }
                 
                 const command = {
                     cmd: 'start',
-                    from: new Date(startTime).toISOString(),
-                    to: new Date(endTime).toISOString()
+                    from: new Date(startTime).toISOString()
                 };
+                
+                // Add end time only if provided
+                if (endTime) {
+                    command.to = new Date(endTime).toISOString();
+                }
                 
                 this.sendCommand(command);
             }
@@ -892,6 +976,91 @@
                         cmd: 'speed',
                         speed: this.currentSpeed
                     });
+                }
+            }
+            
+            // New video control methods
+            rewind() {
+                if (!this.currentTimestamp) return;
+                
+                // Go back 5 seconds
+                const newTimestamp = new Date(this.currentTimestamp.getTime() - 5000);
+                this.sendCommand({
+                    cmd: 'goto',
+                    timestamp: newTimestamp.toISOString()
+                });
+            }
+            
+            forward() {
+                if (!this.currentTimestamp) return;
+                
+                // Go forward 5 seconds
+                const newTimestamp = new Date(this.currentTimestamp.getTime() + 5000);
+                this.sendCommand({
+                    cmd: 'goto',
+                    timestamp: newTimestamp.toISOString()
+                });
+            }
+            
+            playFromCurrent() {
+                if (!this.currentTimestamp) {
+                    alert('No current timestamp available. Please select a recording first.');
+                    return;
+                }
+                
+                // Start replay from current timestamp without end time
+                this.sendCommand({
+                    cmd: 'start',
+                    from: this.currentTimestamp.toISOString()
+                });
+            }
+            
+            seekToPosition(sliderValue) {
+                if (!this.timelineStart || !this.timelineEnd) return;
+                
+                // Calculate timestamp based on slider position
+                const startMs = this.timelineStart.getTime();
+                const endMs = this.timelineEnd.getTime();
+                const totalMs = endMs - startMs;
+                const positionMs = startMs + (totalMs * (sliderValue / 100));
+                const targetTimestamp = new Date(positionMs);
+                
+                this.sendCommand({
+                    cmd: 'goto',
+                    timestamp: targetTimestamp.toISOString()
+                });
+            }
+            
+            updateTimelineSlider() {
+                const slider = document.getElementById('timelineSlider');
+                const startElement = document.getElementById('timelineStart');
+                const endElement = document.getElementById('timelineEnd');
+                
+                if (this.selectedRecording && this.selectedRecording.start_time) {
+                    this.timelineStart = new Date(this.selectedRecording.start_time);
+                    this.timelineEnd = this.selectedRecording.end_time ? 
+                        new Date(this.selectedRecording.end_time) : new Date();
+                    
+                    startElement.textContent = this.timelineStart.toLocaleTimeString();
+                    endElement.textContent = this.timelineEnd.toLocaleTimeString();
+                    
+                    slider.disabled = false;
+                    
+                    // Update slider position based on current timestamp
+                    if (this.currentTimestamp) {
+                        const startMs = this.timelineStart.getTime();
+                        const endMs = this.timelineEnd.getTime();
+                        const currentMs = this.currentTimestamp.getTime();
+                        const position = ((currentMs - startMs) / (endMs - startMs)) * 100;
+                        slider.value = Math.max(0, Math.min(100, position));
+                    }
+                } else {
+                    startElement.textContent = '00:00:00';
+                    endElement.textContent = '00:00:00';
+                    slider.disabled = true;
+                    slider.value = 0;
+                    this.timelineStart = null;
+                    this.timelineEnd = null;
                 }
             }
             
