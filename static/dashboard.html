@@ -370,6 +370,17 @@
         let autoRefreshInterval = null;
         let currentAutoRefreshRate = 3000; // Default 3 seconds
 
+        // Detect base path for proxy support
+        function getBasePath() {
+            const currentPath = window.location.pathname;
+            if (currentPath.endsWith('/dashboard')) {
+                return currentPath.replace('/dashboard', '');
+            }
+            return '';
+        }
+
+        const BASE_PATH = getBasePath();
+
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
             refreshData();
@@ -426,7 +437,7 @@
         async function refreshCameraData(cameraId) {
             // Find the specific camera and refresh its data
             try {
-                const response = await fetch('/api/cameras');
+                const response = await fetch(BASE_PATH + '/api/cameras');
                 if (!response.ok) return;
                 
                 const result = await response.json();
@@ -485,7 +496,7 @@
 
         async function loadServerStatus() {
             try {
-                const response = await fetch('/api/status');
+                const response = await fetch(BASE_PATH + '/api/status');
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -541,7 +552,7 @@
 
         async function loadCameraData() {
             try {
-                const response = await fetch('/api/cameras');
+                const response = await fetch(BASE_PATH + '/api/cameras');
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -618,7 +629,7 @@
                     headers['Authorization'] = `Bearer ${token}`;
                 }
                 
-                const response = await fetch(`${cameraPath}/control/recording/active`, {
+                const response = await fetch(`${BASE_PATH}${cameraPath}/control/recording/active`, {
                     headers: headers
                 });
                 
@@ -655,7 +666,7 @@
                     headers['Authorization'] = `Bearer ${token}`;
                 }
                 
-                const response = await fetch(`${cameraPath}/control/recording/size`, {
+                const response = await fetch(`${BASE_PATH}${cameraPath}/control/recording/size`, {
                     headers: headers
                 });
                 
@@ -755,10 +766,10 @@
                     </div>
                     
                     <div class="camera-links">
-                        <a href="${camera.path}/stream" target="_blank" class="camera-link">
+                        <a href="${BASE_PATH}${camera.path}/stream" target="_blank" class="camera-link">
                             📹 Stream
                         </a>
-                        <a href="${camera.path}/control" target="_blank" class="camera-link">
+                        <a href="${BASE_PATH}${camera.path}/control" target="_blank" class="camera-link">
                             🎛️ Control
                         </a>
                     </div>
@@ -802,7 +813,7 @@
                     headers['Authorization'] = `Bearer ${token}`;
                 }
                 
-                const response = await fetch(`${cameraPath}/control/recording/start`, {
+                const response = await fetch(`${BASE_PATH}${cameraPath}/control/recording/start`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -838,7 +849,7 @@
                     headers['Authorization'] = `Bearer ${token}`;
                 }
                 
-                const response = await fetch(`${cameraPath}/control/recording/stop`, {
+                const response = await fetch(`${BASE_PATH}${cameraPath}/control/recording/stop`, {
                     method: 'POST',
                     headers: headers
                 });
