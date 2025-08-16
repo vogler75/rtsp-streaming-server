@@ -263,4 +263,21 @@ impl RecordingManager {
     ) -> Result<Vec<RecordedFrame>> {
         self.database.get_recorded_frames(session_id, from, to).await
     }
+    
+    pub async fn cleanup_old_recordings(
+        &self,
+        camera_id: Option<&str>,
+        older_than: DateTime<Utc>,
+    ) -> Result<usize> {
+        let deleted_sessions = self.database.delete_old_recordings(camera_id, older_than).await?;
+        if deleted_sessions > 0 {
+            info!(
+                "Cleaned up {} completed recording sessions and old frames{} older than {}",
+                deleted_sessions,
+                camera_id.map(|c| format!(" for camera '{}'", c)).unwrap_or_default(),
+                older_than
+            );
+        }
+        Ok(deleted_sessions)
+    }
 }

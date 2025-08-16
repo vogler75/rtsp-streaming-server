@@ -23,6 +23,7 @@ pub struct CameraConfig {
     pub token: Option<String>,
     pub ffmpeg: Option<FfmpegConfig>,
     pub mqtt: Option<CameraMqttConfig>,
+    pub max_recording_age: Option<String>, // Override max age for this camera (e.g., "10m", "5h", "7d")
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
@@ -121,6 +122,8 @@ pub struct RecordingConfig {
     pub enabled: bool,
     pub database_path: String,
     pub max_frame_size: Option<usize>, // Maximum frame size in bytes for database storage
+    pub max_recording_age: Option<String>, // Max age for recordings (e.g., "10m", "5h", "7d")
+    pub cleanup_interval_hours: Option<u64>, // How often to run cleanup (default: 1 hour)
 }
 
 impl Default for Config {
@@ -152,6 +155,8 @@ impl Default for Config {
                 enabled: false,
                 database_path: "recordings.db".to_string(),
                 max_frame_size: Some(10 * 1024 * 1024), // 10MB
+                max_recording_age: None,
+                cleanup_interval_hours: Some(1),
             }),
         }
     }

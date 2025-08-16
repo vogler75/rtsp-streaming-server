@@ -171,6 +171,7 @@ scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
 - **reconnect_interval**: Seconds between reconnection attempts
 - **chunk_read_size**: Bytes to read at once from FFmpeg
 - **ffmpeg_buffer_size**: FFmpeg RTSP buffer size in bytes
+- **max_recording_age**: Override max recording age for this camera (e.g., "10m", "5h", "7d")
 
 #### Transcoding Options
 - **output_format**: Output format - currently "mjpeg"
@@ -401,6 +402,74 @@ With debug logging enabled, you'll see camera-specific messages:
 ```
 
 This makes it easy to identify issues with specific cameras.
+
+## Recording System
+
+The server includes a comprehensive recording system that stores camera streams to a SQLite database for later playback.
+
+### Recording Features
+
+- **Manual Recording**: Start/stop recording via REST API or control interface
+- **Frame Storage**: Stores individual JPEG frames with timestamps
+- **Playback**: Replay recorded footage at variable speeds
+- **Time-based Filtering**: Query recordings by date/time ranges
+- **Automatic Cleanup**: Periodically delete old recordings to manage disk space
+
+### Recording Configuration
+
+```toml
+[recording]
+enabled = true
+database_path = "recordings.db"
+max_frame_size = 10485760  # 10MB max frame size
+max_recording_age = "7d"    # Delete recordings older than 7 days
+cleanup_interval_hours = 1   # Run cleanup every hour
+```
+
+#### Recording Options
+- **enabled**: Enable/disable recording system
+- **database_path**: SQLite database file location
+- **max_frame_size**: Maximum size for a single frame in bytes
+- **max_recording_age**: Maximum age for recordings before deletion
+  - Format: `"10m"` (minutes), `"5h"` (hours), `"7d"` (days)
+  - Set to `"0"` or omit to disable automatic cleanup
+- **cleanup_interval_hours**: How often to run the cleanup task (default: 1 hour)
+
+### Per-Camera Recording Settings
+
+You can override the global `max_recording_age` for individual cameras:
+
+```toml
+[cameras.cam1]
+max_recording_age = "1d"  # Keep cam1 recordings for only 1 day
+
+[cameras.cam2]
+max_recording_age = "30d" # Keep cam2 recordings for 30 days
+
+[cameras.cam3]
+# Uses global max_recording_age setting
+```
+
+### Automatic Cleanup
+
+When `max_recording_age` is configured, the server will:
+1. Start a background cleanup task that runs every `cleanup_interval_hours`
+2. Delete frames older than the specified age based on their timestamp
+3. Delete completed recording sessions that ended before the cutoff time
+4. Preserve active/ongoing recordings (sessions without end_time)
+5. Process each camera independently based on its configuration
+6. Log cleanup activities for monitoring
+
+The cleanup process:
+- Runs in a transaction to ensure database consistency
+- Deletes old frames by timestamp (not by session)
+- Only deletes completed sessions (where end_time < cutoff)
+- Keeps active recordings intact, even if they started long ago
+- Cleans up orphaned sessions with no remaining frames
+- Handles per-camera overrides
+- Reports number of deleted sessions and frames
+
+This design ensures that continuous recordings are preserved while old data is cleaned up efficiently.
 
 ## Control API
 

@@ -21,6 +21,7 @@ mod mqtt;
 mod database;
 mod recording;
 mod control;
+mod utils;
 
 use config::Config;
 use errors::{Result, StreamError};
@@ -101,14 +102,81 @@ async fn main() -> Result<()> {
                 Ok(database) => {
                     let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
                     
-                    let recording_config = RecordingConfig {
+                    let recording_config_internal = RecordingConfig {
                         max_frame_size: recording_config.max_frame_size.unwrap_or(10 * 1024 * 1024),
                     };
                     
-                    match RecordingManager::new(recording_config, database).await {
+                    match RecordingManager::new(recording_config_internal, database).await {
                         Ok(manager) => {
                             info!("Recording system initialized successfully");
-                            Some(Arc::new(manager))
+                            let manager = Arc::new(manager);
+                            
+                            // Start cleanup task if max_recording_age is configured
+                            if let Some(max_age_str) = &recording_config.max_recording_age {
+                                if !max_age_str.is_empty() && max_age_str != "0" {
+                                    match utils::parse_duration(max_age_str) {
+                                        Ok(max_age_duration) => {
+                                            let cleanup_interval_hours = recording_config.cleanup_interval_hours.unwrap_or(1);
+                                            info!(
+                                                "Starting recording cleanup task: removing recordings older than {} every {} hour(s)",
+                                                max_age_str, cleanup_interval_hours
+                                            );
+                                            
+                                            let manager_clone = manager.clone();
+                                            let cameras_config = config.cameras.clone();
+                                            let global_max_age = max_age_duration;
+                                            
+                                            tokio::spawn(async move {
+                                                let mut interval = tokio::time::interval(
+                                                    tokio::time::Duration::from_secs(cleanup_interval_hours * 3600)
+                                                );
+                                                
+                                                loop {
+                                                    interval.tick().await;
+                                                    
+                                                    // Process each camera's cleanup
+                                                    for (camera_id, camera_config) in &cameras_config {
+                                                        // Determine the max age for this camera
+                                                        let max_age = if let Some(camera_max_age_str) = &camera_config.max_recording_age {
+                                                            if !camera_max_age_str.is_empty() && camera_max_age_str != "0" {
+                                                                match utils::parse_duration(camera_max_age_str) {
+                                                                    Ok(duration) => duration,
+                                                                    Err(e) => {
+                                                                        error!("Invalid max_recording_age for camera '{}': {}", camera_id, e);
+                                                                        continue;
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                continue; // Skip if camera has explicit "0" or empty
+                                                            }
+                                                        } else {
+                                                            global_max_age
+                                                        };
+                                                        
+                                                        let older_than = chrono::Utc::now() - max_age;
+                                                        
+                                                        match manager_clone.cleanup_old_recordings(Some(camera_id), older_than).await {
+                                                            Ok(deleted) => {
+                                                                if deleted > 0 {
+                                                                    info!("Cleaned up {} completed sessions and old frames for camera '{}'", deleted, camera_id);
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error!("Failed to cleanup recordings for camera '{}': {}", camera_id, e);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        }
+                                        Err(e) => {
+                                            error!("Invalid max_recording_age configuration: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            Some(manager)
                         }
                         Err(e) => {
                             error!("Failed to initialize recording manager: {}", e);

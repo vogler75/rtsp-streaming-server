@@ -91,6 +91,12 @@ pub trait DatabaseProvider: Send + Sync {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<RecordedFrame>>;
+    
+    async fn delete_old_recordings(
+        &self,
+        camera_id: Option<&str>,
+        older_than: DateTime<Utc>,
+    ) -> Result<usize>;
 }
 
 pub struct SqliteDatabase {
@@ -347,5 +353,106 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         Ok(frames)
+    }
+    
+    async fn delete_old_recordings(
+        &self,
+        camera_id: Option<&str>,
+        older_than: DateTime<Utc>,
+    ) -> Result<usize> {
+        // Start a transaction
+        let mut tx = self.pool.begin().await?;
+        
+        // Step 1: Delete old frames based on their timestamp
+        let delete_frames_query = if let Some(cam_id) = camera_id {
+            // Delete frames for a specific camera
+            sqlx::query(
+                r#"
+                DELETE FROM recorded_frames 
+                WHERE timestamp < ? 
+                AND session_id IN (
+                    SELECT id FROM recording_sessions WHERE camera_id = ?
+                )
+                "#
+            )
+            .bind(older_than)
+            .bind(cam_id)
+        } else {
+            // Delete frames for all cameras
+            sqlx::query("DELETE FROM recorded_frames WHERE timestamp < ?")
+                .bind(older_than)
+        };
+        
+        let frames_result = delete_frames_query.execute(&mut *tx).await?;
+        let deleted_frames = frames_result.rows_affected();
+        
+        // Step 2: Delete completed sessions based on end_time
+        // Only delete sessions that have ended (end_time is not NULL) and ended before the cutoff
+        let delete_sessions_query = if let Some(cam_id) = camera_id {
+            sqlx::query(
+                r#"
+                DELETE FROM recording_sessions 
+                WHERE end_time IS NOT NULL 
+                AND end_time < ? 
+                AND camera_id = ?
+                "#
+            )
+            .bind(older_than)
+            .bind(cam_id)
+        } else {
+            sqlx::query(
+                r#"
+                DELETE FROM recording_sessions 
+                WHERE end_time IS NOT NULL 
+                AND end_time < ?
+                "#
+            )
+            .bind(older_than)
+        };
+        
+        let sessions_result = delete_sessions_query.execute(&mut *tx).await?;
+        let deleted_sessions = sessions_result.rows_affected();
+        
+        // Step 3: Clean up orphaned sessions (sessions with no frames left)
+        // This handles cases where all frames of a session were deleted but session is still active
+        let cleanup_orphaned_query = if let Some(cam_id) = camera_id {
+            sqlx::query(
+                r#"
+                DELETE FROM recording_sessions 
+                WHERE camera_id = ?
+                AND id NOT IN (
+                    SELECT DISTINCT session_id FROM recorded_frames
+                )
+                AND end_time IS NOT NULL
+                "#
+            )
+            .bind(cam_id)
+        } else {
+            sqlx::query(
+                r#"
+                DELETE FROM recording_sessions 
+                WHERE id NOT IN (
+                    SELECT DISTINCT session_id FROM recorded_frames
+                )
+                AND end_time IS NOT NULL
+                "#
+            )
+        };
+        
+        let orphaned_result = cleanup_orphaned_query.execute(&mut *tx).await?;
+        let deleted_orphaned = orphaned_result.rows_affected();
+        
+        // Commit the transaction
+        tx.commit().await?;
+        
+        if deleted_frames > 0 || deleted_sessions > 0 || deleted_orphaned > 0 {
+            tracing::info!(
+                "Cleanup complete: {} frames deleted, {} completed sessions deleted, {} orphaned sessions deleted",
+                deleted_frames, deleted_sessions, deleted_orphaned
+            );
+        }
+        
+        // Return total number of sessions deleted
+        Ok((deleted_sessions + deleted_orphaned) as usize)
     }
 }
