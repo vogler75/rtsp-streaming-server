@@ -24,7 +24,7 @@ A high-performance, low-latency video streaming server built in Rust that connec
 2. **Open your web browser** and navigate to:
    ```
    # Dashboard (overview of all cameras)
-   http://localhost:8080/
+   http://localhost:8080/dashboard
    
    # Individual camera test pages
    http://localhost:8080/cam1
@@ -34,7 +34,7 @@ A high-performance, low-latency video streaming server built in Rust that connec
    
    For HTTPS (if TLS is enabled):
    ```
-   https://localhost:8080/
+   https://localhost:8080/dashboard
    https://localhost:8080/cam1
    ```
 
@@ -45,8 +45,7 @@ A high-performance, low-latency video streaming server built in Rust that connec
 The server provides different endpoints for various functionality:
 
 ### Main Endpoints
-- **`/`** - Dashboard (overview of all cameras with status, controls, and monitoring)
-- **`/dashboard`** - Alternative route to dashboard
+- **`/dashboard`** - Dashboard (overview of all cameras with status, controls, and monitoring)
 
 ### Camera Endpoints
 For each camera configured with `path = "/cam1"`:
@@ -423,7 +422,7 @@ cargo build --release
 Open your browser to access different interfaces:
 
 **Dashboard (recommended starting point):**
-- `http://localhost:8080/` - Overview of all cameras with status and controls
+- `http://localhost:8080/dashboard` - Overview of all cameras with status and controls
 
 **Individual Camera Pages:**
 - `http://localhost:8080/cam1` - Camera 1 test page (WebSocket streaming)

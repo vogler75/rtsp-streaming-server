@@ -333,7 +333,6 @@ async fn main() -> Result<()> {
 
     // Build router with camera paths
     let mut app = axum::Router::new()
-        .route("/", axum::routing::get(dashboard_handler))
         .route("/dashboard", axum::routing::get(dashboard_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"));
     
