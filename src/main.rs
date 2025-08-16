@@ -333,7 +333,7 @@ async fn main() -> Result<()> {
 
     // Build router with camera paths
     let mut app = axum::Router::new()
-        .route("/", axum::routing::get(index_handler))
+        .route("/", axum::routing::get(dashboard_handler))
         .route("/dashboard", axum::routing::get(dashboard_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"));
     
@@ -381,17 +381,12 @@ async fn main() -> Result<()> {
             )
         ));
 
-        // Keep legacy endpoint for backward compatibility (redirects to /live)
-        let legacy_info_clone = stream_info.clone();
-        app = app.route(&path, axum::routing::get(
-            move |ws, query, addr| camera_handler(
-                ws, query, addr, 
-                legacy_info_clone.frame_sender.clone(), 
-                legacy_info_clone.camera_id.clone(), 
-                legacy_info_clone.mqtt_handle.clone(), 
-                legacy_info_clone.camera_config.clone()
-            )
-        ));
+        // Camera page endpoint: /<camera_path> serves test.html
+        app = app.route(&path, axum::routing::get(serve_test_page));
+        
+        // Test endpoint: /<camera_path>/test serves test.html
+        let test_path = format!("{}/test", path);
+        app = app.route(&test_path, axum::routing::get(serve_test_page));
 
         // REST API endpoints: /<camera_path>/control/*
         if stream_info.recording_manager.is_some() {
@@ -598,8 +593,16 @@ async fn serve_stream_page() -> axum::response::Html<String> {
     axum::response::Html(html)
 }
 
-async fn serve_index_with_mode(is_full_mode: bool) -> axum::response::Html<String> {
-    let mut html = include_str!("../static/index.html").to_string();
+async fn serve_test_page(
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    // Check if 'full' parameter is present
+    let is_full_mode = query.contains_key("full");
+    serve_test_with_mode(is_full_mode).await.into_response()
+}
+
+async fn serve_test_with_mode(is_full_mode: bool) -> axum::response::Html<String> {
+    let mut html = include_str!("../static/test.html").to_string();
     
     if is_full_mode {
         // Inject JavaScript to enable full mode
@@ -617,62 +620,12 @@ async fn serve_index_with_mode(is_full_mode: bool) -> axum::response::Html<Strin
 }
 
 
-async fn index_handler(
-    query: axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> axum::response::Response {
-    // Check if 'full' parameter is present
-    let is_full_mode = query.contains_key("full");
-    serve_index_with_mode(is_full_mode).await.into_response()
-}
 
 async fn dashboard_handler() -> axum::response::Html<String> {
     let html = include_str!("../static/dashboard.html").to_string();
     axum::response::Html(html)
 }
 
-async fn camera_handler(
-    ws: Option<axum::extract::WebSocketUpgrade>,
-    query: axum::extract::Query<std::collections::HashMap<String, String>>,
-    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
-    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
-    camera_id: String,
-    mqtt_handle: Option<MqttHandle>,
-    camera_config: config::CameraConfig,
-) -> axum::response::Response {
-    match ws {
-        Some(ws_upgrade) => {
-            // Check token authentication before upgrading WebSocket
-            if let Some(expected_token) = &camera_config.token {
-                // Get token from query parameters
-                if let Some(provided_token) = query.get("token") {
-                    if provided_token == expected_token {
-                        info!("Token authentication successful for camera {}", camera_id);
-                    } else {
-                        warn!("Invalid token provided for camera {}", camera_id);
-                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-                    }
-                } else {
-                    warn!("Missing token for camera {} that requires authentication", camera_id);
-                    return (axum::http::StatusCode::UNAUTHORIZED, "Missing token").into_response();
-                }
-            }
-            
-            if let Some(connect_info) = addr {
-                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
-            } else {
-                // Fallback with unknown IP
-                let fallback_addr = "127.0.0.1:0".parse().unwrap();
-                let connect_info = axum::extract::ConnectInfo(fallback_addr);
-                websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
-            }
-        },
-        None => {
-            // Check if 'full' parameter is present
-            let is_full_mode = query.contains_key("full");
-            serve_index_with_mode(is_full_mode).await.into_response()
-        }
-    }
-}
 
 async fn camera_live_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,
