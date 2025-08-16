@@ -405,6 +405,64 @@
             }
         }
 
+        function onTokenChange(cameraId) {
+            // Store the token and refresh data after a short delay to allow typing
+            const tokenInput = document.getElementById(`token-${cameraId}`);
+            if (tokenInput) {
+                cameraTokens[cameraId] = tokenInput.value;
+                
+                // Mark this camera as being edited to prevent auto-refresh interference
+                tokenInput.dataset.editing = 'true';
+                
+                // Debounce the refresh to avoid too many API calls while typing
+                clearTimeout(window.tokenChangeTimeout);
+                window.tokenChangeTimeout = setTimeout(() => {
+                    tokenInput.dataset.editing = 'false';
+                    refreshCameraData(cameraId);
+                }, 1000); // Wait 1 second after user stops typing
+            }
+        }
+
+        async function refreshCameraData(cameraId) {
+            // Find the specific camera and refresh its data
+            try {
+                const response = await fetch('/api/cameras');
+                if (!response.ok) return;
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    const camera = result.data.cameras.find(c => c.id === cameraId);
+                    if (camera) {
+                        // Use stored token
+                        const token = cameraTokens[cameraId] || null;
+                        
+                        const [recordingStatus, databaseSize] = await Promise.all([
+                            getRecordingStatus(camera.path, camera.id, token),
+                            getDatabaseSize(camera.path, camera.id, token)
+                        ]);
+                        
+                        // Find the camera card and update it
+                        const cardHtml = createCameraCard(camera, recordingStatus, databaseSize, token);
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = cardHtml;
+                        const newCard = tempDiv.firstChild;
+                        
+                        // Find existing card and replace it
+                        const allCards = document.querySelectorAll('.camera-card');
+                        for (let card of allCards) {
+                            const nameElement = card.querySelector('.camera-name');
+                            if (nameElement && nameElement.textContent === cameraId) {
+                                card.parentNode.replaceChild(newCard, card);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to refresh camera data:', error);
+            }
+        }
+
         async function refreshData() {
             hideError();
             
@@ -512,36 +570,68 @@
             }
         }
 
+        // Store tokens to persist through refreshes
+        const cameraTokens = {};
+
         async function displayCameras(cameras) {
             const container = document.getElementById('camerasContainer');
             
             // Sort cameras by name/id
             cameras.sort((a, b) => a.id.localeCompare(b.id));
             
+            // Preserve existing token values before refresh
+            cameras.forEach(camera => {
+                const tokenInput = document.getElementById(`token-${camera.id}`);
+                if (tokenInput && tokenInput.value && tokenInput.dataset.editing !== 'true') {
+                    cameraTokens[camera.id] = tokenInput.value;
+                }
+            });
+            
             const camerasHtml = await Promise.all(cameras.map(async camera => {
+                // Use stored token or get from input field
+                const token = cameraTokens[camera.id] || null;
+                
                 const [recordingStatus, databaseSize] = await Promise.all([
-                    getRecordingStatus(camera.path, camera.id),
-                    getDatabaseSize(camera.path, camera.id)
+                    getRecordingStatus(camera.path, camera.id, token),
+                    getDatabaseSize(camera.path, camera.id, token)
                 ]);
-                return createCameraCard(camera, recordingStatus, databaseSize);
+                return createCameraCard(camera, recordingStatus, databaseSize, token);
             }));
             
             container.innerHTML = '<div class="cameras-grid">' + camerasHtml.join('') + '</div>';
+            
+            // Restore token values after DOM update
+            cameras.forEach(camera => {
+                if (cameraTokens[camera.id]) {
+                    const tokenInput = document.getElementById(`token-${camera.id}`);
+                    if (tokenInput) {
+                        tokenInput.value = cameraTokens[camera.id];
+                    }
+                }
+            });
         }
 
-        async function getRecordingStatus(cameraPath, cameraId) {
+        async function getRecordingStatus(cameraPath, cameraId, token = null) {
             try {
-                const response = await fetch(`${cameraPath}/control/recording/active`);
+                const headers = {};
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                
+                const response = await fetch(`${cameraPath}/control/recording/active`, {
+                    headers: headers
+                });
+                
                 if (!response.ok) {
                     if (response.status === 401) {
-                        // Token required but not provided
-                        return { active: false, requires_auth: true };
+                        // Token required but not provided or invalid
+                        return { active: false, requires_auth: true, auth_failed: !!token };
                     }
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 const result = await response.json();
                 if (result.status === 'success') {
-                    return result.data;
+                    return { ...result.data, authenticated: true };
                 } else {
                     throw new Error(result.error || 'Unknown error');
                 }
@@ -552,24 +642,33 @@
                     active: false,
                     session_id: null,
                     start_time: null,
-                    frame_count: 0
+                    frame_count: 0,
+                    authenticated: false
                 };
             }
         }
 
-        async function getDatabaseSize(cameraPath, cameraId) {
+        async function getDatabaseSize(cameraPath, cameraId, token = null) {
             try {
-                const response = await fetch(`${cameraPath}/control/recording/size`);
+                const headers = {};
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                
+                const response = await fetch(`${cameraPath}/control/recording/size`, {
+                    headers: headers
+                });
+                
                 if (!response.ok) {
                     if (response.status === 401) {
-                        // Token required but not provided
-                        return { size_mb: 0, requires_auth: true };
+                        // Token required but not provided or invalid
+                        return { size_bytes: 0, size_mb: 0, size_gb: 0, requires_auth: true, auth_failed: !!token };
                     }
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 const result = await response.json();
                 if (result.status === 'success') {
-                    return result.data;
+                    return { ...result.data, authenticated: true };
                 } else {
                     throw new Error(result.error || 'Unknown error');
                 }
@@ -579,17 +678,21 @@
                 return {
                     size_bytes: 0,
                     size_mb: 0,
-                    size_gb: 0
+                    size_gb: 0,
+                    authenticated: false
                 };
             }
         }
 
-        function createCameraCard(camera, recordingStatus, databaseSize) {
+        function createCameraCard(camera, recordingStatus, databaseSize, storedToken = null) {
             const lastFrameTime = camera.last_frame_time ? 
                 new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
             
             // Format database size for display
             const formatSize = (sizeData) => {
+                if (sizeData.requires_auth) {
+                    return sizeData.auth_failed ? 'Auth failed' : 'Auth required';
+                }
                 if (sizeData.size_gb > 1) {
                     return `${sizeData.size_gb.toFixed(2)} GB`;
                 } else if (sizeData.size_mb > 1) {
@@ -602,31 +705,45 @@
             
             const recordingHtml = camera.connected ? `
                 <div class="recording-section">
-                    <div class="recording-status">
-                        <div class="recording-indicator ${recordingStatus.active ? 'recording-active' : 'recording-inactive'}">
-                            ${recordingStatus.active ? '🔴' : '⚫'} 
-                            ${recordingStatus.active ? 'Recording' : 'Not Recording'}
-                        </div>
-                        ${recordingStatus.active ? `<span>${recordingStatus.frame_count} frames</span>` : ''}
-                    </div>
-                    
-                    ${camera.token_required ? `
+                    ${recordingStatus.requires_auth && !recordingStatus.authenticated ? `
                         <div class="token-section">
                             <input type="password" class="token-input" placeholder="Enter camera token" 
-                                   id="token-${camera.id}">
+                                   id="token-${camera.id}" onchange="onTokenChange('${camera.id}')" 
+                                   value="${storedToken || ''}">
+                            ${recordingStatus.auth_failed ? 
+                                '<div style="color: #ef4444; font-size: 0.8em; margin-top: 5px;">❌ Invalid token</div>' : 
+                                '<div style="color: #fbbf24; font-size: 0.8em; margin-top: 5px;">🔐 Authentication required</div>'
+                            }
                         </div>
-                    ` : ''}
-                    
-                    <div class="camera-controls">
-                        <button class="btn-small btn-start" onclick="startRecording('${camera.id}', '${camera.path}')"
-                                ${recordingStatus.active ? 'disabled' : ''}>
-                            Start Recording
-                        </button>
-                        <button class="btn-small btn-stop" onclick="stopRecording('${camera.id}', '${camera.path}')"
-                                ${!recordingStatus.active ? 'disabled' : ''}>
-                            Stop Recording  
-                        </button>
-                    </div>
+                    ` : `
+                        <div class="recording-status">
+                            <div class="recording-indicator ${recordingStatus.active ? 'recording-active' : 'recording-inactive'}">
+                                ${recordingStatus.active ? '🔴' : '⚫'} 
+                                ${recordingStatus.active ? 'Recording' : 'Not Recording'}
+                            </div>
+                            ${recordingStatus.active ? `<span>${recordingStatus.frame_count} frames</span>` : ''}
+                        </div>
+                        
+                        ${camera.token_required && recordingStatus.authenticated ? `
+                            <div class="token-section">
+                                <input type="password" class="token-input" placeholder="Enter camera token" 
+                                       id="token-${camera.id}" onchange="onTokenChange('${camera.id}')" 
+                                       value="****" readonly style="color: #4ade80;">
+                                <div style="color: #4ade80; font-size: 0.8em; margin-top: 5px;">✅ Authenticated</div>
+                            </div>
+                        ` : ''}
+                        
+                        <div class="camera-controls">
+                            <button class="btn-small btn-start" onclick="startRecording('${camera.id}', '${camera.path}')"
+                                    ${recordingStatus.active ? 'disabled' : ''}>
+                                Start Recording
+                            </button>
+                            <button class="btn-small btn-stop" onclick="stopRecording('${camera.id}', '${camera.path}')"
+                                    ${!recordingStatus.active ? 'disabled' : ''}>
+                                Stop Recording  
+                            </button>
+                        </div>
+                    `}
                 </div>
             ` : '';
 
