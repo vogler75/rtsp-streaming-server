@@ -15,7 +15,7 @@ pub struct CameraStatus {
     pub id: String,
     pub connected: bool,
     pub capture_fps: f32,
-    pub clients_connected: usize,
+    pub clients_connected: usize, // Total subscribers: WebSocket clients + internal systems (recording=1, control=1)
     pub last_frame_time: Option<String>,
     pub ffmpeg_running: bool,
     pub duplicate_frames: u64,

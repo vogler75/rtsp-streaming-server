@@ -79,7 +79,7 @@ impl RtspClient {
                             id: self.camera_id.clone(),
                             connected: false,
                             capture_fps: 0.0,
-                            clients_connected: self.frame_sender.receiver_count(),
+                            clients_connected: self.frame_sender.receiver_count(), // Includes WebSocket clients + internal systems (recording, control)
                             last_frame_time: None,
                             ffmpeg_running: false,
                             duplicate_frames: 0, // No duplicates when disconnected
@@ -700,7 +700,7 @@ impl RtspClient {
                                         id: self.camera_id.clone(),
                                         connected: true,
                                         capture_fps: fps,
-                                        clients_connected: self.frame_sender.receiver_count(),
+                                        clients_connected: self.frame_sender.receiver_count(), // Includes WebSocket clients + internal systems (recording, control)
                                         last_frame_time: Some(Utc::now().to_rfc3339()),
                                         ffmpeg_running: true,
                                         duplicate_frames: duplicate_count,

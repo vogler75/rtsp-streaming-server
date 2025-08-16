@@ -474,6 +474,8 @@ async fn main() -> Result<()> {
             drop(camera_streams); // Release lock before await
             
             // Calculate total clients by summing clients from all cameras
+            // Note: clients_connected includes WebSocket clients + internal systems (recording + control)
+            // Each camera typically shows +2 clients at startup (recording=1, control=1)
             let mut total_clients = 0;
             if let Some(mqtt_handle) = &state.mqtt_handle {
                 let all_camera_statuses = mqtt_handle.get_all_camera_status().await;

@@ -360,6 +360,10 @@
         <div class="last-update">
             Last updated: <span id="lastUpdate">Never</span>
         </div>
+
+        <div style="text-align: center; margin-top: 10px; color: #cbd5e1; font-size: 0.8em;">
+            * Client count includes WebSocket connections + internal systems (recording + control = +2 per camera)
+        </div>
     </div>
 
     <script>
@@ -607,7 +611,7 @@
                         </div>
                         <div class="camera-stat">
                             <strong>${camera.clients_connected}</strong><br>
-                            <small>Clients</small>
+                            <small>Clients*</small>
                         </div>
                         <div class="camera-stat">
                             <strong>${camera.ffmpeg_running ? '✅' : '❌'}</strong><br>
