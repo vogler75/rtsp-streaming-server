@@ -947,6 +947,7 @@ async fn api_get_active_recording(
 
     if let Some(active_recording) = recording_manager.get_active_recording(&camera_id).await {
         let data = serde_json::json!({
+            "active": true,
             "session_id": active_recording.session_id,
             "start_time": active_recording.start_time,
             "frame_count": active_recording.frame_count,

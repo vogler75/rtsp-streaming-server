@@ -929,8 +929,9 @@
                     
                     if (response.ok) {
                         const result = await response.json();
+                        this.logJson({ response: result });
                         
-                        if (result.status === 'success' && result.data) {
+                        if (result.data && result.data.active === true) {
                             // Active recording found
                             this.isRecording = true;
                             document.getElementById('startRecording').disabled = true;
@@ -941,6 +942,7 @@
                             this.isRecording = false;
                             document.getElementById('startRecording').disabled = false;
                             document.getElementById('stopRecording').disabled = true;
+                            this.logJson({ status: 'No active recording', data: result.data });
                         }
                     } else if (response.status === 404) {
                         // 404 means no active recording (which is expected)
