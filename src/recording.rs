@@ -290,4 +290,70 @@ impl RecordingManager {
     ) -> Result<Option<RecordedFrame>> {
         self.database.get_frame_at_timestamp(camera_id, timestamp).await
     }
+
+    /// Check for active recordings at startup and restart them
+    pub async fn restart_active_recordings_at_startup(
+        &self,
+        camera_frame_senders: &HashMap<String, Arc<broadcast::Sender<Bytes>>>,
+    ) -> Result<()> {
+        info!("Checking for active recordings to restart at startup...");
+        
+        let mut restarted_count = 0;
+        
+        for (camera_id, frame_sender) in camera_frame_senders {
+            // Check database for active recording sessions for this camera
+            match self.database.get_active_recordings(camera_id).await {
+                Ok(active_sessions) => {
+                    for session in active_sessions {
+                        info!(
+                            "Found active recording session {} for camera '{}', restarting recording...",
+                            session.id, camera_id
+                        );
+                        
+                        // Create active recording entry to track this session
+                        let active_recording = ActiveRecording {
+                            session_id: session.id,
+                            start_time: session.start_time,
+                            frame_count: 0, // Will be updated as new frames come in
+                            requested_duration: None, // Not tracked for restarted sessions
+                        };
+                        
+                        // Store active recording
+                        let mut active_recordings = self.active_recordings.write().await;
+                        active_recordings.insert(camera_id.clone(), active_recording);
+                        drop(active_recordings);
+                        
+                        // Subscribe to frame stream and start recording task
+                        let frame_receiver = frame_sender.subscribe();
+                        let mut frame_subscribers = self.frame_subscribers.write().await;
+                        frame_subscribers.insert(camera_id.clone(), frame_receiver);
+                        drop(frame_subscribers);
+                        
+                        // Start recording task
+                        self.start_recording_task(camera_id.clone(), session.id, frame_sender.clone()).await;
+                        
+                        restarted_count += 1;
+                        info!(
+                            "Restarted recording for camera '{}' with session ID {}",
+                            camera_id, session.id
+                        );
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to check for active recordings for camera '{}': {}",
+                        camera_id, e
+                    );
+                }
+            }
+        }
+        
+        if restarted_count > 0 {
+            info!("Restarted {} active recording(s) at startup", restarted_count);
+        } else {
+            info!("No active recordings found to restart at startup");
+        }
+        
+        Ok(())
+    }
 }

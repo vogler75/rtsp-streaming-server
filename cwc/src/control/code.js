@@ -34,6 +34,7 @@ let currentSpeed = 1.0;
 let currentLive = false;
 let currentRecordingReason = '';
 let currentRecordingActive = false;
+let currentGoto = '';
 
 ////////////////////////////////////////////
 // VideoPlayer functions
@@ -411,7 +412,12 @@ function connectToControlWebSocket(url) {
             const timestampMs = dataView.getBigInt64(1, true); // little-endian
             const frameData = buffer.slice(9); // Rest is frame data
             
-            console.log('[CWC DEBUG] ⬅ RECEIVED VIDEO FRAME with timestamp:', new Date(Number(timestampMs)), 'Frame size:', frameData.byteLength, 'bytes');
+            // Update the timestamp property with the current frame timestamp in ISO format
+            const timestampNumber = Number(timestampMs);
+            const timestampISO = new Date(timestampNumber).toISOString();
+            WebCC.Properties.timestamp = timestampISO;
+            
+            // Video frame received and timestamp property updated (removed verbose logging)
             
             // Create or update an img element to display the frame
             let imgElement = document.getElementById('mjpegFrame');
@@ -789,6 +795,22 @@ function setProperty(data) {
         console.log('[CWC DEBUG] ⚠️ Recording command ignored - not in control mode');
       }
       break;
+    case 'goto':
+      currentGoto = data.value;
+      console.log('[CWC DEBUG] 🔧 Goto timestamp changed to:', currentGoto);
+      
+      if (isControlMode && controlWebSocket && currentGoto) {
+        console.log('[CWC DEBUG] 🎯 Triggering goto command to timestamp:', currentGoto);
+        sendControlCommand({
+          cmd: 'goto',
+          timestamp: currentGoto
+        });
+      } else if (!currentGoto) {
+        console.log('[CWC DEBUG] ⚠️ Goto command ignored - empty timestamp');
+      } else {
+        console.log('[CWC DEBUG] ⚠️ Goto command ignored - not in control mode or WebSocket not connected');
+      }
+      break;
   }
 }
 
@@ -812,6 +834,7 @@ WebCC.start(
       currentLive = WebCC.Properties.live || false;
       currentRecordingReason = WebCC.Properties.recording_reason || '';
       currentRecordingActive = WebCC.Properties.recording_active || false;
+      currentGoto = WebCC.Properties.goto || '';
       
       // Check version property at startup
       if (versionElement && WebCC.Properties.version) {
@@ -852,7 +875,9 @@ WebCC.start(
       speed: 1.0,
       live: false,
       recording_reason: '',
-      recording_active: false
+      recording_active: false,
+      goto: '',
+      timestamp: ''
     }
   },
   // placeholder to include additional Unified dependencies

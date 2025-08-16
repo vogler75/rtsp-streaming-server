@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.12",
+			"version": "1.0.16",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -97,6 +97,16 @@
 						"type": "boolean",
 						"default": false,
 						"description": "Start or stop recording (true=start, false=stop)"
+					},
+					"goto": {
+						"type": "string",
+						"default": "",
+						"description": "Go to specific timestamp in ISO format (e.g., '2025-08-15T10:30:00.000Z')"
+					},
+					"timestamp": {
+						"type": "string",
+						"default": "",
+						"description": "Current video frame timestamp in ISO format (read-only, e.g., '2025-08-15T10:30:00.000Z')"
 					}
 				}
 			}

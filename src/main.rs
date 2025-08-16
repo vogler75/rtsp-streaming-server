@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::sync::broadcast;
 use tracing::{info, warn, error};
 use std::fs::File;
@@ -27,7 +28,6 @@ use config::Config;
 use errors::{Result, StreamError};
 use video_stream::VideoStream;
 use websocket::websocket_handler;
-use std::collections::HashMap;
 use mqtt::{MqttPublisher, MqttHandle};
 use database::SqliteDatabase;
 use recording::{RecordingManager, RecordingConfig};
@@ -247,6 +247,26 @@ async fn main() -> Result<()> {
     if camera_streams.is_empty() {
         error!("No cameras configured or all failed to initialize");
         return Err(StreamError::config("No cameras available"));
+    }
+
+    // Restart active recordings if recording manager is available
+    if let Some(ref recording_manager) = recording_manager {
+        info!("Checking for active recordings to restart...");
+        
+        // Create a map of camera_id -> frame_sender for the restart method
+        let mut camera_frame_senders: HashMap<String, Arc<broadcast::Sender<bytes::Bytes>>> = HashMap::new();
+        
+        for stream_info in camera_streams.values() {
+            camera_frame_senders.insert(
+                stream_info.camera_id.clone(),
+                stream_info.frame_sender.clone()
+            );
+        }
+        
+        // Restart active recordings
+        if let Err(e) = recording_manager.restart_active_recordings_at_startup(&camera_frame_senders).await {
+            error!("Failed to restart active recordings at startup: {}", e);
+        }
     }
 
     let cors_layer = if let Some(origin) = &config.server.cors_allow_origin {

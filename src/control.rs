@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use chrono::{DateTime, Utc};
 use tracing::{info, error, debug};
 use tokio::sync::broadcast;
@@ -10,12 +10,143 @@ use futures_util::{stream::StreamExt, SinkExt};
 use crate::recording::RecordingManager;
 use crate::database::RecordedFrame;
 
+// Custom deserializer for timestamps that supports both string (ISO format) and number (ms since epoch)
+fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+
+    struct TimestampVisitor;
+
+    impl<'de> Visitor<'de> for TimestampVisitor {
+        type Value = DateTime<Utc>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a timestamp as either an ISO string or milliseconds since epoch")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            // Try to parse as ISO string (existing behavior)
+            DateTime::parse_from_rfc3339(value)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(de::Error::custom)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            // Parse as milliseconds since epoch
+            DateTime::from_timestamp_millis(value)
+                .ok_or_else(|| de::Error::custom("invalid timestamp"))
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            // Parse as milliseconds since epoch
+            DateTime::from_timestamp_millis(value as i64)
+                .ok_or_else(|| de::Error::custom("invalid timestamp"))
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            // Parse as milliseconds since epoch (handle floating point)
+            DateTime::from_timestamp_millis(value as i64)
+                .ok_or_else(|| de::Error::custom("invalid timestamp"))
+        }
+    }
+
+    deserializer.deserialize_any(TimestampVisitor)
+}
+
+// Custom deserializer for optional timestamps
+fn deserialize_optional_timestamp<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+
+    struct OptionalTimestampVisitor;
+
+    impl<'de> Visitor<'de> for OptionalTimestampVisitor {
+        type Value = Option<DateTime<Utc>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("an optional timestamp as either an ISO string or milliseconds since epoch")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserialize_timestamp(deserializer).map(Some)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            DateTime::parse_from_rfc3339(value)
+                .map(|dt| Some(dt.with_timezone(&Utc)))
+                .map_err(de::Error::custom)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            DateTime::from_timestamp_millis(value)
+                .map(Some)
+                .ok_or_else(|| de::Error::custom("invalid timestamp"))
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            DateTime::from_timestamp_millis(value as i64)
+                .map(Some)
+                .ok_or_else(|| de::Error::custom("invalid timestamp"))
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            DateTime::from_timestamp_millis(value as i64)
+                .map(Some)
+                .ok_or_else(|| de::Error::custom("invalid timestamp"))
+        }
+    }
+
+    deserializer.deserialize_option(OptionalTimestampVisitor)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd")]
 pub enum ControlCommand {
     #[serde(rename = "start")]
     StartReplay {
+        #[serde(deserialize_with = "deserialize_timestamp")]
         from: DateTime<Utc>,
+        #[serde(deserialize_with = "deserialize_optional_timestamp", default)]
         to: Option<DateTime<Utc>>,  // Optional - if None, play until end
     },
     #[serde(rename = "stop")]
@@ -28,6 +159,7 @@ pub enum ControlCommand {
     StartLiveStream,
     #[serde(rename = "goto")]
     GoToTimestamp {
+        #[serde(deserialize_with = "deserialize_timestamp")]
         timestamp: DateTime<Utc>,
     },
 }
