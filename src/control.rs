@@ -567,14 +567,26 @@ impl ControlHandler {
                                 message_data.extend_from_slice(&frame_data);
                                 
                                 let message = Message::Binary(message_data);
-                                if let Ok(mut sender_guard) = sender_clone.try_lock() {
-                                    if sender_guard.send(message).await.is_err() {
-                                        error!("Failed to send live frame, stopping stream");
+                                // Use timeout instead of try_lock to avoid skipping frames unnecessarily
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_millis(10), // 10ms timeout
+                                    async {
+                                        let mut sender_guard = sender_clone.lock().await;
+                                        sender_guard.send(message).await
+                                    }
+                                ).await {
+                                    Ok(Ok(())) => {
+                                        // Frame sent successfully
+                                    }
+                                    Ok(Err(e)) => {
+                                        error!("Failed to send live frame: {}, stopping stream", e);
                                         break;
                                     }
-                                } else {
-                                    // Sender is busy, skip this frame
-                                    continue;
+                                    Err(_) => {
+                                        // Timeout - client is too slow, skip this frame
+                                        debug!("Skipped frame due to slow client");
+                                        continue;
+                                    }
                                 }
                             }
                             Err(broadcast::error::RecvError::Lagged(_)) => {
