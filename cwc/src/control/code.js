@@ -24,6 +24,17 @@ let lastFpsTime = Date.now();
 let bytesReceived = 0;
 let lastBitrateTime = Date.now();
 
+// Control mode variables
+let isControlMode = false;
+let controlWebSocket = null;
+let currentPlayFrom = '';
+let currentPlayTo = '';
+let currentPlay = false;
+let currentSpeed = 1.0;
+let currentLive = false;
+let currentRecordingReason = '';
+let currentRecordingActive = false;
+
 ////////////////////////////////////////////
 // VideoPlayer functions
 
@@ -129,6 +140,12 @@ function connectToWebSocket(url) {
   if (!url || url.trim() === '' || !shouldConnect) {
     console.log('No URL provided or connection disabled');
     updateConnectionStatus(false);
+    return;
+  }
+  
+  // Check if we're in control mode and need to connect to control endpoint
+  if (isControlMode) {
+    connectToControlWebSocket(url);
     return;
   }
   
@@ -330,6 +347,267 @@ function connectToWebSocket(url) {
   }
 }
 
+function connectToControlWebSocket(url) {
+  console.log('[CWC DEBUG] 🔗 Connecting to control WebSocket...');
+  
+  if (controlWebSocket) {
+    console.log('[CWC DEBUG] Closing existing control WebSocket');
+    controlWebSocket.close();
+    controlWebSocket = null;
+  }
+  
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  try {
+    // Convert the URL to control endpoint (add /control to the path)
+    let controlUrl = url;
+    if (controlUrl.includes('?')) {
+      // Insert /control before query parameters
+      controlUrl = controlUrl.replace('?', '/control?');
+    } else {
+      controlUrl = controlUrl + '/control';
+    }
+    
+    // Only add token if provided - no other parameters
+    if (currentToken && currentToken.trim() !== '') {
+      const separator = controlUrl.includes('?') ? '&' : '?';
+      controlUrl += separator + 'token=' + encodeURIComponent(currentToken);
+      console.log('[CWC DEBUG] Adding token to control URL');
+    }
+    
+    console.log('[CWC DEBUG] 🔗 Control URL:', controlUrl);
+    controlWebSocket = new WebSocket(controlUrl);
+    
+    controlWebSocket.onopen = function() {
+      console.log('[CWC DEBUG] ✅ Control WebSocket connected successfully');
+      updateConnectionStatus(true);
+    };
+    
+    controlWebSocket.onmessage = function(event) {
+      if (event.data instanceof Blob) {
+        // Handle binary messages from control WebSocket
+        if (event.data.size === 0) {
+          return; // Skip empty frames
+        }
+        
+        // Read the binary data to check protocol byte
+        event.data.arrayBuffer().then(buffer => {
+          const dataView = new DataView(buffer);
+          
+          if (buffer.byteLength < 9) {
+            console.warn('Control message too short, expected at least 9 bytes');
+            return;
+          }
+          
+          // First byte indicates message type
+          const messageType = dataView.getUint8(0);
+          
+          if (messageType === 0) {
+            // Video frame message
+            // Next 8 bytes are timestamp (little-endian 64-bit integer)
+            const timestampMs = dataView.getBigInt64(1, true); // little-endian
+            const frameData = buffer.slice(9); // Rest is frame data
+            
+            console.log('[CWC DEBUG] ⬅ RECEIVED VIDEO FRAME with timestamp:', new Date(Number(timestampMs)), 'Frame size:', frameData.byteLength, 'bytes');
+            
+            // Create or update an img element to display the frame
+            let imgElement = document.getElementById('mjpegFrame');
+            if (!imgElement) {
+              imgElement = document.createElement('img');
+              imgElement.id = 'mjpegFrame';
+              imgElement.style.width = '100%';
+              imgElement.style.height = '100%';
+              imgElement.style.objectFit = 'contain';
+              
+              videoElement.style.display = 'none';
+              videoElement.parentNode.insertBefore(imgElement, videoElement.nextSibling);
+            } else {
+              imgElement.style.display = 'block';
+              videoElement.style.display = 'none';
+            }
+            
+            // Create blob URL and clean up previous one
+            const previousSrc = imgElement.src;
+            if (previousSrc && previousSrc.startsWith('blob:')) {
+              URL.revokeObjectURL(previousSrc);
+            }
+            
+            const frameBlob = new Blob([frameData], { type: 'image/jpeg' });
+            const blobUrl = URL.createObjectURL(frameBlob);
+            imgElement.src = blobUrl;
+            
+            // Update statistics
+            frameCount++;
+            fpsCounter++;
+            bytesReceived += event.data.size;
+            
+            const now = Date.now();
+            
+            // FPS calculation
+            if (now - lastFpsTime >= 1000) {
+              const fps = Math.round(fpsCounter * 1000 / (now - lastFpsTime));
+              WebCC.Properties.fps = fps;
+              fpsCounter = 0;
+              lastFpsTime = now;
+            }
+            
+            // Bitrate calculation
+            if (now - lastBitrateTime >= 1000) {
+              const kbs = Math.round(bytesReceived / 1024);
+              WebCC.Properties.kbs = kbs;
+              bytesReceived = 0;
+              lastBitrateTime = now;
+            }
+            
+            // Clean up blob URL after image loads
+            imgElement.onload = function() {
+              setTimeout(() => {
+                URL.revokeObjectURL(blobUrl);
+              }, 100);
+            };
+            
+          } else if (messageType === 1) {
+            // JSON response message
+            const jsonData = buffer.slice(1); // Skip first byte
+            const jsonString = new TextDecoder().decode(jsonData);
+            
+            try {
+              const response = JSON.parse(jsonString);
+              console.log('[CWC DEBUG] ⬅ RECEIVED JSON RESPONSE:', response);
+              
+              // Handle command responses
+              if (response.code) {
+                if (response.code === 200) {
+                  console.log('[CWC DEBUG] ✅ Control command successful:', response.text);
+                  if (response.data) {
+                    console.log('[CWC DEBUG] Response data:', response.data);
+                  }
+                } else {
+                  console.error('[CWC DEBUG] ❌ Control command failed:', response.text, 'Code:', response.code);
+                }
+              }
+            } catch (e) {
+              console.error('[CWC DEBUG] ⬅ Failed to parse JSON response:', e);
+              console.log('[CWC DEBUG] Raw JSON data:', jsonString);
+            }
+          } else {
+            console.warn('[CWC DEBUG] ⬅ UNKNOWN MESSAGE TYPE:', messageType, 'Buffer size:', buffer.byteLength);
+          }
+        }).catch(error => {
+          console.error('[CWC DEBUG] ⬅ Error reading binary data:', error);
+        });
+        
+      } else if (typeof event.data === 'string') {
+        // Handle text messages (fallback)
+        try {
+          const response = JSON.parse(event.data);
+          console.log('[CWC DEBUG] ⬅ RECEIVED TEXT RESPONSE:', response);
+          
+          // Handle command responses
+          if (response.code) {
+            if (response.code === 200) {
+              console.log('[CWC DEBUG] ✅ Control command successful (text):', response.text);
+            } else {
+              console.error('[CWC DEBUG] ❌ Control command failed (text):', response.text);
+            }
+          }
+        } catch (e) {
+          console.log('[CWC DEBUG] ⬅ RECEIVED TEXT MESSAGE (non-JSON):', event.data);
+        }
+      }
+    };
+    
+    controlWebSocket.onerror = function(error) {
+      console.error('[CWC DEBUG] ❌ Control WebSocket error:', error);
+      updateConnectionStatus(false);
+      scheduleReconnect();
+    };
+    
+    controlWebSocket.onclose = function(event) {
+      console.log('[CWC DEBUG] 🔌 Control WebSocket closed:', event.code, event.reason || 'No reason provided');
+      updateConnectionStatus(false);
+      controlWebSocket = null;
+      
+      if (event.code !== 1000) {
+        console.log('[CWC DEBUG] Scheduling reconnect due to abnormal close');
+        scheduleReconnect();
+      }
+    };
+    
+  } catch (error) {
+    console.error('[CWC DEBUG] ❌ Failed to create control WebSocket:', error);
+    updateConnectionStatus(false);
+    scheduleReconnect();
+  }
+}
+
+function sendControlCommand(command) {
+  if (!controlWebSocket || controlWebSocket.readyState !== WebSocket.OPEN) {
+    console.error('[CWC DEBUG] Control WebSocket not connected - cannot send command:', command);
+    return;
+  }
+  
+  const commandStr = JSON.stringify(command);
+  console.log('[CWC DEBUG] ➤ SENDING CONTROL COMMAND:', commandStr);
+  controlWebSocket.send(commandStr);
+}
+
+function handleRecordingControl(active, reason) {
+  if (!isControlMode || !currentURL) {
+    console.log('[CWC DEBUG] Recording control only available in control mode');
+    return;
+  }
+  
+  // Use HTTP API for recording control
+  // Convert WebSocket URL to HTTP URL and preserve the camera path
+  let baseUrl = currentURL.replace(/^ws(s?):\/\//, 'http$1://');
+  
+  // Remove /control from the end if it exists (from control WebSocket URL)
+  baseUrl = baseUrl.replace(/\/control(\?.*)?$/, '');
+  
+  const endpoint = active ? '/control/recording/start' : '/control/recording/stop';
+  const fullUrl = baseUrl + endpoint;
+  
+  const requestOptions = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  };
+  
+  if (currentToken) {
+    requestOptions.headers['Authorization'] = 'Bearer ' + currentToken;
+    console.log('[CWC DEBUG] Using token authentication for HTTP request');
+  }
+  
+  if (active) {
+    // Always pass reason when starting recording, use empty string if no reason provided
+    requestOptions.body = JSON.stringify({ reason: reason || '' });
+  }
+  
+  console.log('[CWC DEBUG] ➤ SENDING HTTP REQUEST:', {
+    method: 'POST',
+    url: fullUrl,
+    body: requestOptions.body || '(no body)',
+    headers: requestOptions.headers
+  });
+  
+  fetch(fullUrl, requestOptions)
+    .then(response => {
+      console.log('[CWC DEBUG] ⬅ HTTP RESPONSE STATUS:', response.status, response.statusText);
+      return response.json();
+    })
+    .then(data => {
+      console.log('[CWC DEBUG] ⬅ HTTP RESPONSE DATA:', data);
+    })
+    .catch(error => {
+      console.error('[CWC DEBUG] ⬅ HTTP REQUEST ERROR:', error);
+    });
+}
+
 function setProperty(data) {  
   switch (data.key) {
     case 'URL':
@@ -415,6 +693,102 @@ function setProperty(data) {
         }
       }
       break;
+    case 'control':
+      isControlMode = data.value;
+      console.log('[CWC DEBUG] 🔧 Control mode changed to:', isControlMode);
+      
+      // Reconnect if URL is available and we're supposed to be connected
+      if (shouldConnect && currentURL) {
+        console.log('[CWC DEBUG] Reconnecting due to control mode change...');
+        if (websocket) {
+          websocket.close();
+          websocket = null;
+        }
+        if (controlWebSocket) {
+          controlWebSocket.close();
+          controlWebSocket = null;
+        }
+        connectToWebSocket(currentURL);
+      }
+      break;
+    case 'play_from':
+      currentPlayFrom = data.value;
+      console.log('[CWC DEBUG] 🔧 Play from timestamp changed to:', currentPlayFrom);
+      break;
+    case 'play_to':
+      currentPlayTo = data.value;
+      console.log('[CWC DEBUG] 🔧 Play to timestamp changed to:', currentPlayTo);
+      break;
+    case 'play':
+      currentPlay = data.value;
+      console.log('[CWC DEBUG] 🔧 Play control changed to:', currentPlay);
+      
+      if (isControlMode && controlWebSocket) {
+        if (currentPlay) {
+          // Start playback
+          const command = {
+            cmd: 'start',
+            from: currentPlayFrom
+          };
+          if (currentPlayTo) {
+            command.to = currentPlayTo;
+          }
+          console.log('[CWC DEBUG] 🎬 Triggering playback start with timestamps from:', currentPlayFrom, 'to:', currentPlayTo || '(end)');
+          sendControlCommand(command);
+        } else {
+          // Stop playback
+          console.log('[CWC DEBUG] ⏹️ Triggering playback stop');
+          sendControlCommand({ cmd: 'stop' });
+        }
+      } else {
+        console.log('[CWC DEBUG] ⚠️ Play command ignored - not in control mode or WebSocket not connected');
+      }
+      break;
+    case 'speed':
+      currentSpeed = data.value;
+      console.log('[CWC DEBUG] 🔧 Playback speed changed to:', currentSpeed);
+      
+      if (isControlMode && controlWebSocket) {
+        console.log('[CWC DEBUG] ⚡ Triggering speed change');
+        sendControlCommand({
+          cmd: 'speed',
+          speed: currentSpeed
+        });
+      } else {
+        console.log('[CWC DEBUG] ⚠️ Speed command ignored - not in control mode or WebSocket not connected');
+      }
+      break;
+    case 'live':
+      currentLive = data.value;
+      console.log('[CWC DEBUG] 🔧 Live stream control changed to:', currentLive);
+      
+      if (isControlMode && controlWebSocket) {
+        if (currentLive) {
+          console.log('[CWC DEBUG] 📺 Triggering live stream start');
+          sendControlCommand({ cmd: 'live' });
+        } else {
+          console.log('[CWC DEBUG] ⏹️ Triggering live stream stop');
+          sendControlCommand({ cmd: 'stop' });
+        }
+      } else {
+        console.log('[CWC DEBUG] ⚠️ Live command ignored - not in control mode or WebSocket not connected');
+      }
+      break;
+    case 'recording_reason':
+      currentRecordingReason = data.value;
+      console.log('[CWC DEBUG] 🔧 Recording reason changed to:', currentRecordingReason);
+      break;
+    case 'recording_active':
+      currentRecordingActive = data.value;
+      console.log('[CWC DEBUG] 🔧 Recording active changed to:', currentRecordingActive);
+      
+      if (isControlMode) {
+        console.log('[CWC DEBUG] 🔴 Triggering recording control - active:', currentRecordingActive, 'reason:', currentRecordingReason);
+        handleRecordingControl(currentRecordingActive, currentRecordingReason);
+      } else {
+        console.log('[CWC DEBUG] ⚠️ Recording command ignored - not in control mode');
+      }
+      break;
   }
 }
 
@@ -430,6 +804,14 @@ WebCC.start(
       currentURL = WebCC.Properties.URL || '';
       currentToken = WebCC.Properties.token || '';
       shouldConnect = WebCC.Properties.connect || false;
+      isControlMode = WebCC.Properties.control || false;
+      currentPlayFrom = WebCC.Properties.play_from || '';
+      currentPlayTo = WebCC.Properties.play_to || '';
+      currentPlay = WebCC.Properties.play || false;
+      currentSpeed = WebCC.Properties.speed || 1.0;
+      currentLive = WebCC.Properties.live || false;
+      currentRecordingReason = WebCC.Properties.recording_reason || '';
+      currentRecordingActive = WebCC.Properties.recording_active || false;
       
       // Check version property at startup
       if (versionElement && WebCC.Properties.version) {
@@ -462,7 +844,15 @@ WebCC.start(
       fps: 0,
       kbs: 0,
       version: false,
-      token: ''
+      token: '',
+      control: false,
+      play_from: '',
+      play_to: '',
+      play: false,
+      speed: 1.0,
+      live: false,
+      recording_reason: '',
+      recording_active: false
     }
   },
   // placeholder to include additional Unified dependencies

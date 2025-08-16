@@ -802,9 +802,11 @@ async fn api_stop_recording(
                 });
                 Json(ApiResponse::success(data)).into_response()
             } else {
-                (axum::http::StatusCode::NOT_FOUND,
-                 Json(ApiResponse::<()>::error("No active recording found", 404)))
-                 .into_response()
+                let data = serde_json::json!({
+                    "message": "No active recording found",
+                    "camera_id": camera_id
+                });
+                Json(ApiResponse::success(data)).into_response()
             }
         }
         Err(_) => {
@@ -914,9 +916,12 @@ async fn api_get_active_recording(
         });
         Json(ApiResponse::success(data)).into_response()
     } else {
-        (axum::http::StatusCode::NOT_FOUND,
-         Json(ApiResponse::<()>::error("No active recording found", 404)))
-         .into_response()
+        let data = serde_json::json!({
+            "message": "No active recording found",
+            "camera_id": camera_id,
+            "active": false
+        });
+        Json(ApiResponse::success(data)).into_response()
     }
 }
 

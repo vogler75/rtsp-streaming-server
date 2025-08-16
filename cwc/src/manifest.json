@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.7",
+			"version": "1.0.12",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -57,6 +57,46 @@
 						"type": "string",
 						"default": "",
 						"description": "Authentication token for WebSocket connection (Bearer token)"
+					},
+					"control": {
+						"type": "boolean",
+						"default": false,
+						"description": "Enable control mode instead of normal video streaming"
+					},
+					"play_from": {
+						"type": "string",
+						"default": "",
+						"description": "Start timestamp for playback as ISO string (e.g., '2025-08-15T10:00:00.000Z')"
+					},
+					"play_to": {
+						"type": "string",
+						"default": "",
+						"description": "End timestamp for playback as ISO string (optional, plays until end if empty)"
+					},
+					"play": {
+						"type": "boolean",
+						"default": false,
+						"description": "Start/stop playback with the specified time range"
+					},
+					"speed": {
+						"type": "number",
+						"default": 1.0,
+						"description": "Playback speed multiplier (e.g., 1.0 = normal, 2.0 = 2x speed)"
+					},
+					"live": {
+						"type": "boolean",
+						"default": false,
+						"description": "Enable/disable live stream mode"
+					},
+					"recording_reason": {
+						"type": "string",
+						"default": "",
+						"description": "Reason for starting a recording session"
+					},
+					"recording_active": {
+						"type": "boolean",
+						"default": false,
+						"description": "Start or stop recording (true=start, false=stop)"
 					}
 				}
 			}
