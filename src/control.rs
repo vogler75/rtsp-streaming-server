@@ -404,18 +404,21 @@ impl ControlHandler {
             Self::handle_stop(replay_state, live_stream_state).await;
         }
 
-        // Check if frames exist first
-        match recording_manager.get_replay_frames(camera_id, from, to).await {
-            Ok(frames) => {
-                if frames.is_empty() {
-                    return CommandResponse::error(404, "No recorded frames found in the specified time range");
-                }
+        // Check if frames exist by trying to create a stream
+        match recording_manager.create_replay_stream(camera_id, from, to).await {
+            Ok(mut test_stream) => {
+                // Check if we can get at least one frame
+                match test_stream.next_frame().await {
+                    Ok(Some(_first_frame)) => {
+                        // We have at least one frame, close the test stream
+                        let _ = test_stream.close().await;
+                        
+                        // Use estimated frame count if available, otherwise show "streaming"
+                        let frame_count = test_stream.estimated_frame_count().unwrap_or(0);
 
-                let frame_count = frames.len();
-
-                // Create control channels
-                let (speed_sender, mut speed_receiver) = broadcast::channel(1);
-                let (stop_sender, mut stop_receiver) = broadcast::channel(1);
+                        // Create control channels
+                        let (speed_sender, mut speed_receiver) = broadcast::channel(1);
+                        let (stop_sender, mut stop_receiver) = broadcast::channel(1);
                 
                 replay_state.active = true;
                 replay_state.speed_sender = Some(speed_sender.clone());
@@ -427,14 +430,15 @@ impl ControlHandler {
                 let recording_manager_clone = recording_manager.clone();
                 
                 tokio::spawn(async move {
-                    info!("Starting replay for camera '{}' with {} frames", camera_id_clone, frame_count);
+                    info!("Starting streaming replay for camera '{}' (estimated {} frames)", camera_id_clone, frame_count);
                     
-                    // Get frames again for the replay task
-                    if let Ok(frames) = recording_manager_clone.get_replay_frames(&camera_id_clone, from, to).await {
+                    // Create streaming replay
+                    if let Ok(mut frame_stream) = recording_manager_clone.create_replay_stream(&camera_id_clone, from, to).await {
                         let mut current_speed = 1.0f32;
-                        let mut last_timestamp = if !frames.is_empty() { frames[0].timestamp } else { Utc::now() };
+                        let mut last_timestamp: Option<DateTime<Utc>> = None;
+                        let mut frame_count = 0;
                         
-                        for frame in frames {
+                        loop {
                             // Check for stop signal
                             if stop_receiver.try_recv().is_ok() {
                                 info!("Replay stopped by user");
@@ -447,45 +451,81 @@ impl ControlHandler {
                                 info!("Replay speed changed to {}x", current_speed);
                             }
                             
-                            // Calculate delay between frames
-                            let frame_delay = frame.timestamp.signed_duration_since(last_timestamp);
-                            let adjusted_delay = if current_speed > 0.0 {
-                                (frame_delay.num_milliseconds() as f32 / current_speed).max(0.0)
-                            } else {
-                                0.0
-                            };
-                            
-                            // Wait for the appropriate time
-                            if adjusted_delay > 0.0 {
-                                tokio::time::sleep(tokio::time::Duration::from_millis(adjusted_delay as u64)).await;
+                            // Get next frame from stream
+                            match frame_stream.next_frame().await {
+                                Ok(Some(frame)) => {
+                                    frame_count += 1;
+                                    
+                                    // Calculate delay between frames
+                                    if let Some(last_ts) = last_timestamp {
+                                        let frame_delay = frame.timestamp.signed_duration_since(last_ts);
+                                        let adjusted_delay = if current_speed > 0.0 {
+                                            (frame_delay.num_milliseconds() as f32 / current_speed).max(0.0)
+                                        } else {
+                                            0.0
+                                        };
+                                        
+                                        // Wait for the appropriate time
+                                        if adjusted_delay > 0.0 {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(adjusted_delay as u64)).await;
+                                        }
+                                    }
+                                    
+                                    // Send frame with timestamp
+                                    let frame_bytes = Self::encode_frame_with_timestamp(&frame);
+                                    
+                                    let mut sender_guard = sender_clone.lock().await;
+                                    if let Err(e) = sender_guard.send(Message::Binary(frame_bytes)).await {
+                                        error!("Failed to send replay frame: {}", e);
+                                        break;
+                                    }
+                                    drop(sender_guard);
+                                    
+                                    last_timestamp = Some(frame.timestamp);
+                                }
+                                Ok(None) => {
+                                    // End of stream
+                                    info!("Replay completed for camera '{}' - streamed {} frames", camera_id_clone, frame_count);
+                                    break;
+                                }
+                                Err(e) => {
+                                    error!("Error reading frame from stream: {}", e);
+                                    break;
+                                }
                             }
-                            
-                            // Send frame with timestamp
-                            let frame_bytes = Self::encode_frame_with_timestamp(&frame);
-                            
-                            let mut sender_guard = sender_clone.lock().await;
-                            if let Err(e) = sender_guard.send(Message::Binary(frame_bytes)).await {
-                                error!("Failed to send replay frame: {}", e);
-                                break;
-                            }
-                            drop(sender_guard);
-                            
-                            last_timestamp = frame.timestamp;
                         }
                         
-                        info!("Replay completed for camera '{}'", camera_id_clone);
+                        // Clean up the stream
+                        if let Err(e) = frame_stream.close().await {
+                            error!("Error closing frame stream: {}", e);
+                        }
+                    } else {
+                        error!("Failed to create frame stream for replay");
                     }
                 });
                 
-                let data = serde_json::json!({
-                    "frame_count": frame_count,
-                    "from": from,
-                    "to": to
-                });
-                CommandResponse::success_with_data("Replay started", data)
+                        let data = serde_json::json!({
+                            "frame_count": frame_count,
+                            "from": from,
+                            "to": to
+                        });
+                        CommandResponse::success_with_data("Replay started", data)
+                    }
+                    Ok(None) => {
+                        // No frames found
+                        let _ = test_stream.close().await;
+                        CommandResponse::error(404, "No recorded frames found in the specified time range")
+                    }
+                    Err(e) => {
+                        // Error reading from stream
+                        let _ = test_stream.close().await;
+                        error!("Failed to read from frame stream: {}", e);
+                        CommandResponse::error(500, "Failed to access replay data")
+                    }
+                }
             }
             Err(e) => {
-                error!("Failed to get replay frames: {}", e);
+                error!("Failed to create frame stream: {}", e);
                 CommandResponse::error(500, "Failed to start replay")
             }
         }

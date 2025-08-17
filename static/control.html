@@ -409,6 +409,9 @@
                         <div class="button-group" style="margin-top: 10px;">
                             <button id="refreshRecordings">🔄 Refresh List</button>
                         </div>
+                        <div class="info-text" style="margin-top: 5px; font-size: 11px;">
+                            ⏰ Times displayed in your local timezone
+                        </div>
                     </div>
                     <div class="recordings-list" id="recordingsList">
                         <div class="info-text">Select a date range and click "Refresh List"</div>
@@ -606,7 +609,14 @@
             updateTimeline() {
                 if (!this.currentTimestamp) return;
 
-                document.getElementById('timelineCurrent').textContent = `Current: ${this.currentTimestamp.toLocaleTimeString()}`;
+                // Display current time with more detail including timezone
+                const currentTimeString = this.currentTimestamp.toLocaleString(undefined, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZoneName: 'short'
+                });
+                document.getElementById('timelineCurrent').textContent = `Current: ${currentTimeString}`;
 
                 // Update slider position for both replay and live modes
                 if (this.timelineStart && this.timelineEnd) {
@@ -643,9 +653,11 @@
                     return;
                 }
 
-                const fromDate = new Date(from + 'T00:00:00');
-                const toDate = new Date(to + 'T23:59:59');
+                // Create dates in local timezone (user's intent) then convert to UTC for backend
+                const fromDate = new Date(from + 'T00:00:00'); // Start of day in local time
+                const toDate = new Date(to + 'T23:59:59');     // End of day in local time
 
+                // Convert to UTC for backend API call
                 const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings?from=${fromDate.toISOString()}&to=${toDate.toISOString()}`;
                 
                 try {
@@ -678,9 +690,38 @@
                 recordings.forEach(rec => {
                     const item = document.createElement('div');
                     item.className = 'recording-item';
-                    const startTime = new Date(rec.start_time).toLocaleString();
-                    const endTime = rec.end_time ? new Date(rec.end_time).toLocaleString() : 'In Progress';
-                    item.innerHTML = `<strong>Session ${rec.id}</strong><br>Start: ${startTime}<br>End: ${endTime}`;
+                    
+                    // Display times in local timezone with more detailed format
+                    const startTime = new Date(rec.start_time).toLocaleString(undefined, {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    
+                    const endTime = rec.end_time ? 
+                        new Date(rec.end_time).toLocaleString(undefined, {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        }) : 'In Progress';
+                    
+                    // Calculate duration if recording is complete
+                    let durationText = '';
+                    if (rec.end_time) {
+                        const duration = new Date(rec.end_time) - new Date(rec.start_time);
+                        const hours = Math.floor(duration / (1000 * 60 * 60));
+                        const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
+                        const seconds = Math.floor((duration % (1000 * 60)) / 1000);
+                        durationText = `<br>Duration: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    }
+                    
+                    item.innerHTML = `<strong>Session ${rec.id}</strong><br>Start: ${startTime}<br>End: ${endTime}${durationText}`;
                     item.addEventListener('click', () => {
                         this.selectedRecording = rec;
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));

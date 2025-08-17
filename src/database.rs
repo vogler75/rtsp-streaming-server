@@ -19,6 +19,21 @@ pub struct RecordedFrame {
     pub frame_data: Vec<u8>,  // Store actual frame data
 }
 
+// Streaming interface for database-agnostic frame iteration
+#[async_trait]
+pub trait FrameStream: Send {
+    /// Get the next frame from the stream
+    async fn next_frame(&mut self) -> Result<Option<RecordedFrame>>;
+    
+    /// Close the stream and cleanup resources
+    async fn close(&mut self) -> Result<()>;
+    
+    /// Get an estimated frame count (optional, may not be accurate)
+    fn estimated_frame_count(&self) -> Option<usize> {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordingStatus {
     Active,
@@ -104,11 +119,142 @@ pub trait DatabaseProvider: Send + Sync {
         timestamp: DateTime<Utc>,
     ) -> Result<Option<RecordedFrame>>;
     
+    /// Create a streaming cursor for frames in the given time range
+    async fn create_frame_stream(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Box<dyn FrameStream>>;
+    
     async fn get_database_size(&self) -> Result<i64>;
 }
 
 pub struct SqliteDatabase {
     pool: SqlitePool,
+}
+
+// SQLite-specific frame streaming implementation
+pub struct SqliteFrameStream {
+    connection: sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    camera_id: String,
+    to: DateTime<Utc>,
+    current_timestamp: Option<DateTime<Utc>>,
+    batch_size: i64,
+    current_batch: Vec<RecordedFrame>,
+    batch_index: usize,
+    finished: bool,
+}
+
+impl SqliteFrameStream {
+    async fn new(
+        pool: &SqlitePool,
+        camera_id: String,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Self> {
+        let connection = pool.acquire().await?;
+        Ok(Self {
+            connection,
+            camera_id,
+            to,
+            current_timestamp: Some(from),
+            batch_size: 50, // Process 50 frames at a time for memory efficiency
+            current_batch: Vec::with_capacity(50), // Pre-allocate for efficiency
+            batch_index: 0,
+            finished: false,
+        })
+    }
+    
+    async fn fetch_next_batch(&mut self) -> Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        
+        let current_ts = match self.current_timestamp {
+            Some(ts) => ts,
+            None => {
+                self.finished = true;
+                return Ok(());
+            }
+        };
+        
+        let rows = sqlx::query(
+            r#"
+            SELECT rf.timestamp, rf.frame_data
+            FROM recorded_frames rf
+            JOIN recording_sessions rs ON rf.session_id = rs.id
+            WHERE rs.camera_id = ? 
+              AND rf.timestamp >= ? 
+              AND rf.timestamp <= ?
+            ORDER BY rf.timestamp ASC
+            LIMIT ?
+            "#
+        )
+        .bind(&self.camera_id)
+        .bind(current_ts)
+        .bind(self.to)
+        .bind(self.batch_size)
+        .fetch_all(self.connection.as_mut())
+        .await?;
+        
+        self.current_batch.clear();
+        self.batch_index = 0;
+        
+        for row in rows {
+            let timestamp: DateTime<Utc> = row.get("timestamp");
+            let frame_data: Vec<u8> = row.get("frame_data");
+            
+            self.current_batch.push(RecordedFrame {
+                timestamp,
+                frame_data,
+            });
+            
+            // Update current timestamp for next batch
+            self.current_timestamp = Some(timestamp + chrono::Duration::microseconds(1));
+        }
+        
+        // If we got fewer rows than requested, we've reached the end
+        if self.current_batch.len() < self.batch_size as usize {
+            self.finished = true;
+        }
+        
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl FrameStream for SqliteFrameStream {
+    async fn next_frame(&mut self) -> Result<Option<RecordedFrame>> {
+        // If we've consumed all frames in current batch, fetch the next batch
+        if self.batch_index >= self.current_batch.len() {
+            self.fetch_next_batch().await?;
+            
+            // If still no frames after fetching, we're done
+            if self.current_batch.is_empty() {
+                return Ok(None);
+            }
+        }
+        
+        // Return the next frame from current batch
+        let frame = self.current_batch[self.batch_index].clone();
+        self.batch_index += 1;
+        Ok(Some(frame))
+    }
+    
+    async fn close(&mut self) -> Result<()> {
+        // SQLite connection will be dropped automatically
+        self.finished = true;
+        self.current_batch.clear();
+        self.current_batch.shrink_to_fit(); // Release memory
+        self.current_timestamp = None;
+        Ok(())
+    }
+    
+    fn estimated_frame_count(&self) -> Option<usize> {
+        // Could implement a count query here if needed
+        None
+    }
 }
 
 impl SqliteDatabase {
@@ -498,6 +644,16 @@ impl DatabaseProvider for SqliteDatabase {
         } else {
             Ok(None)
         }
+    }
+    
+    async fn create_frame_stream(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Box<dyn FrameStream>> {
+        let stream = SqliteFrameStream::new(&self.pool, camera_id.to_string(), from, to).await?;
+        Ok(Box::new(stream))
     }
     
     async fn get_database_size(&self) -> Result<i64> {
