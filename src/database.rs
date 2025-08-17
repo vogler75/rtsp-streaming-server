@@ -469,19 +469,24 @@ impl DatabaseProvider for SqliteDatabase {
         camera_id: &str,
         timestamp: DateTime<Utc>,
     ) -> Result<Option<RecordedFrame>> {
-        // Find the nearest frame before or at the given timestamp
+        // Find the nearest frame before or at the given timestamp, within 1 second
+        let one_second_before = timestamp - chrono::Duration::seconds(1);
+        
         let row = sqlx::query(
             r#"
             SELECT rf.timestamp, rf.frame_data
             FROM recorded_frames rf
             JOIN recording_sessions rs ON rf.session_id = rs.id
-            WHERE rs.camera_id = ? AND rf.timestamp <= ?
+            WHERE rs.camera_id = ? 
+              AND rf.timestamp <= ? 
+              AND rf.timestamp >= ?
             ORDER BY rf.timestamp DESC
             LIMIT 1
             "#
         )
         .bind(camera_id)
         .bind(timestamp)
+        .bind(one_second_before)
         .fetch_optional(&self.pool)
         .await?;
         

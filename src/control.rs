@@ -693,7 +693,26 @@ impl ControlHandler {
                 CommandResponse::success_with_data("Goto timestamp completed", data)
             }
             Ok(None) => {
-                CommandResponse::error(404, "No frame found at or before the specified timestamp")
+                // Send empty frame (0 bytes) when no frame found within 1 second
+                let empty_frame = RecordedFrame {
+                    timestamp,
+                    frame_data: Vec::new(), // Empty frame data
+                };
+                let frame_bytes = Self::encode_frame_with_timestamp(&empty_frame);
+                
+                let mut sender_guard = sender.lock().await;
+                if let Err(e) = sender_guard.send(Message::Binary(frame_bytes)).await {
+                    error!("Failed to send empty goto frame: {}", e);
+                    return CommandResponse::error(500, "Failed to send empty frame");
+                }
+                
+                let data = serde_json::json!({
+                    "requested_timestamp": timestamp,
+                    "actual_timestamp": timestamp,
+                    "frame_size": 0,
+                    "note": "No frame found within 1 second of requested timestamp"
+                });
+                CommandResponse::success_with_data("Goto timestamp completed with empty frame", data)
             }
             Err(e) => {
                 error!("Failed to get frame at timestamp: {}", e);

@@ -352,8 +352,8 @@ impl RecordingManager {
         let database = self.get_camera_database(camera_id).await
             .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
 
-        // If no end time specified, use current time
-        let end_time = to.unwrap_or_else(|| Utc::now());
+        // If no end time specified, use start time plus 1 hour
+        let end_time = to.unwrap_or_else(|| from + chrono::Duration::hours(1));
         database.get_frames_in_range(camera_id, from, end_time).await
     }
 
