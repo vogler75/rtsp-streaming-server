@@ -386,12 +386,6 @@ function connectToControlWebSocket(url) {
   try {
     // Convert the URL to control endpoint (add /control to the path)
     let controlUrl = url;
-    if (controlUrl.includes('?')) {
-      // Insert /control before query parameters
-      controlUrl = controlUrl.replace('?', '/control?');
-    } else {
-      controlUrl = controlUrl + '/control';
-    }
     
     // Only add token if provided - no other parameters
     if (currentToken && currentToken.trim() !== '') {

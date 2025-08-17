@@ -10,8 +10,6 @@ use futures_util::{stream::StreamExt, SinkExt};
 use crate::recording::RecordingManager;
 use crate::database::RecordedFrame;
 
-// Import the same global mutex from websocket module
-use crate::websocket::WEBSOCKET_CONNECTION_MUTEX;
 
 // Custom deserializer for timestamps that supports both string (ISO format) and number (ms since epoch)
 fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
@@ -262,13 +260,11 @@ impl ControlHandler {
     }
 
     pub async fn handle_websocket(&mut self, socket: WebSocket) {
-        // Acquire the global connection mutex to ensure exclusive access during setup
-        debug!("[{}] Control WebSocket waiting for connection mutex...", self.client_id);
-        let _connection_guard = WEBSOCKET_CONNECTION_MUTEX.lock().await;
-        debug!("[{}] Control WebSocket acquired connection mutex", self.client_id);
-        
+        info!("[CONTROL] handle_websocket starting for camera '{}' client '{}'", self.camera_id, self.client_id);
         let (sender, mut receiver) = socket.split();
+        info!("[CONTROL] WebSocket split completed for camera '{}' client '{}'", self.camera_id, self.client_id);
         let sender = Arc::new(tokio::sync::Mutex::new(sender));
+        info!("[CONTROL] WebSocket sender wrapped in Arc<Mutex> for camera '{}' client '{}'", self.camera_id, self.client_id);
         info!("Control WebSocket connected for camera '{}' client '{}'", self.camera_id, self.client_id);
 
         // Create a channel to signal cleanup when connection closes
@@ -287,7 +283,7 @@ impl ControlHandler {
             while let Some(msg) = receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
-                        debug!("Received control command: {}", text);
+                        info!("[CONTROL-CMD] Received control command: {}", text);
                         
                         match serde_json::from_str::<ControlCommand>(&text) {
                             Ok(command) => {
@@ -344,12 +340,16 @@ impl ControlHandler {
             Self::handle_stop(&mut replay_state, &mut live_stream_state).await;
         });
 
-        // Release the connection mutex now that critical setup is complete
-        drop(_connection_guard);
-        debug!("[{}] Control WebSocket released connection mutex", self.client_id);
-
-        // Wait for tasks to complete
-        let _ = recv_task.await;
+        // Wait for tasks to complete with timeout to prevent hanging
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            recv_task
+        ).await {
+            Ok(_) => debug!("Control receive task completed normally"),
+            Err(_) => {
+                error!("Timeout waiting for control receive task to complete");
+            }
+        }
         
         // Send cleanup signal to any running tasks
         let _ = cleanup_tx.send(());
@@ -561,12 +561,15 @@ impl ControlHandler {
         let (stop_sender, mut stop_receiver) = broadcast::channel::<()>(1);
         
         let subscriber_count_before = frame_sender.receiver_count();
-        debug!("Control live stream: Subscriber count before subscribe: {}", subscriber_count_before);
+        info!("[CONTROL-LIVE] Subscriber count before subscribe: {} for camera", subscriber_count_before);
         
+        info!("[CONTROL-LIVE] About to call frame_sender.subscribe()...");
         let mut frame_receiver = frame_sender.subscribe();
+        info!("[CONTROL-LIVE] Successfully subscribed to frame_sender");
         
         let subscriber_count_after = frame_sender.receiver_count();
-        debug!("Control live stream: Subscriber count after subscribe: {}", subscriber_count_after);
+        info!("[CONTROL-LIVE] Subscriber count after subscribe: {} (delta: +{})", 
+             subscriber_count_after, subscriber_count_after.saturating_sub(subscriber_count_before));
 
         // Start the live streaming task
         let sender_clone = sender.clone();
@@ -600,7 +603,7 @@ impl ControlHandler {
                                 let message = Message::Binary(message_data);
                                 // Use timeout instead of try_lock to avoid skipping frames unnecessarily
                                 match tokio::time::timeout(
-                                    std::time::Duration::from_millis(10), // 10ms timeout
+                                    std::time::Duration::from_millis(5), // Reduced timeout for faster dropping
                                     async {
                                         let mut sender_guard = sender_clone.lock().await;
                                         sender_guard.send(message).await
@@ -633,6 +636,8 @@ impl ControlHandler {
                 }
             }
             
+            // Explicitly drop the frame receiver to ensure cleanup
+            drop(frame_receiver);
             info!("Live stream task ended");
         });
 
@@ -706,6 +711,9 @@ pub async fn handle_control_websocket(
     recording_manager: Arc<RecordingManager>,
     frame_sender: Arc<broadcast::Sender<Bytes>>,
 ) {
-    let mut handler = ControlHandler::new(camera_id, client_id, recording_manager, frame_sender);
+    info!("[CONTROL] handle_control_websocket started for camera {} client {}", camera_id, client_id);
+    let mut handler = ControlHandler::new(camera_id.clone(), client_id.clone(), recording_manager, frame_sender);
+    info!("[CONTROL] ControlHandler created for camera {} client {}", camera_id, client_id);
     handler.handle_websocket(socket).await;
+    info!("[CONTROL] handle_control_websocket completed for camera {} client {}", camera_id, client_id);
 }

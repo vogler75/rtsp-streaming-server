@@ -6,7 +6,7 @@ use axum::{
 use axum::extract::ws::{WebSocket, Message};
 use tokio::sync::broadcast;
 use futures_util::{stream::StreamExt, SinkExt};
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn};
 use bytes::Bytes;
 use crate::mqtt::{MqttHandle, ClientStatus};
 use crate::config::CameraConfig;
@@ -14,8 +14,8 @@ use chrono::Utc;
 use uuid::Uuid;
 use std::net::SocketAddr;
 
-// Global mutex to ensure exclusive WebSocket connection handling
-pub static WEBSOCKET_CONNECTION_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// Rate limiting has been disabled to prevent blocking issues
+// The code has been removed as it was causing dashboard access problems
 
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
@@ -42,10 +42,7 @@ async fn handle_socket(
     
     debug!("[{}] Starting WebSocket connection setup for camera {}", client_id, camera_id);
     
-    // Acquire the global connection mutex to ensure exclusive access during setup
-    debug!("[{}] Waiting for WebSocket connection mutex...", client_id);
-    let _connection_guard = WEBSOCKET_CONNECTION_MUTEX.lock().await;
-    debug!("[{}] Acquired WebSocket connection mutex", client_id);
+    // Rate limiting has been disabled to prevent blocking issues
     
     let (mut sender, mut receiver) = socket.split();
     debug!("[{}] WebSocket split completed", client_id);
@@ -53,11 +50,11 @@ async fn handle_socket(
     let subscriber_count_before = frame_sender.receiver_count();
     debug!("[{}] Subscriber count before subscribe: {}", client_id, subscriber_count_before);
     
-    // Critical section: add detailed logging around the subscribe operation
+    // Subscribe to frame stream
     debug!("[{}] About to call frame_sender.subscribe()", client_id);
     let subscription_start = std::time::Instant::now();
     
-    let mut frame_receiver = frame_sender.subscribe();
+    let frame_receiver = frame_sender.subscribe();
     
     let subscription_duration = subscription_start.elapsed();
     debug!("[{}] Subscribe completed in {:?}", client_id, subscription_duration);
@@ -66,10 +63,16 @@ async fn handle_socket(
     debug!("[{}] Subscriber count after subscribe: {} (delta: +{})", 
            client_id, subscriber_count_after, subscriber_count_after.saturating_sub(subscriber_count_before));
     
+    // Check if we're approaching the channel limit
+    if subscriber_count_after > 8 {
+        warn!("[{}] High subscriber count ({}) for camera {} - may cause performance issues", 
+              client_id, subscriber_count_after, camera_id);
+    }
+    
     info!("New WebSocket client {} ({}) connected to camera {}", client_id, client_ip, camera_id);
     debug!("Frame sender has {} subscribers", frame_sender.receiver_count());
     
-    // Register client with MQTT
+    // Register client with MQTT (OUTSIDE mutex to prevent blocking)
     if let Some(ref mqtt) = mqtt_handle {
         let client_status = ClientStatus {
             id: client_id.clone(),
@@ -79,6 +82,7 @@ async fn handle_socket(
             actual_fps: 0.0,
             ip_address: client_ip,
         };
+        // This is now outside the mutex so it won't block other connections
         mqtt.add_client(client_status).await;
     }
 
@@ -88,7 +92,7 @@ async fn handle_socket(
     debug!("[{}] About to spawn send_task", client_id);
     let task_spawn_start = std::time::Instant::now();
     
-    let send_task = tokio::spawn(async move {
+    let mut send_task = tokio::spawn(async move {
         debug!("[{}] Send_task started", client_id_clone);
         let task_start_time = std::time::Instant::now();
         let mut frame_count = 0u64;
@@ -96,6 +100,7 @@ async fn handle_socket(
         let mut total_frames_sent = 0u64;
         let mut last_stats_time = tokio::time::Instant::now();
         let mut fps_frame_count = 0u64;
+        let mut frame_receiver = frame_receiver; // Move the frame_receiver into the task
         
         debug!("[{}] Starting frame receive loop", client_id_clone);
         
@@ -112,7 +117,7 @@ async fn handle_socket(
                     
                     // Use timeout for non-blocking send - drop frame if it takes too long
                     match tokio::time::timeout(
-                        std::time::Duration::from_millis(10), // 10ms timeout for sending
+                        std::time::Duration::from_millis(5), // Reduced timeout for faster dropping
                         sender.send(Message::Binary(frame_data.to_vec()))
                     ).await {
                         Ok(Ok(())) => {
@@ -163,7 +168,7 @@ async fn handle_socket(
         info!("WebSocket send task ended (sent: {}, dropped: {})", frame_count, dropped_frames);
     });
 
-    let recv_task = tokio::spawn(async move {
+    let mut recv_task = tokio::spawn(async move {
         while let Some(msg) = receiver.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
@@ -188,24 +193,41 @@ async fn handle_socket(
     
     let spawn_duration = task_spawn_start.elapsed();
     debug!("[{}] Both tasks spawned in {:?}", client_id, spawn_duration);
-    
-    // Release the connection mutex now that critical setup is complete
-    drop(_connection_guard);
-    debug!("[{}] Released WebSocket connection mutex", client_id);
 
+    // Use tokio::select! to wait for either task to complete, then abort the other
     tokio::select! {
-        send_result = send_task => {
+        send_result = &mut send_task => {
             debug!("[{}] Send task completed with result: {:?}", client_id, send_result);
+            // Abort the receive task if send task completes first
+            recv_task.abort();
+            // Wait for abort with timeout to prevent hanging
+            match tokio::time::timeout(std::time::Duration::from_millis(100), recv_task).await {
+                Ok(_) => debug!("[{}] Receive task aborted after send task completion", client_id),
+                Err(_) => warn!("[{}] Timeout waiting for receive task abort", client_id),
+            }
         },
-        recv_result = recv_task => {
+        recv_result = &mut recv_task => {
             debug!("[{}] Recv task completed with result: {:?}", client_id, recv_result);
+            // Abort the send task if receive task completes first
+            send_task.abort();
+            // Wait for abort with timeout to prevent hanging
+            match tokio::time::timeout(std::time::Duration::from_millis(100), send_task).await {
+                Ok(_) => debug!("[{}] Send task aborted after receive task completion", client_id),
+                Err(_) => warn!("[{}] Timeout waiting for send task abort", client_id),
+            }
         },
     }
 
     info!("WebSocket client {} disconnected", client_id);
     
-    // Unregister client from MQTT
+    // Unregister client from MQTT (with timeout to prevent blocking)
     if let Some(ref mqtt) = mqtt_handle {
-        mqtt.remove_client(&client_id).await;
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            mqtt.remove_client(&client_id)
+        ).await {
+            Ok(_) => debug!("[{}] Client unregistered from MQTT", client_id),
+            Err(_) => error!("[{}] Timeout unregistering client from MQTT", client_id),
+        }
     }
 }

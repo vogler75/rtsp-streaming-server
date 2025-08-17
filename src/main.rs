@@ -57,7 +57,7 @@ struct AppState {
     start_time: std::time::Instant,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter("rtsp_streaming_server=debug,info")
@@ -474,6 +474,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/status", axum::routing::get(move || {
         let state = api_state.clone();
         async move {
+            info!("[API] /api/status endpoint called");
             let uptime_secs = state.start_time.elapsed().as_secs();
             let camera_streams = state.camera_streams.read().await;
             let total_cameras = camera_streams.len();
@@ -496,6 +497,8 @@ async fn main() -> Result<()> {
                 "total_cameras": total_cameras
             });
             
+            info!("[API] /api/status returning response with uptime={}, clients={}, cameras={}", 
+                  uptime_secs, total_clients, total_cameras);
             Json(ApiResponse::success(status)).into_response()
         }
     }));
@@ -504,7 +507,9 @@ async fn main() -> Result<()> {
     app = app.route("/api/cameras", axum::routing::get(move || {
         let state = api_state2.clone();
         async move {
+            info!("[API] /api/cameras endpoint called");
             let camera_streams = state.camera_streams.read().await;
+            info!("[API] Got camera_streams lock, {} cameras found", camera_streams.len());
             
             let mut cameras = Vec::new();
             
@@ -557,6 +562,7 @@ async fn main() -> Result<()> {
                 "count": cameras.len()
             });
             
+            info!("[API] /api/cameras returning {} cameras", cameras.len());
             Json(ApiResponse::success(response)).into_response()
         }
     }));
@@ -621,7 +627,9 @@ async fn serve_test_with_mode(is_full_mode: bool) -> axum::response::Html<String
 
 
 async fn dashboard_handler() -> axum::response::Html<String> {
+    info!("[DASHBOARD] Dashboard HTML requested");
     let html = include_str!("../static/dashboard.html").to_string();
+    info!("[DASHBOARD] Returning dashboard HTML ({} bytes)", html.len());
     axum::response::Html(html)
 }
 
@@ -781,15 +789,26 @@ async fn camera_control_handler(
             }
             
             let client_id = uuid::Uuid::new_v4().to_string();
-            debug!("Starting control WebSocket handler for camera {} with client {}", camera_id, client_id);
-            let socket = ws_upgrade.on_upgrade(move |socket| {
-                handle_control_websocket(
-                    socket,
-                    camera_id,
-                    client_id,
-                    recording_manager.unwrap(),
-                    frame_sender,
-                )
+            info!("[CONTROL] Starting control WebSocket upgrade for camera {} with client {}", camera_id, client_id);
+            let camera_id_clone = camera_id.clone();
+            let client_id_clone = client_id.clone();
+            let socket = ws_upgrade.on_upgrade(move |socket| async move {
+                info!("[CONTROL] WebSocket upgraded for camera {} client {}", camera_id_clone, client_id_clone);
+                // Spawn control handler as separate task to prevent blocking
+                let camera_id_task = camera_id.clone();
+                let client_id_task = client_id.clone();
+                let _handle = tokio::spawn(async move {
+                    info!("[CONTROL] Spawned control handler task for camera {} client {}", camera_id_task, client_id_task);
+                    handle_control_websocket(
+                        socket,
+                        camera_id,
+                        client_id,
+                        recording_manager.unwrap(),
+                        frame_sender,
+                    ).await;
+                    info!("[CONTROL] Control handler task completed for camera {} client {}", camera_id_task, client_id_task);
+                });
+                info!("[CONTROL] Control handler spawned, waiting for completion");
             });
             socket.into_response()
         },
@@ -1085,7 +1104,14 @@ async fn api_get_recording_size(
 async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("HTTP server listening on http://{}", addr);
-    axum::serve(listener, app).await?;
+    
+    // Configure server with higher connection limits
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.expect("failed to listen for ctrl+c");
+            info!("Shutting down HTTP server...");
+        })
+        .await?;
     Ok(())
 }
 
