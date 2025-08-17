@@ -5,7 +5,7 @@
   "transport": "tcp",
   "reconnect_interval": 5,
   "chunk_read_size": null,
-  "token": null,
+  "token": "test",
   "max_recording_age": null,
   "mqtt": null,
   "ffmpeg": {

@@ -4,7 +4,7 @@
   "url": "rtsp://admin007:admin007@192.168.1.171:554/stream1",
   "transport": "tcp",
   "reconnect_interval": 5,
-  "chunk_read_size": 8192,
+  "chunk_read_size": null,
   "token": null,
   "ffmpeg": {
     "command": null,
@@ -14,7 +14,7 @@
     "video_bitrate": null,
     "quality": null,
     "output_framerate": null,
-    "scale": "1280:-1",
+    "scale": null,
     "movflags": null,
     "rtbufsize": null,
     "fflags": null,
@@ -26,9 +26,6 @@
     "extra_output_args": null,
     "log_stderr": null
   },
-  "mqtt": {
-    "publish_interval": 5,
-    "topic_name": "Videoserver/test"
-  },
+  "mqtt": null,
   "max_recording_age": null
 }

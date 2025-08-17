@@ -111,6 +111,7 @@ struct AppState {
     recording_manager: Option<Arc<RecordingManager>>,
     transcoding_config: Arc<config::TranscodingConfig>,
     recording_config: Option<Arc<config::RecordingConfig>>,
+    admin_token: Option<String>,
     start_time: std::time::Instant,
 }
 
@@ -412,6 +413,7 @@ async fn main() -> Result<()> {
         recording_manager: recording_manager.clone(),
         transcoding_config: Arc::new(config.transcoding.clone()),
         recording_config: config.recording.clone().map(Arc::new),
+        admin_token: config.server.admin_token.clone(),
         start_time: std::time::Instant::now(),
     };
 
@@ -426,42 +428,44 @@ async fn main() -> Result<()> {
         
         // Stream endpoint: /<camera_path>/stream
         let stream_path = format!("{}/stream", path);
-        let stream_info_clone = stream_info.clone();
+        let camera_id_for_stream = stream_info.camera_id.clone();
+        let state_for_stream = app_state.clone();
         app = app.route(&stream_path, axum::routing::get(
-            move |ws, query, addr| camera_stream_handler(
-                ws, query, addr, 
-                stream_info_clone.frame_sender.clone(), 
-                stream_info_clone.camera_id.clone(), 
-                stream_info_clone.mqtt_handle.clone(), 
-                stream_info_clone.camera_config.clone()
-            )
+            move |ws, query, addr| {
+                let camera_id = camera_id_for_stream.clone();
+                let state = state_for_stream.clone();
+                async move {
+                    dynamic_camera_stream_handler(ws, query, addr, camera_id, state).await
+                }
+            }
         ));
 
         // Control endpoint: /<camera_path>/control
         let control_path = format!("{}/control", path);
-        let control_info_clone = stream_info.clone();
+        let camera_id_for_control = stream_info.camera_id.clone();
+        let state_for_control = app_state.clone();
         app = app.route(&control_path, axum::routing::get(
-            move |headers, ws, query, addr| camera_control_handler(
-                headers, ws, query, addr,
-                control_info_clone.frame_sender.clone(),
-                control_info_clone.camera_id.clone(),
-                control_info_clone.mqtt_handle.clone(),
-                control_info_clone.camera_config.clone(),
-                control_info_clone.recording_manager.clone()
-            )
+            move |headers, ws, query, addr| {
+                let camera_id = camera_id_for_control.clone();
+                let state = state_for_control.clone();
+                async move {
+                    dynamic_camera_control_handler(headers, ws, query, addr, camera_id, state).await
+                }
+            }
         ));
 
         // Live endpoint: /<camera_path>/live (WebSocket only)
         let live_path = format!("{}/live", path);
-        let live_info_clone = stream_info.clone();
+        let camera_id_for_live = stream_info.camera_id.clone();
+        let state_for_live = app_state.clone();
         app = app.route(&live_path, axum::routing::get(
-            move |ws, query, addr| camera_live_handler(
-                ws, query, addr, 
-                live_info_clone.frame_sender.clone(), 
-                live_info_clone.camera_id.clone(), 
-                live_info_clone.mqtt_handle.clone(), 
-                live_info_clone.camera_config.clone()
-            )
+            move |ws, query, addr| {
+                let camera_id = camera_id_for_live.clone();
+                let state = state_for_live.clone();
+                async move {
+                    dynamic_camera_live_handler(ws, query, addr, camera_id, state).await
+                }
+            }
         ));
 
         // Camera page endpoint: /<camera_path> serves test.html
@@ -763,8 +767,86 @@ async fn serve_test_with_mode(is_full_mode: bool) -> axum::response::Html<String
 
 async fn dashboard_handler() -> axum::response::Html<String> {
     trace!("Dashboard HTML requested");
-    let html = include_str!("../static/dashboard.html").to_string();
+    let html = include_str!("../static/dashboard-admin.html").to_string();
     axum::response::Html(html)
+}
+
+// Dynamic handlers that check current state instead of using captured state
+async fn dynamic_camera_stream_handler(
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    camera_id: String,
+    app_state: AppState,
+) -> axum::response::Response {
+    // Look up camera in current state
+    let camera_streams = app_state.camera_streams.read().await;
+    if let Some(stream_info) = camera_streams.get(&camera_id) {
+        let stream_info = stream_info.clone();
+        drop(camera_streams);
+        
+        camera_stream_handler(
+            ws, query, addr,
+            stream_info.frame_sender,
+            stream_info.camera_id,
+            stream_info.mqtt_handle,
+            stream_info.camera_config,
+        ).await
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
+    }
+}
+
+async fn dynamic_camera_control_handler(
+    headers: axum::http::HeaderMap,
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    camera_id: String,
+    app_state: AppState,
+) -> axum::response::Response {
+    // Look up camera in current state
+    let camera_streams = app_state.camera_streams.read().await;
+    if let Some(stream_info) = camera_streams.get(&camera_id) {
+        let stream_info = stream_info.clone();
+        drop(camera_streams);
+        
+        camera_control_handler(
+            headers, ws, query, addr,
+            stream_info.frame_sender,
+            stream_info.camera_id,
+            stream_info.mqtt_handle,
+            stream_info.camera_config,
+            stream_info.recording_manager,
+        ).await
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
+    }
+}
+
+async fn dynamic_camera_live_handler(
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    camera_id: String,
+    app_state: AppState,
+) -> axum::response::Response {
+    // Look up camera in current state
+    let camera_streams = app_state.camera_streams.read().await;
+    if let Some(stream_info) = camera_streams.get(&camera_id) {
+        let stream_info = stream_info.clone();
+        drop(camera_streams);
+        
+        camera_live_handler(
+            ws, query, addr,
+            stream_info.frame_sender,
+            stream_info.camera_id,
+            stream_info.mqtt_handle,
+            stream_info.camera_config,
+        ).await
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
+    }
 }
 
 
@@ -1369,11 +1451,39 @@ async fn api_get_camera_config(
     }
 }
 
+fn check_admin_token(headers: &axum::http::HeaderMap, admin_token: &Option<String>) -> bool {
+    // If no admin token is configured, allow access
+    let Some(ref expected_token) = admin_token else {
+        return true;
+    };
+    
+    // Check Authorization header
+    if let Some(auth_header) = headers.get("Authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            // Support both "Bearer <token>" and plain token
+            let token = if auth_str.starts_with("Bearer ") {
+                &auth_str[7..]
+            } else {
+                auth_str
+            };
+            return token == expected_token;
+        }
+    }
+    
+    false
+}
+
 async fn api_create_camera(
-    _headers: axum::http::HeaderMap,
+    headers: axum::http::HeaderMap,
     body: axum::extract::Json<CreateCameraRequest>,
-    _state: AppState,
+    state: AppState,
 ) -> axum::response::Response {
+    // Check admin token
+    if !check_admin_token(&headers, &state.admin_token) {
+        return (axum::http::StatusCode::UNAUTHORIZED,
+                Json(ApiResponse::<()>::error("Unauthorized", 401)))
+               .into_response();
+    }
     let camera_id = body.camera_id.clone();
     let camera_config = body.config.clone();
     
@@ -1412,11 +1522,17 @@ async fn api_create_camera(
 }
 
 async fn api_update_camera(
-    _headers: axum::http::HeaderMap,
+    headers: axum::http::HeaderMap,
     path: axum::extract::Path<String>,
     body: axum::extract::Json<config::CameraConfig>,
-    _state: AppState,
+    state: AppState,
 ) -> axum::response::Response {
+    // Check admin token
+    if !check_admin_token(&headers, &state.admin_token) {
+        return (axum::http::StatusCode::UNAUTHORIZED,
+                Json(ApiResponse::<()>::error("Unauthorized", 401)))
+               .into_response();
+    }
     let camera_id = path.0;
     let camera_config = body.0;
     
@@ -1455,10 +1571,16 @@ async fn api_update_camera(
 }
 
 async fn api_delete_camera(
-    _headers: axum::http::HeaderMap,
+    headers: axum::http::HeaderMap,
     path: axum::extract::Path<String>,
-    _state: AppState,
+    state: AppState,
 ) -> axum::response::Response {
+    // Check admin token
+    if !check_admin_token(&headers, &state.admin_token) {
+        return (axum::http::StatusCode::UNAUTHORIZED,
+                Json(ApiResponse::<()>::error("Unauthorized", 401)))
+               .into_response();
+    }
     let camera_id = path.0;
     
     // Check if camera exists
@@ -1472,7 +1594,12 @@ async fn api_delete_camera(
                .into_response();
     }
     
-    // TODO: Stop the camera stream
+    // Stop the camera stream first
+    if let Err(e) = state.remove_camera(&camera_id).await {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<()>::error(&format!("Failed to stop camera stream: {}", e), 500)))
+               .into_response();
+    }
     
     // Delete camera config file
     if let Err(e) = config::Config::delete_camera_config(&camera_id) {

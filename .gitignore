@@ -32,4 +32,5 @@ Thumbs.db
 ffmpeg.exe
 config.toml
 recordings/
+cameras.bak
 *.log

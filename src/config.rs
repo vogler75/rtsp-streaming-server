@@ -3,6 +3,7 @@ use std::fs;
 use std::collections::HashMap;
 use std::path::Path;
 use crate::errors::Result;
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -70,6 +71,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub tls: Option<TlsConfig>,
     pub cors_allow_origin: Option<String>,
+    pub admin_token: Option<String>,  // Optional token for admin operations
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +144,7 @@ impl Default for Config {
                     key_path: "certs/server.key".to_string(),
                 }),
                 cors_allow_origin: Some("*".to_string()),
+                admin_token: None,
             },
             cameras,
             transcoding: TranscodingConfig {
@@ -198,7 +201,7 @@ impl Config {
                             Ok(content) => {
                                 match serde_json::from_str::<CameraConfig>(&content) {
                                     Ok(camera_config) => {
-                                        println!("Loaded camera configuration: {} (JSON)", file_stem);
+                                        info!("Loaded camera configuration: {} (JSON)", file_stem);
                                         cameras.insert(file_stem.to_string(), camera_config);
                                     }
                                     Err(e) => {
@@ -217,7 +220,7 @@ impl Config {
                             Ok(content) => {
                                 match toml::from_str::<CameraConfig>(&content) {
                                     Ok(camera_config) => {
-                                        println!("Loaded camera configuration: {} (TOML)", file_stem);
+                                        info!("Loaded camera configuration: {} (TOML)", file_stem);
                                         cameras.insert(file_stem.to_string(), camera_config);
                                     }
                                     Err(e) => {
@@ -252,7 +255,7 @@ impl Config {
         let json_content = serde_json::to_string_pretty(config)?;
         fs::write(&file_path, json_content)?;
         
-        println!("Saved camera configuration: {} to {}", camera_id, file_path);
+        info!("Saved camera configuration: {} to {}", camera_id, file_path);
         Ok(())
     }
 
@@ -268,13 +271,13 @@ impl Config {
         if Path::new(&json_path).exists() {
             fs::remove_file(&json_path)?;
             deleted = true;
-            println!("Deleted camera configuration: {} (JSON)", camera_id);
+            info!("Deleted camera configuration: {} (JSON)", camera_id);
         }
         
         if Path::new(&toml_path).exists() {
             fs::remove_file(&toml_path)?;
             deleted = true;
-            println!("Deleted camera configuration: {} (TOML)", camera_id);
+            info!("Deleted camera configuration: {} (TOML)", camera_id);
         }
         
         if !deleted {

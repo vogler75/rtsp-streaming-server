@@ -448,6 +448,13 @@
                 this.canvas = document.getElementById('videoCanvas');
                 this.ctx = this.canvas.getContext('2d');
                 this.currentTimestamp = null;
+                
+                // Check for token in URL parameters and populate the field
+                const urlParams = new URLSearchParams(window.location.search);
+                const token = urlParams.get('token');
+                if (token) {
+                    document.getElementById('bearerToken').value = token;
+                }
                 this.timelineStart = null;
                 this.timelineEnd = null;
                 this.setupEventListeners();

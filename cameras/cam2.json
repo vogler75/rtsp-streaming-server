@@ -14,7 +14,7 @@
     "video_bitrate": null,
     "quality": null,
     "output_framerate": null,
-    "scale": "640:-1",
+    "scale": "1280:-1",
     "movflags": null,
     "rtbufsize": null,
     "fflags": null,
