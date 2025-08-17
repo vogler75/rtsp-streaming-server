@@ -7,9 +7,12 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::fmt::format::{Writer, FormatEvent, FormatFields};
 use tracing_subscriber::registry::LookupSpan;
 use std::fs::File;
+use std::fs;
 use std::io::BufReader;
+use std::path::Path;
+use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use axum::response::IntoResponse;
-use axum::extract::{State, Path, Query};
+use axum::extract::{State, Path as AxumPath, Query};
 use axum::Json;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -98,14 +101,25 @@ struct CameraStreamInfo {
     mqtt_handle: Option<MqttHandle>,
     camera_config: config::CameraConfig,
     recording_manager: Option<Arc<RecordingManager>>,
+    task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Clone)]
 struct AppState {
     camera_streams: Arc<tokio::sync::RwLock<HashMap<String, CameraStreamInfo>>>,
     mqtt_handle: Option<MqttHandle>,
+    recording_manager: Option<Arc<RecordingManager>>,
+    transcoding_config: Arc<config::TranscodingConfig>,
+    recording_config: Option<Arc<config::RecordingConfig>>,
     start_time: std::time::Instant,
 }
+
+#[derive(serde::Deserialize)]
+struct CreateCameraRequest {
+    camera_id: String,
+    config: config::CameraConfig,
+}
+
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> Result<()> {
@@ -314,17 +328,21 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                // Extract frame sender before starting (since start() consumes the video_stream)
+                let frame_sender = video_stream.frame_sender.clone();
+                
+                // Start the video stream and get the task handle
+                let task_handle = video_stream.start().await;
+                
                 // Store the camera stream info for this camera's path
                 camera_streams.insert(camera_config.path.clone(), CameraStreamInfo {
                     camera_id: camera_id.clone(),
-                    frame_sender: video_stream.frame_sender.clone(),
+                    frame_sender,
                     mqtt_handle: mqtt_handle.clone(),
                     camera_config: camera_config.clone(),
                     recording_manager: recording_manager.clone(),
+                    task_handle: Some(Arc::new(task_handle)),
                 });
-                
-                // Start the video stream
-                video_stream.start().await;
                 info!("Started camera '{}' on path '{}'" , camera_id, camera_config.path);
             }
             Err(e) => {
@@ -391,6 +409,9 @@ async fn main() -> Result<()> {
     let app_state = AppState {
         camera_streams: Arc::new(tokio::sync::RwLock::new(camera_streams_by_id)),
         mqtt_handle: mqtt_handle.clone(),
+        recording_manager: recording_manager.clone(),
+        transcoding_config: Arc::new(config.transcoding.clone()),
+        recording_config: config.recording.clone().map(Arc::new),
         start_time: std::time::Instant::now(),
     };
 
@@ -629,8 +650,59 @@ async fn main() -> Result<()> {
             Json(ApiResponse::success(response)).into_response()
         }
     }));
+
+    // Camera management API endpoints
+    let admin_state = app_state.clone();
+    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<CreateCameraRequest>| {
+        let state = admin_state.clone();
+        async move {
+            api_create_camera(headers, body, state).await
+        }
+    }));
+
+    let admin_state2 = app_state.clone();
+    app = app.route("/api/admin/cameras/:id", axum::routing::get(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
+        let state = admin_state2.clone();
+        async move {
+            api_get_camera_config(headers, path, state).await
+        }
+    }));
+
+    let admin_state3 = app_state.clone();
+    app = app.route("/api/admin/cameras/:id", axum::routing::put(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>, body: axum::extract::Json<config::CameraConfig>| {
+        let state = admin_state3.clone();
+        async move {
+            api_update_camera(headers, path, body, state).await
+        }
+    }));
+
+    let admin_state4 = app_state.clone();
+    app = app.route("/api/admin/cameras/:id", axum::routing::delete(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
+        let state = admin_state4.clone();
+        async move {
+            api_delete_camera(headers, path, state).await
+        }
+    }));
     
+    // Add admin web interface
+    app = app.route("/admin", axum::routing::get(admin_page));
+    app = app.route("/admin/", axum::routing::get(admin_page));
+    
+    // Add fallback handler for dynamic camera routes
+    let fallback_state = app_state.clone();
+    app = app.fallback(move |uri: axum::http::Uri, ws: Option<axum::extract::WebSocketUpgrade>, query: axum::extract::Query<std::collections::HashMap<String, String>>, addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: axum::http::HeaderMap| {
+        let state = fallback_state.clone();
+        async move {
+            dynamic_camera_fallback_handler(uri, ws, query, addr, headers, state).await
+        }
+    });
+
     app = app.layer(cors_layer);
+
+    // Start camera configuration file watcher
+    if let Err(e) = start_camera_config_watcher(app_state.clone()).await {
+        error!("Failed to start camera configuration watcher: {}", e);
+    }
 
     let addr = format!("{}:{}", config.server.host, config.server.port);
     
@@ -1074,7 +1146,7 @@ async fn api_list_recordings(
 
 async fn api_get_recorded_frames(
     headers: axum::http::HeaderMap,
-    Path(session_id): Path<i64>,
+    AxumPath(session_id): AxumPath<i64>,
     Query(query): Query<GetFramesQuery>,
     camera_config: config::CameraConfig,
     recording_manager: Arc<RecordingManager>,
@@ -1251,4 +1323,542 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
         .map_err(|e| StreamError::server(format!("HTTPS server error: {}", e)))?;
 
     Ok(())
+}
+
+// Camera management API handlers
+
+async fn api_get_camera_config(
+    _headers: axum::http::HeaderMap,
+    path: axum::extract::Path<String>,
+    _state: AppState,
+) -> axum::response::Response {
+    let camera_id = path.0;
+    
+    // Load camera config from file
+    let cameras_dir = "cameras";
+    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
+    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
+    
+    // Try JSON first, then TOML for backward compatibility
+    if let Ok(content) = fs::read_to_string(&json_path) {
+        match serde_json::from_str::<config::CameraConfig>(&content) {
+            Ok(camera_config) => {
+                Json(ApiResponse::success(camera_config)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Failed to parse camera config: {}", e), 500)))
+                .into_response()
+            }
+        }
+    } else if let Ok(content) = fs::read_to_string(&toml_path) {
+        match toml::from_str::<config::CameraConfig>(&content) {
+            Ok(camera_config) => {
+                Json(ApiResponse::success(camera_config)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Failed to parse camera config: {}", e), 500)))
+                .into_response()
+            }
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("Camera not found", 404)))
+        .into_response()
+    }
+}
+
+async fn api_create_camera(
+    _headers: axum::http::HeaderMap,
+    body: axum::extract::Json<CreateCameraRequest>,
+    _state: AppState,
+) -> axum::response::Response {
+    let camera_id = body.camera_id.clone();
+    let camera_config = body.config.clone();
+    
+    // Check if camera already exists
+    let cameras_dir = "cameras";
+    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
+    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
+    
+    if std::path::Path::new(&json_path).exists() || std::path::Path::new(&toml_path).exists() {
+        return (axum::http::StatusCode::CONFLICT,
+                Json(ApiResponse::<()>::error("Camera already exists", 409)))
+               .into_response();
+    }
+    
+    // Validate camera config
+    if camera_config.path.is_empty() || camera_config.url.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error("Path and URL are required", 400)))
+               .into_response();
+    }
+    
+    // Save camera config
+    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config) {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<()>::error(&format!("Failed to save camera config: {}", e), 500)))
+               .into_response();
+    }
+    
+    // TODO: Start the new camera stream
+    info!("Camera '{}' created successfully", camera_id);
+    
+    Json(ApiResponse::success(serde_json::json!({
+        "message": "Camera created successfully",
+        "camera_id": camera_id
+    }))).into_response()
+}
+
+async fn api_update_camera(
+    _headers: axum::http::HeaderMap,
+    path: axum::extract::Path<String>,
+    body: axum::extract::Json<config::CameraConfig>,
+    _state: AppState,
+) -> axum::response::Response {
+    let camera_id = path.0;
+    let camera_config = body.0;
+    
+    // Check if camera exists
+    let cameras_dir = "cameras";
+    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
+    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
+    
+    if !std::path::Path::new(&json_path).exists() && !std::path::Path::new(&toml_path).exists() {
+        return (axum::http::StatusCode::NOT_FOUND,
+                Json(ApiResponse::<()>::error("Camera not found", 404)))
+               .into_response();
+    }
+    
+    // Validate camera config
+    if camera_config.path.is_empty() || camera_config.url.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error("Path and URL are required", 400)))
+               .into_response();
+    }
+    
+    // Save updated camera config
+    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config) {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<()>::error(&format!("Failed to save camera config: {}", e), 500)))
+               .into_response();
+    }
+    
+    // TODO: Stop and restart the camera stream with new configuration
+    info!("Camera '{}' updated successfully", camera_id);
+    
+    Json(ApiResponse::success(serde_json::json!({
+        "message": "Camera updated successfully",
+        "camera_id": camera_id
+    }))).into_response()
+}
+
+async fn api_delete_camera(
+    _headers: axum::http::HeaderMap,
+    path: axum::extract::Path<String>,
+    _state: AppState,
+) -> axum::response::Response {
+    let camera_id = path.0;
+    
+    // Check if camera exists
+    let cameras_dir = "cameras";
+    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
+    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
+    
+    if !std::path::Path::new(&json_path).exists() && !std::path::Path::new(&toml_path).exists() {
+        return (axum::http::StatusCode::NOT_FOUND,
+                Json(ApiResponse::<()>::error("Camera not found", 404)))
+               .into_response();
+    }
+    
+    // TODO: Stop the camera stream
+    
+    // Delete camera config file
+    if let Err(e) = config::Config::delete_camera_config(&camera_id) {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<()>::error(&format!("Failed to delete camera config: {}", e), 500)))
+               .into_response();
+    }
+    
+    info!("Camera '{}' deleted successfully", camera_id);
+    
+    Json(ApiResponse::success(serde_json::json!({
+        "message": "Camera deleted successfully",
+        "camera_id": camera_id
+    }))).into_response()
+}
+
+async fn admin_page() -> axum::response::Response {
+    let html = include_str!("../static/admin.html");
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/html")],
+        html
+    ).into_response()
+}
+
+// Camera management functions for dynamic reload
+
+impl AppState {
+    async fn add_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
+        // Check if camera already exists
+        {
+            let camera_streams = self.camera_streams.read().await;
+            if camera_streams.contains_key(&camera_id) {
+                info!("Camera '{}' already exists, skipping add operation", camera_id);
+                return Ok(());
+            }
+        }
+        
+        // Check if camera is enabled
+        if !camera_config.enabled.unwrap_or(true) {
+            info!("Camera '{}' is disabled, skipping", camera_id);
+            return Ok(());
+        }
+        
+        info!("Adding camera '{}' on path '{}'...", camera_id, camera_config.path);
+        
+        // Create video stream
+        match VideoStream::new(
+            camera_id.clone(),
+            camera_config.clone(),
+            &self.transcoding_config,
+            self.mqtt_handle.clone(),
+        ).await {
+            Ok(video_stream) => {
+                // Create database for this camera if recording is enabled
+                if let Some(ref recording_manager_ref) = &self.recording_manager {
+                    if let Some(recording_config) = &self.recording_config {
+                        let camera_db_path = format!("{}/{}.db", recording_config.database_path, camera_id);
+                        info!("Creating database for camera '{}' at '{}'", camera_id, camera_db_path);
+                        
+                        match SqliteDatabase::new(&camera_db_path).await {
+                            Ok(database) => {
+                                let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
+                                if let Err(e) = recording_manager_ref.add_camera_database(&camera_id, database).await {
+                                    error!("Failed to add database for camera '{}': {}", camera_id, e);
+                                } else {
+                                    info!("Database created successfully for camera '{}'", camera_id);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to create database for camera '{}': {}", camera_id, e);
+                            }
+                        }
+                    }
+                }
+
+                // Extract frame sender before starting (since start() consumes the video_stream)
+                let frame_sender = video_stream.frame_sender.clone();
+                
+                // Start the video stream and get the task handle
+                let task_handle = video_stream.start().await;
+                
+                // Store the camera stream info
+                let camera_stream_info = CameraStreamInfo {
+                    camera_id: camera_id.clone(),
+                    frame_sender,
+                    mqtt_handle: self.mqtt_handle.clone(),
+                    camera_config: camera_config.clone(),
+                    recording_manager: self.recording_manager.clone(),
+                    task_handle: Some(Arc::new(task_handle)),
+                };
+                
+                // Add to camera streams
+                {
+                    let mut camera_streams = self.camera_streams.write().await;
+                    camera_streams.insert(camera_id.clone(), camera_stream_info);
+                }
+                
+                info!("Camera '{}' added and started successfully", camera_id);
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to create video stream for camera '{}': {}", camera_id, e);
+                Err(e)
+            }
+        }
+    }
+    
+    async fn remove_camera(&self, camera_id: &str) -> Result<()> {
+        info!("Removing camera '{}'...", camera_id);
+        
+        // Remove from camera streams and get the camera info for cleanup
+        let removed = {
+            let mut camera_streams = self.camera_streams.write().await;
+            camera_streams.remove(camera_id)
+        };
+        
+        if let Some(camera_info) = removed {
+            // Stop and abort the video stream task
+            if let Some(task_handle) = camera_info.task_handle {
+                info!("Cancelling video stream task for camera '{}'", camera_id);
+                task_handle.abort();
+                
+                // Wait a bit for the task to terminate
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+            
+            // Stop recording if active
+            if let Some(ref recording_manager_ref) = &self.recording_manager {
+                info!("Stopping any active recordings for camera '{}'", camera_id);
+                if let Err(e) = recording_manager_ref.stop_recording(camera_id).await {
+                    error!("Failed to stop recording for camera '{}': {}", camera_id, e);
+                }
+            }
+            
+            // The frame_sender will be dropped which will close all WebSocket connections
+            // for this camera automatically when the last reference is dropped
+            info!("Frame sender dropped for camera '{}' - WebSocket connections will close", camera_id);
+            
+            info!("Camera '{}' removed successfully", camera_id);
+            Ok(())
+        } else {
+            warn!("Camera '{}' was not found in active streams", camera_id);
+            Ok(())
+        }
+    }
+    
+    async fn restart_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
+        info!("Restarting camera '{}'...", camera_id);
+        
+        // Remove the old camera
+        self.remove_camera(&camera_id).await?;
+        
+        // Add the new camera with updated config
+        self.add_camera(camera_id, camera_config).await?;
+        
+        Ok(())
+    }
+}
+
+async fn start_camera_config_watcher(app_state: AppState) -> Result<()> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+    
+    // Create file watcher
+    let mut watcher = RecommendedWatcher::new(
+        move |res| {
+            match res {
+                Ok(event) => {
+                    if let Err(e) = tx.blocking_send(event) {
+                        error!("Failed to send file watcher event: {}", e);
+                    }
+                }
+                Err(e) => error!("File watcher error: {}", e),
+            }
+        },
+        NotifyConfig::default(),
+    ).map_err(|e| crate::errors::StreamError::config(&format!("File watcher error: {}", e)))?;
+    
+    // Watch the cameras directory
+    let cameras_dir = Path::new("cameras");
+    if !cameras_dir.exists() {
+        info!("Creating cameras directory for watching...");
+        fs::create_dir_all(cameras_dir)?;
+    }
+    
+    watcher.watch(cameras_dir, RecursiveMode::NonRecursive)
+        .map_err(|e| crate::errors::StreamError::config(&format!("Failed to watch cameras directory: {}", e)))?;
+    info!("Started watching cameras directory for configuration changes");
+    
+    // Keep watcher alive and handle events with debouncing
+    tokio::spawn(async move {
+        let _watcher = watcher; // Keep watcher alive
+        let mut last_events: std::collections::HashMap<String, tokio::time::Instant> = std::collections::HashMap::new();
+        
+        while let Some(event) = rx.recv().await {
+            // Debounce events for each camera to prevent rapid duplicate calls
+            let mut should_process = false;
+            if let Some(camera_id) = event.paths.get(0).and_then(|p| get_camera_id_from_path(p)) {
+                let now = tokio::time::Instant::now();
+                let should_process_this = if let Some(last_time) = last_events.get(&camera_id) {
+                    now.duration_since(*last_time) >= tokio::time::Duration::from_millis(500) // 500ms debounce
+                } else {
+                    true
+                };
+                
+                if should_process_this {
+                    last_events.insert(camera_id, now);
+                    should_process = true;
+                }
+            } else {
+                should_process = true; // Process events we can't identify
+            }
+            
+            if should_process {
+                handle_file_event(event, &app_state).await;
+            }
+        }
+    });
+    
+    Ok(())
+}
+
+async fn handle_file_event(event: Event, app_state: &AppState) {
+    match event.kind {
+        EventKind::Create(_) => {
+            for path in event.paths {
+                if let Some(camera_id) = get_camera_id_from_path(&path) {
+                    info!("Detected new camera configuration: {}", camera_id);
+                    if let Ok(camera_config) = load_camera_config(&camera_id) {
+                        if let Err(e) = app_state.add_camera(camera_id.clone(), camera_config).await {
+                            error!("Failed to add camera '{}': {}", camera_id, e);
+                        }
+                    }
+                }
+            }
+        }
+        EventKind::Modify(_) => {
+            for path in event.paths {
+                if let Some(camera_id) = get_camera_id_from_path(&path) {
+                    info!("Detected camera configuration change: {}", camera_id);
+                    if let Ok(camera_config) = load_camera_config(&camera_id) {
+                        if let Err(e) = app_state.restart_camera(camera_id.clone(), camera_config).await {
+                            error!("Failed to restart camera '{}': {}", camera_id, e);
+                        }
+                    }
+                }
+            }
+        }
+        EventKind::Remove(_) => {
+            for path in event.paths {
+                if let Some(camera_id) = get_camera_id_from_path(&path) {
+                    info!("Detected camera configuration removal: {}", camera_id);
+                    if let Err(e) = app_state.remove_camera(&camera_id).await {
+                        error!("Failed to remove camera '{}': {}", camera_id, e);
+                    }
+                }
+            }
+        }
+        _ => {
+            // Ignore other event types
+        }
+    }
+}
+
+fn get_camera_id_from_path(path: &Path) -> Option<String> {
+    if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+        if file_name.ends_with(".json") || file_name.ends_with(".toml") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                return Some(stem.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn load_camera_config(camera_id: &str) -> Result<config::CameraConfig> {
+    let cameras_dir = "cameras";
+    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
+    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
+    
+    // Try JSON first, then TOML for backward compatibility
+    if let Ok(content) = fs::read_to_string(&json_path) {
+        match serde_json::from_str::<config::CameraConfig>(&content) {
+            Ok(camera_config) => return Ok(camera_config),
+            Err(e) => {
+                error!("Failed to parse JSON camera config file {}: {}", json_path, e);
+            }
+        }
+    }
+    
+    if let Ok(content) = fs::read_to_string(&toml_path) {
+        match toml::from_str::<config::CameraConfig>(&content) {
+            Ok(camera_config) => return Ok(camera_config),
+            Err(e) => {
+                error!("Failed to parse TOML camera config file {}: {}", toml_path, e);
+            }
+        }
+    }
+    
+    Err(crate::errors::StreamError::config(&format!("Camera configuration file not found: {}", camera_id)))
+}
+
+async fn dynamic_camera_fallback_handler(
+    uri: axum::http::Uri,
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    app_state: AppState,
+) -> axum::response::Response {
+    let path_str = uri.path();
+    
+    // Parse the URI to determine camera path and endpoint
+    if let Some(camera_info) = parse_camera_path(path_str, &app_state).await {
+        let (camera_id, _camera_path, endpoint) = camera_info;
+        
+        // Get camera stream info
+        let camera_streams = app_state.camera_streams.read().await;
+        if let Some(stream_info) = camera_streams.get(&camera_id) {
+            let stream_info = stream_info.clone();
+            drop(camera_streams);
+            
+            match endpoint.as_str() {
+                "stream" => {
+                    camera_stream_handler(
+                        ws, query, addr,
+                        stream_info.frame_sender,
+                        stream_info.camera_id,
+                        stream_info.mqtt_handle,
+                        stream_info.camera_config,
+                    ).await
+                }
+                "live" => {
+                    camera_live_handler(
+                        ws, query, addr,
+                        stream_info.frame_sender,
+                        stream_info.camera_id,
+                        stream_info.mqtt_handle,
+                        stream_info.camera_config,
+                    ).await
+                }
+                "control" => {
+                    camera_control_handler(
+                        headers, ws, query, addr,
+                        stream_info.frame_sender,
+                        stream_info.camera_id,
+                        stream_info.mqtt_handle,
+                        stream_info.camera_config,
+                        stream_info.recording_manager,
+                    ).await
+                }
+                "test" => {
+                    serve_test_page(query).await.into_response()
+                }
+                "" => {
+                    // Root camera path - serve test page
+                    serve_test_page(query).await.into_response()
+                }
+                _ => {
+                    // Unknown endpoint
+                    (axum::http::StatusCode::NOT_FOUND, "Endpoint not found").into_response()
+                }
+            }
+        } else {
+            (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Page not found").into_response()
+    }
+}
+
+async fn parse_camera_path(path: &str, app_state: &AppState) -> Option<(String, String, String)> {
+    // Find matching camera by checking if any camera's path matches the beginning of the request path
+    let camera_streams = app_state.camera_streams.read().await;
+    
+    for (camera_id, stream_info) in camera_streams.iter() {
+        let camera_path = &stream_info.camera_config.path;
+        
+        if path == camera_path {
+            // Exact match - root camera endpoint
+            return Some((camera_id.clone(), camera_path.clone(), String::new()));
+        } else if path.starts_with(&format!("{}/", camera_path)) {
+            // Path starts with camera path + /
+            let remaining = &path[camera_path.len() + 1..];
+            return Some((camera_id.clone(), camera_path.clone(), remaining.to_string()));
+        }
+    }
+    
+    None
 }

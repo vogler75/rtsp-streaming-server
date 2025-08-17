@@ -184,37 +184,104 @@ impl Config {
             return Ok(cameras);
         }
         
-        // Read all .toml files in the cameras directory
+        // Read all .json and .toml files in the cameras directory (for backward compatibility)
         let entries = fs::read_dir(cameras_dir)?;
         
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
             
-            // Only process .toml files
-            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
-                if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    match fs::read_to_string(&path) {
-                        Ok(content) => {
-                            match toml::from_str::<CameraConfig>(&content) {
-                                Ok(camera_config) => {
-                                    println!("Loaded camera configuration: {}", file_stem);
-                                    cameras.insert(file_stem.to_string(), camera_config);
-                                }
-                                Err(e) => {
-                                    eprintln!("Error parsing camera config file {}: {}", path.display(), e);
+            if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
+                match path.extension().and_then(|s| s.to_str()) {
+                    Some("json") => {
+                        match fs::read_to_string(&path) {
+                            Ok(content) => {
+                                match serde_json::from_str::<CameraConfig>(&content) {
+                                    Ok(camera_config) => {
+                                        println!("Loaded camera configuration: {} (JSON)", file_stem);
+                                        cameras.insert(file_stem.to_string(), camera_config);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Error parsing JSON camera config file {}: {}", path.display(), e);
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                eprintln!("Error reading camera config file {}: {}", path.display(), e);
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("Error reading camera config file {}: {}", path.display(), e);
+                    }
+                    Some("toml") => {
+                        // Backward compatibility with TOML files
+                        match fs::read_to_string(&path) {
+                            Ok(content) => {
+                                match toml::from_str::<CameraConfig>(&content) {
+                                    Ok(camera_config) => {
+                                        println!("Loaded camera configuration: {} (TOML)", file_stem);
+                                        cameras.insert(file_stem.to_string(), camera_config);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Error parsing TOML camera config file {}: {}", path.display(), e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error reading camera config file {}: {}", path.display(), e);
+                            }
                         }
+                    }
+                    _ => {
+                        // Skip non-config files
                     }
                 }
             }
         }
         
         Ok(cameras)
+    }
+
+    pub fn save_camera_config(camera_id: &str, config: &CameraConfig) -> Result<()> {
+        let cameras_dir = "cameras";
+        
+        // Ensure cameras directory exists
+        if !Path::new(cameras_dir).exists() {
+            fs::create_dir_all(cameras_dir)?;
+        }
+        
+        let file_path = format!("{}/{}.json", cameras_dir, camera_id);
+        let json_content = serde_json::to_string_pretty(config)?;
+        fs::write(&file_path, json_content)?;
+        
+        println!("Saved camera configuration: {} to {}", camera_id, file_path);
+        Ok(())
+    }
+
+    pub fn delete_camera_config(camera_id: &str) -> Result<()> {
+        let cameras_dir = "cameras";
+        
+        // Try to delete both JSON and TOML files for backward compatibility
+        let json_path = format!("{}/{}.json", cameras_dir, camera_id);
+        let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
+        
+        let mut deleted = false;
+        
+        if Path::new(&json_path).exists() {
+            fs::remove_file(&json_path)?;
+            deleted = true;
+            println!("Deleted camera configuration: {} (JSON)", camera_id);
+        }
+        
+        if Path::new(&toml_path).exists() {
+            fs::remove_file(&toml_path)?;
+            deleted = true;
+            println!("Deleted camera configuration: {} (TOML)", camera_id);
+        }
+        
+        if !deleted {
+            return Err(crate::errors::StreamError::config(&format!("Camera configuration file not found: {}", camera_id)).into());
+        }
+        
+        Ok(())
     }
 
 }

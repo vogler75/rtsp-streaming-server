@@ -68,13 +68,13 @@ impl VideoStream {
         })
     }
     
-    pub async fn start(self) {
+    pub async fn start(self) -> tokio::task::JoinHandle<()> {
         let camera_id = self.camera_id.clone();
         tokio::spawn(async move {
             info!("Starting video stream for camera '{}'", camera_id);
             if let Err(e) = self.rtsp_client.start().await {
                 error!("RTSP client error for camera '{}': {}", camera_id, e);
             }
-        });
+        })
     }
 }

@@ -38,7 +38,7 @@ A high-performance, low-latency video streaming server built in Rust that connec
    https://localhost:8080/cam1
    ```
 
-3. **Configure cameras** by editing `config.toml` (see Configuration section)
+3. **Configure cameras** by creating JSON files in the `cameras` directory (see Configuration section)
 
 ## URL Structure
 
@@ -75,7 +75,9 @@ The **`/stream`** endpoint provides a clean video streaming interface optimized 
 
 ## Configuration
 
-The server can be configured via the `config.toml` file:
+The server uses two configuration methods:
+1. **`config.toml`**: Main server configuration (server settings, MQTT, transcoding defaults, recording)
+2. **`cameras/` directory**: Individual camera configurations as JSON files
 
 ### Server Configuration
 
@@ -120,62 +122,181 @@ channel_buffer_size = 1    # Frame buffer size (1 = only latest)
 debug_capture = true       # Show capture rate debug info
 ```
 
-### Multi-Camera Configuration
+### Camera Configuration
 
-Configure multiple cameras, each with its own path and settings. The server supports both RTSP and HTTP/HTTPS stream sources:
+Cameras are configured using individual JSON files in the `cameras/` directory. Each file represents one camera configuration. The server automatically detects changes to these files and can add, update, or remove cameras without requiring a restart.
 
-```toml
-# RTSP Camera Example
-[cameras.cam1]
-enabled = false  # Optional: Enable/disable this camera (default: true)
-path = "/cam1"
-url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
-transport = "tcp"
-reconnect_interval = 5
-chunk_read_size = 8192 # 32768
-token = "secure-cam1-token"  # Optional: Token required for WebSocket authentication
+#### Camera Directory Structure
+```
+cameras/
+├── cam1.json
+├── cam2.json
+├── cam3.json
+└── cam4.json
+```
 
-# FFmpeg configuration for cam1
-[cameras.cam1.ffmpeg]
-log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
+#### Camera Configuration File Format
 
-# Command override - if set, replaces all other FFmpeg options with a custom command
-# Placeholder: $url = camera RTSP URL
-#command = "-use_wallclock_as_timestamps 1 -rtsp_transport tcp -i $url -an -c:v mjpeg -q:v 4 -vf fps=15 -f mjpeg -"
+Create a JSON file for each camera in the `cameras/` directory:
 
-use_wallclock_as_timestamps = true  # Adds "-use_wallclock_as_timestamps 1" as first option
+**Example: `cameras/cam1.json`**
+```json
+{
+  "enabled": true,
+  "path": "/cam1",
+  "url": "rtsp://admin007:admin007@192.168.1.171:554/stream1",
+  "transport": "tcp",
+  "reconnect_interval": 5,
+  "chunk_read_size": 8192,
+  "token": "secure-cam1-token",
+  "max_recording_age": "7d",
+  
+  "ffmpeg": {
+    "command": null,
+    "use_wallclock_as_timestamps": true,
+    "output_format": "mjpeg",
+    "video_codec": "mjpeg",
+    "video_bitrate": "200k",
+    "quality": 75,
+    "output_framerate": 5,
+    "scale": "640:-1",
+    "movflags": null,
+    "rtbufsize": 65536,
+    "fflags": "+nobuffer+discardcorrupt",
+    "flags": "low_delay",
+    "avioflags": "direct",
+    "fps_mode": "cfr",
+    "flush_packets": "1",
+    "extra_input_args": ["-analyzeduration", "100000", "-probesize", "100000"],
+    "extra_output_args": [],
+    "log_stderr": "file"
+  },
+  
+  "mqtt": {
+    "publish_interval": 5,
+    "topic_name": "surveillance/cameras/cam1/image"
+  },
+  
+  "transcoding_override": {
+    "output_format": "mjpeg",
+    "quality": 75,
+    "capture_framerate": 10,
+    "output_framerate": 5,
+    "channel_buffer_size": 50,
+    "debug_capture": false,
+    "debug_duplicate_frames": false
+  }
+}
+```
 
-scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
+#### Camera Configuration Options
 
-#output_format = "mjpeg"  # Output format: MJPEG for streaming
-#output_framerate = 5  # Output framerate (fps)
+##### Basic Settings
+- **`enabled`** (boolean): Enable/disable this camera (default: `true`)
+- **`path`** (string): URL path for this camera (e.g., `"/cam1"`)
+- **`url`** (string): RTSP/HTTP camera URL with credentials
+  - RTSP: `"rtsp://user:pass@192.168.1.100:554/stream1"`
+  - HTTP: `"http://user:pass@192.168.1.100/video.mjpg"`
+  - Note: URL-encode special characters in passwords (e.g., `#` → `%23`)
+- **`transport`** (string): Transport protocol - `"tcp"` or `"udp"` (for RTSP only)
+- **`reconnect_interval`** (number): Seconds between reconnection attempts (default: `5`)
+- **`chunk_read_size`** (number|null): Bytes to read at once from FFmpeg
+- **`token`** (string|null): Optional token required for WebSocket authentication
+- **`max_recording_age`** (string|null): Override max recording age (e.g., `"10m"`, `"5h"`, `"7d"`)
 
-#video_codec = "mjpeg"  # Video codec: mjpeg is default for MJPEG format
-#video_bitrate = "200k"  # Video bitrate: "200k", "1M", "2000k", etc.
+##### FFmpeg Settings (`ffmpeg` object)
+- **`command`** (string|null): Custom FFmpeg command override. If set, replaces all other FFmpeg options
+  - Placeholder: `$url` will be replaced with the camera URL
+  - Example: `"-use_wallclock_as_timestamps 1 -rtsp_transport tcp -i $url -an -c:v mjpeg -q:v 4 -vf fps=15 -f mjpeg -"`
+- **`use_wallclock_as_timestamps`** (boolean|null): Add `-use_wallclock_as_timestamps 1` as first option (default: `true`)
+- **`output_format`** (string|null): Output format, typically `"mjpeg"` for streaming
+- **`video_codec`** (string|null): Video codec (e.g., `"mjpeg"`)
+- **`video_bitrate`** (string|null): Video bitrate (e.g., `"200k"`, `"1M"`, `"2000k"`)
+- **`quality`** (number|null): JPEG quality for MJPEG (1-100, default: `75`)
+- **`output_framerate`** (number|null): Output framerate in FPS
+- **`scale`** (string|null): Video scaling (e.g., `"640:480"`, `"1280:-1"` for aspect ratio preservation)
+- **`movflags`** (string|null): MOV flags for MP4/MOV formats
+- **`rtbufsize`** (number|null): RTSP buffer size in bytes (helps with network jitter)
+- **`fflags`** (string|null): Format flags (e.g., `"+nobuffer+discardcorrupt"` for low latency)
+- **`flags`** (string|null): Codec flags (e.g., `"low_delay"`)
+- **`avioflags`** (string|null): AVIO flags (e.g., `"direct"` to bypass buffering)
+- **`fps_mode`** (string|null): Frame rate mode - `"cfr"` (constant), `"vfr"` (variable), `"passthrough"`
+- **`flush_packets`** (string|null): Flush packets immediately (`"1"` for low latency)
+- **`extra_input_args`** (array|null): Additional FFmpeg input arguments
+- **`extra_output_args`** (array|null): Additional FFmpeg output arguments
+- **`log_stderr`** (string|null): FFmpeg stderr logging - `"file"`, `"console"`, `"both"`, or `null` to disable
 
-# FFmpeg advanced options for low latency
-#rtbufsize = 65536  # RTSP buffer size in bytes
-#fflags = "+nobuffer+discardcorrupt"
-#flags = "low_delay"
-#avioflags = "direct"
-#fps_mode = "cfr"  # Use "cfr" for constant framerate, "vfr" for variable, "passthrough" to keep original
-#flush_packets = "1"
-#extra_input_args = [] # ["-analyzeduration", "100000", "-probesize", "100000"]
-#extra_output_args = []
+##### MQTT Settings (`mqtt` object)
+Camera-specific MQTT settings (optional):
+- **`publish_interval`** (number): Seconds between MQTT image publishes (0 = every frame)
+- **`topic_name`** (string): MQTT topic for camera images
 
-# HTTP/ASF Stream Example
-[cameras.cam4]
-enabled = true  # Optional: Enable/disable this camera (default: true)
-path = "/cam4"
-# For HTTP streams with authentication, use Basic Auth format:
-# Note: Special characters in password must be URL-encoded (e.g., # = %23)
-url = "http://Admin007:Admin007%23%23@outdoor2:80/videostream.asf?resolution=64&rate=0"
-transport = "tcp"  # Ignored for HTTP streams
-reconnect_interval = 5
+##### Transcoding Override (`transcoding_override` object)
+Override global transcoding settings for this camera (optional):
+- **`output_format`** (string): Output format (e.g., `"mjpeg"`)
+- **`quality`** (number): JPEG quality (1-100)
+- **`capture_framerate`** (number): Capture rate from camera (0 = max available)
+- **`output_framerate`** (number): Output framerate
+- **`channel_buffer_size`** (number): Frame buffer size
+- **`debug_capture`** (boolean): Enable capture rate debug output
+- **`debug_duplicate_frames`** (boolean): Enable duplicate frame detection logging
 
-[cameras.cam4.ffmpeg]
-log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
-scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.
+#### Dynamic Camera Management
+
+The server watches the `cameras/` directory for changes and automatically:
+- **Adds** new cameras when JSON files are created
+- **Updates** camera settings when files are modified
+- **Removes** cameras when files are deleted
+
+All changes are applied without server restart. WebSocket connections and FFmpeg processes are properly managed during these operations.
+
+#### Example Camera Configurations
+
+**Minimal Configuration (`cameras/simple.json`):**
+```json
+{
+  "enabled": true,
+  "path": "/simple",
+  "url": "rtsp://192.168.1.100:554/stream1",
+  "transport": "tcp",
+  "reconnect_interval": 5
+}
+```
+
+**High-Quality Camera (`cameras/hq_cam.json`):**
+```json
+{
+  "enabled": true,
+  "path": "/hq_cam",
+  "url": "rtsp://admin:pass@192.168.1.200:554/h264",
+  "transport": "tcp",
+  "reconnect_interval": 5,
+  "ffmpeg": {
+    "quality": 95,
+    "scale": "1920:-1",
+    "output_framerate": 30,
+    "video_bitrate": "5M"
+  }
+}
+```
+
+**Low-Latency Camera (`cameras/fast_cam.json`):**
+```json
+{
+  "enabled": true,
+  "path": "/fast_cam",
+  "url": "rtsp://192.168.1.150:554/live",
+  "transport": "udp",
+  "reconnect_interval": 2,
+  "ffmpeg": {
+    "rtbufsize": 32768,
+    "fflags": "+nobuffer+discardcorrupt",
+    "flags": "low_delay",
+    "avioflags": "direct",
+    "flush_packets": "1",
+    "extra_input_args": ["-analyzeduration", "100000", "-probesize", "100000"]
+  }
+}
 ```
 
 ### Configuration Options
@@ -395,6 +516,38 @@ openssl pkcs12 -in certificate.p12 -clcerts -nokeys -out server.crt
 # Extract private key (will prompt for passwords)
 openssl pkcs12 -in certificate.p12 -nocerts -nodes -out server.key
 ```
+
+## Admin Interface
+
+The server includes a web-based admin interface for managing camera configurations without editing JSON files directly.
+
+### Accessing the Admin Interface
+
+Navigate to:
+```
+http://localhost:8080/admin
+```
+
+### Features
+
+- **Camera Management**: Add, edit, and delete camera configurations
+- **Live Configuration**: All changes are applied immediately without server restart
+- **Visual Configuration**: User-friendly forms for all camera settings
+- **Configuration Groups**: Settings organized into logical sections:
+  - Basic Settings (URL, path, transport)
+  - MQTT Settings (publishing intervals, topics)
+  - FFmpeg Settings (quality, scaling, performance)
+  - Extended Options (advanced FFmpeg parameters)
+
+### Using the Admin Interface
+
+1. **View Cameras**: See all configured cameras with their status
+2. **Add Camera**: Click "Add Camera" and fill in the required fields
+3. **Edit Camera**: Click the edit icon next to any camera to modify settings
+4. **Delete Camera**: Click the delete icon to remove a camera
+5. **Save Changes**: Click "Save Camera" to apply configuration changes
+
+All changes made through the admin interface are saved to JSON files in the `cameras/` directory and are immediately applied by the server's file watcher.
 
 ## Usage
 

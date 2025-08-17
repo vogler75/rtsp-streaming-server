@@ -1,0 +1,32 @@
+{
+  "enabled": true,
+  "path": "/cam3",
+  "url": "rtsp://admin007:admin007@192.168.1.182:554/stream1",
+  "transport": "tcp",
+  "reconnect_interval": 5,
+  "chunk_read_size": null,
+  "token": null,
+  "max_recording_age": null,
+  "mqtt": null,
+  "ffmpeg": {
+    "command": null,
+    "use_wallclock_as_timestamps": null,
+    "output_format": null,
+    "video_codec": null,
+    "video_bitrate": null,
+    "quality": null,
+    "output_framerate": null,
+    "scale": "640:-1",
+    "movflags": null,
+    "rtbufsize": null,
+    "fflags": null,
+    "flags": null,
+    "avioflags": null,
+    "fps_mode": null,
+    "flush_packets": null,
+    "extra_input_args": null,
+    "extra_output_args": null,
+    "log_stderr": null
+  },
+  "transcoding_override": null
+}
