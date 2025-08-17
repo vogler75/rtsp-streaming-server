@@ -1,0 +1,15 @@
+enabled = true
+path = "/cam2"
+url = "rtsp://admin007:admin007@192.168.1.188:554/stream1"
+transport = "tcp"
+reconnect_interval = 5
+#token = "secure-cam2-token"  # Token required for WebSocket authentication
+
+# Example: MQTT configuration with custom topic
+[mqtt]
+publish_interval = 0  # Publish every frame (0 = every frame)
+topic_name = "surveillance/cameras/cam2/image"  # Custom topic name (overrides default <base_topic>/cameras/<cam-name>/jpg)
+
+[ffmpeg]
+#log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
+scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.

@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::collections::HashMap;
+use std::path::Path;
 use crate::errors::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
+    #[serde(default)]
     pub cameras: HashMap<String, CameraConfig>,
     pub transcoding: TranscodingConfig,
     pub mqtt: Option<MqttConfig>,
@@ -165,8 +167,54 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+        
+        // Load cameras from the cameras directory
+        config.cameras = Self::load_cameras_from_directory("cameras")?;
+        
         Ok(config)
+    }
+
+    fn load_cameras_from_directory(cameras_dir: &str) -> Result<HashMap<String, CameraConfig>> {
+        let mut cameras = HashMap::new();
+        
+        // Check if cameras directory exists
+        if !Path::new(cameras_dir).exists() {
+            eprintln!("Warning: cameras directory '{}' does not exist, no cameras will be loaded", cameras_dir);
+            return Ok(cameras);
+        }
+        
+        // Read all .toml files in the cameras directory
+        let entries = fs::read_dir(cameras_dir)?;
+        
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            
+            // Only process .toml files
+            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    match fs::read_to_string(&path) {
+                        Ok(content) => {
+                            match toml::from_str::<CameraConfig>(&content) {
+                                Ok(camera_config) => {
+                                    println!("Loaded camera configuration: {}", file_stem);
+                                    cameras.insert(file_stem.to_string(), camera_config);
+                                }
+                                Err(e) => {
+                                    eprintln!("Error parsing camera config file {}: {}", path.display(), e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error reading camera config file {}: {}", path.display(), e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(cameras)
     }
 
 }

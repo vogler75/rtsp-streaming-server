@@ -1,0 +1,9 @@
+enabled = true
+path = "/cam3"
+url = "rtsp://admin007:admin007@192.168.1.182:554/stream1"
+transport = "tcp"
+reconnect_interval = 5
+
+[ffmpeg]
+#log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
+scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.

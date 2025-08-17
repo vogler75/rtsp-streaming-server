@@ -1,0 +1,9 @@
+enabled = true
+path = "/cam4"
+url = "http://Admin007:Admin007%23%23@outdoor2:80/videostream.asf"
+transport = "tcp"
+reconnect_interval = 5
+
+[ffmpeg]
+#log_stderr = "file"  # FFmpeg stderr logging: "file", "console", "both"
+#scale = "640:-1"  # Video scaling: "640:480", "1280:-1", etc.

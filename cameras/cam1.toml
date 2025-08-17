@@ -1,0 +1,15 @@
+enabled = true
+path = "/cam1"
+url = "rtsp://admin007:admin007@192.168.1.171:554/stream1"
+transport = "tcp"
+reconnect_interval = 5
+chunk_read_size = 8192
+
+[mqtt]
+publish_interval = 5
+topic_name = "Videoserver/test"
+
+[ffmpeg]
+#log_stderr = "file"
+use_wallclock_as_timestamps = true
+scale = "1280:-1"
