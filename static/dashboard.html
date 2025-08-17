@@ -753,13 +753,244 @@
 
     <!-- Server Config Modal -->
     <div id="serverConfigModal" class="modal">
-        <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto;">
             <div class="modal-header">
                 <h2>Server Configuration</h2>
-                <button class="close-button" onclick="closeServerConfigModal()">✕</button>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button onclick="toggleConfigView()" id="configViewToggle" style="background: #3498db; padding: 5px 10px; font-size: 12px;">📝 Switch to JSON</button>
+                    <button class="close-button" onclick="closeServerConfigModal()">✕</button>
+                </div>
             </div>
             
-            <div style="margin: 20px 0;">
+            <form id="serverConfigForm" style="margin: 20px 0;">
+                <p style="color: #ddd; margin-bottom: 20px;">
+                    Configure server settings. Changes will be saved to the config file.
+                    <strong>Note:</strong> Some changes may require a server restart to take effect.
+                </p>
+
+                <!-- Server Section -->
+                <div class="form-section">
+                    <h3 class="collapsible" onclick="toggleSection(this)">🖥️ Server Settings</h3>
+                    <div class="collapsible-content">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Host Address</label>
+                                <input type="text" id="config_server_host" placeholder="0.0.0.0">
+                                <span class="help-text">IP address to bind the server to (0.0.0.0 for all interfaces)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Port</label>
+                                <input type="number" id="config_server_port" placeholder="8080" min="1" max="65535">
+                                <span class="help-text">TCP port for the web server</span>
+                            </div>
+                            <div class="form-group">
+                                <label>CORS Origin</label>
+                                <input type="text" id="config_server_cors_allow_origin" placeholder="*">
+                                <span class="help-text">Allowed CORS origin (* for all, or specific domain)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Admin Token</label>
+                                <input type="password" id="config_server_admin_token" placeholder="Enter secure token">
+                                <span class="help-text">Token required for admin dashboard access</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TLS Section -->
+                <div class="form-section">
+                    <h3 class="collapsible" onclick="toggleSection(this)">🔒 TLS/SSL Settings</h3>
+                    <div class="collapsible-content">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Enable TLS/SSL</label>
+                                <select id="config_server_tls_enabled">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Enable HTTPS and secure WebSocket connections</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Certificate Path</label>
+                                <input type="text" id="config_server_tls_cert_path" placeholder="certs/server.crt">
+                                <span class="help-text">Path to SSL certificate file</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Private Key Path</label>
+                                <input type="text" id="config_server_tls_key_path" placeholder="certs/server.key">
+                                <span class="help-text">Path to SSL private key file</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MQTT Section -->
+                <div class="form-section">
+                    <h3 class="collapsible" onclick="toggleSection(this)">📡 MQTT Settings</h3>
+                    <div class="collapsible-content">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Enable MQTT</label>
+                                <select id="config_mqtt_enabled">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Enable MQTT message publishing</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Broker URL</label>
+                                <input type="text" id="config_mqtt_broker_url" placeholder="mqtt://192.168.1.4:1883">
+                                <span class="help-text">MQTT broker connection URL</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Client ID</label>
+                                <input type="text" id="config_mqtt_client_id" placeholder="videoserver-01">
+                                <span class="help-text">Unique MQTT client identifier</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Base Topic</label>
+                                <input type="text" id="config_mqtt_base_topic" placeholder="Videoserver">
+                                <span class="help-text">Base topic prefix for all MQTT messages</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Quality of Service</label>
+                                <select id="config_mqtt_qos">
+                                    <option value="0">0 - At most once</option>
+                                    <option value="1">1 - At least once</option>
+                                    <option value="2">2 - Exactly once</option>
+                                </select>
+                                <span class="help-text">MQTT message delivery guarantee</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Retain Messages</label>
+                                <select id="config_mqtt_retain">
+                                    <option value="false">No</option>
+                                    <option value="true">Yes</option>
+                                </select>
+                                <span class="help-text">Whether MQTT messages should be retained by broker</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Keep Alive (seconds)</label>
+                                <input type="number" id="config_mqtt_keep_alive_secs" placeholder="60" min="1">
+                                <span class="help-text">MQTT keep-alive interval</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Publish Interval (seconds)</label>
+                                <input type="number" id="config_mqtt_publish_interval_secs" placeholder="1" min="1">
+                                <span class="help-text">How often to publish status updates</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Publish Picture Arrival</label>
+                                <select id="config_mqtt_publish_picture_arrival">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="help-text">Publish messages when new frames arrive</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Max Packet Size (bytes)</label>
+                                <input type="number" id="config_mqtt_max_packet_size" placeholder="268435456" min="1024">
+                                <span class="help-text">Maximum MQTT packet size</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recording Section -->
+                <div class="form-section">
+                    <h3 class="collapsible" onclick="toggleSection(this)">🎥 Recording Settings</h3>
+                    <div class="collapsible-content">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Enable Recording</label>
+                                <select id="config_recording_enabled">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Enable video recording functionality</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Database Path</label>
+                                <input type="text" id="config_recording_database_path" placeholder="recordings">
+                                <span class="help-text">Directory for recording database storage</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Max Frame Size (bytes)</label>
+                                <input type="number" id="config_recording_max_frame_size" placeholder="10485760" min="1024">
+                                <span class="help-text">Maximum size for a single frame (10MB default)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Max Recording Age</label>
+                                <input type="text" id="config_recording_max_recording_age" placeholder="7d">
+                                <span class="help-text">Auto-delete recordings older than this (e.g., 7d, 24h, 30m)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Cleanup Interval (hours)</label>
+                                <input type="number" id="config_recording_cleanup_interval_hours" placeholder="1" min="1">
+                                <span class="help-text">How often to run cleanup of old recordings</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transcoding Section -->
+                <div class="form-section">
+                    <h3 class="collapsible" onclick="toggleSection(this)">🎬 Transcoding Settings</h3>
+                    <div class="collapsible-content">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Output Format</label>
+                                <select id="config_transcoding_output_format">
+                                    <option value="mjpeg">MJPEG</option>
+                                    <option value="h264">H.264</option>
+                                    <option value="webm">WebM</option>
+                                </select>
+                                <span class="help-text">Video output format for streaming</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Capture Framerate</label>
+                                <input type="number" id="config_transcoding_capture_framerate" placeholder="5" min="0" step="0.1">
+                                <span class="help-text">Input capture rate (0 = max available from camera)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Output Framerate</label>
+                                <input type="number" id="config_transcoding_output_framerate" placeholder="0" min="0" step="0.1">
+                                <span class="help-text">Output streaming rate (0 = same as input)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Channel Buffer Size</label>
+                                <input type="number" id="config_transcoding_channel_buffer_size" placeholder="50" min="1">
+                                <span class="help-text">Frame buffer size (higher = more memory, smoother)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Debug Capture</label>
+                                <select id="config_transcoding_debug_capture">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Show capture rate debug information</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Debug Duplicate Frames</label>
+                                <select id="config_transcoding_debug_duplicate_frames">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Show duplicate frame detection debug info</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: flex-end; padding-top: 20px; border-top: 1px solid #444;">
+                    <button type="button" onclick="resetServerConfig()" style="background: #666;">Reset to Original</button>
+                    <button type="button" onclick="exportServerConfig()" style="background: #3498db;">Export JSON</button>
+                    <button type="button" onclick="saveServerConfig()" style="background: #27ae60;">Save Configuration</button>
+                </div>
+            </form>
+
+            <!-- JSON Editor View -->
+            <div id="serverConfigJson" style="margin: 20px 0; display: none;">
                 <p style="color: #ddd; margin-bottom: 15px;">
                     Edit the server configuration directly as JSON. Changes will be saved to the config file.
                     <strong>Note:</strong> Some changes may require a server restart to take effect.
@@ -770,9 +1001,9 @@
                           placeholder="Loading configuration..."></textarea>
                 
                 <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
-                    <button onclick="resetServerConfig()" style="background: #666;">Reset</button>
-                    <button onclick="validateServerConfig()" style="background: #f39c12;">Validate</button>
-                    <button onclick="saveServerConfig()" style="background: #27ae60;">Save Configuration</button>
+                    <button onclick="resetServerConfigJson()" style="background: #666;">Reset</button>
+                    <button onclick="validateServerConfig()" style="background: #f39c12;">Validate JSON</button>
+                    <button onclick="saveServerConfigJson()" style="background: #27ae60;">Save Configuration</button>
                 </div>
             </div>
         </div>
@@ -963,7 +1194,7 @@
             document.getElementById('editModal').classList.remove('active');
         }
 
-        let originalServerConfig = '';
+        let originalServerConfig = {};
 
         async function showServerConfig() {
             if (!isAdminMode) {
@@ -981,8 +1212,11 @@
                 if (response.ok) {
                     const data = await response.json();
                     if (data.status === 'success') {
-                        originalServerConfig = JSON.stringify(data.data, null, 2);
-                        document.getElementById('serverConfigEditor').value = originalServerConfig;
+                        originalServerConfig = data.data;
+                        populateServerConfigForm(data.data);
+                        // Also populate the JSON editor with the current config
+                        const configJson = JSON.stringify(data.data, null, 2);
+                        document.getElementById('serverConfigEditor').value = configJson;
                         document.getElementById('serverConfigModal').classList.add('active');
                     } else {
                         showAlert('Failed to load server configuration', 'error');
@@ -995,31 +1229,119 @@
             }
         }
 
+        function populateServerConfigForm(config) {
+            // Server settings
+            document.getElementById('config_server_host').value = config.server?.host || '';
+            document.getElementById('config_server_port').value = config.server?.port || '';
+            document.getElementById('config_server_cors_allow_origin').value = config.server?.cors_allow_origin || '';
+            document.getElementById('config_server_admin_token').value = config.server?.admin_token || '';
+            
+            // TLS settings
+            document.getElementById('config_server_tls_enabled').value = (config.server?.tls?.enabled || false).toString();
+            document.getElementById('config_server_tls_cert_path').value = config.server?.tls?.cert_path || '';
+            document.getElementById('config_server_tls_key_path').value = config.server?.tls?.key_path || '';
+            
+            // MQTT settings
+            document.getElementById('config_mqtt_enabled').value = (config.mqtt?.enabled || false).toString();
+            document.getElementById('config_mqtt_broker_url').value = config.mqtt?.broker_url || '';
+            document.getElementById('config_mqtt_client_id').value = config.mqtt?.client_id || '';
+            document.getElementById('config_mqtt_base_topic').value = config.mqtt?.base_topic || '';
+            document.getElementById('config_mqtt_qos').value = (config.mqtt?.qos || 0).toString();
+            document.getElementById('config_mqtt_retain').value = (config.mqtt?.retain || false).toString();
+            document.getElementById('config_mqtt_keep_alive_secs').value = config.mqtt?.keep_alive_secs || '';
+            document.getElementById('config_mqtt_publish_interval_secs').value = config.mqtt?.publish_interval_secs || '';
+            document.getElementById('config_mqtt_publish_picture_arrival').value = (config.mqtt?.publish_picture_arrival !== undefined ? config.mqtt.publish_picture_arrival : true).toString();
+            document.getElementById('config_mqtt_max_packet_size').value = config.mqtt?.max_packet_size || '';
+            
+            // Recording settings
+            document.getElementById('config_recording_enabled').value = (config.recording?.enabled || false).toString();
+            document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
+            document.getElementById('config_recording_max_frame_size').value = config.recording?.max_frame_size || '';
+            document.getElementById('config_recording_max_recording_age').value = config.recording?.max_recording_age || '';
+            document.getElementById('config_recording_cleanup_interval_hours').value = config.recording?.cleanup_interval_hours || '';
+            
+            // Transcoding settings
+            document.getElementById('config_transcoding_output_format').value = config.transcoding?.output_format || 'mjpeg';
+            document.getElementById('config_transcoding_capture_framerate').value = config.transcoding?.capture_framerate || '';
+            document.getElementById('config_transcoding_output_framerate').value = config.transcoding?.output_framerate || '';
+            document.getElementById('config_transcoding_channel_buffer_size').value = config.transcoding?.channel_buffer_size || '';
+            document.getElementById('config_transcoding_debug_capture').value = (config.transcoding?.debug_capture || false).toString();
+            document.getElementById('config_transcoding_debug_duplicate_frames').value = (config.transcoding?.debug_duplicate_frames || false).toString();
+        }
+
+        function collectServerConfigFromForm() {
+            return {
+                server: {
+                    host: document.getElementById('config_server_host').value || "0.0.0.0",
+                    port: parseInt(document.getElementById('config_server_port').value) || 8080,
+                    cors_allow_origin: document.getElementById('config_server_cors_allow_origin').value || "*",
+                    admin_token: document.getElementById('config_server_admin_token').value || "",
+                    tls: {
+                        enabled: document.getElementById('config_server_tls_enabled').value === 'true',
+                        cert_path: document.getElementById('config_server_tls_cert_path').value || "certs/server.crt",
+                        key_path: document.getElementById('config_server_tls_key_path').value || "certs/server.key"
+                    }
+                },
+                mqtt: {
+                    enabled: document.getElementById('config_mqtt_enabled').value === 'true',
+                    broker_url: document.getElementById('config_mqtt_broker_url').value || "",
+                    client_id: document.getElementById('config_mqtt_client_id').value || "",
+                    base_topic: document.getElementById('config_mqtt_base_topic').value || "",
+                    qos: parseInt(document.getElementById('config_mqtt_qos').value) || 0,
+                    retain: document.getElementById('config_mqtt_retain').value === 'true',
+                    keep_alive_secs: parseInt(document.getElementById('config_mqtt_keep_alive_secs').value) || 60,
+                    publish_interval_secs: parseInt(document.getElementById('config_mqtt_publish_interval_secs').value) || 1,
+                    publish_picture_arrival: document.getElementById('config_mqtt_publish_picture_arrival').value === 'true',
+                    max_packet_size: parseInt(document.getElementById('config_mqtt_max_packet_size').value) || 268435456
+                },
+                recording: {
+                    enabled: document.getElementById('config_recording_enabled').value === 'true',
+                    database_path: document.getElementById('config_recording_database_path').value || "recordings",
+                    max_frame_size: parseInt(document.getElementById('config_recording_max_frame_size').value) || 10485760,
+                    max_recording_age: document.getElementById('config_recording_max_recording_age').value || "7d",
+                    cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1
+                },
+                transcoding: {
+                    output_format: document.getElementById('config_transcoding_output_format').value || "mjpeg",
+                    capture_framerate: parseFloat(document.getElementById('config_transcoding_capture_framerate').value) || 5,
+                    output_framerate: parseFloat(document.getElementById('config_transcoding_output_framerate').value) || 0,
+                    channel_buffer_size: parseInt(document.getElementById('config_transcoding_channel_buffer_size').value) || 50,
+                    debug_capture: document.getElementById('config_transcoding_debug_capture').value === 'true',
+                    debug_duplicate_frames: document.getElementById('config_transcoding_debug_duplicate_frames').value === 'true'
+                }
+            };
+        }
+
         function closeServerConfigModal() {
             document.getElementById('serverConfigModal').classList.remove('active');
         }
 
         function resetServerConfig() {
-            document.getElementById('serverConfigEditor').value = originalServerConfig;
+            populateServerConfigForm(originalServerConfig);
             showAlert('Configuration reset to original values', 'info');
         }
 
-        function validateServerConfig() {
-            const configText = document.getElementById('serverConfigEditor').value;
+        function exportServerConfig() {
+            const config = collectServerConfigFromForm();
+            const configJson = JSON.stringify(config, null, 2);
             
-            try {
-                JSON.parse(configText);
-                showAlert('Configuration JSON is valid ✓', 'success');
-            } catch (error) {
-                showAlert(`Invalid JSON: ${error.message}`, 'error');
-            }
+            // Create download link
+            const blob = new Blob([configJson], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showAlert('Configuration exported as config.json', 'success');
         }
 
         async function saveServerConfig() {
-            const configText = document.getElementById('serverConfigEditor').value;
-            
             try {
-                const configData = JSON.parse(configText);
+                const config = collectServerConfigFromForm();
                 
                 const response = await fetch(`${basePath}/api/admin/config`, {
                     method: 'PUT',
@@ -1027,13 +1349,13 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${adminToken}`
                     },
-                    body: configText
+                    body: JSON.stringify(config)
                 });
                 
                 if (response.ok) {
                     const data = await response.json();
                     if (data.status === 'success') {
-                        originalServerConfig = configText; // Update original to new saved version
+                        originalServerConfig = config; // Update original to new saved version
                         showAlert('Server configuration saved successfully! ' + (data.data.note || ''), 'success');
                         closeServerConfigModal();
                     } else {
@@ -1044,7 +1366,97 @@
                     showAlert(`Error saving configuration: ${errorData}`, 'error');
                 }
             } catch (error) {
-                showAlert(`Invalid JSON or save error: ${error.message}`, 'error');
+                showAlert(`Error saving configuration: ${error.message}`, 'error');
+            }
+        }
+
+        // Toggle between form view and JSON view
+        function toggleConfigView() {
+            const formView = document.getElementById('serverConfigForm');
+            const jsonView = document.getElementById('serverConfigJson');
+            const toggleBtn = document.getElementById('configViewToggle');
+            
+            if (formView.style.display === 'none') {
+                // Switch to form view
+                formView.style.display = 'block';
+                jsonView.style.display = 'none';
+                toggleBtn.textContent = '📝 Switch to JSON';
+                
+                // Sync JSON to form when switching to form view
+                try {
+                    const jsonText = document.getElementById('serverConfigEditor').value;
+                    if (jsonText.trim()) {
+                        const config = JSON.parse(jsonText);
+                        populateServerConfigForm(config);
+                    }
+                } catch (e) {
+                    showAlert('Invalid JSON detected - keeping form data unchanged', 'warning');
+                }
+            } else {
+                // Switch to JSON view
+                formView.style.display = 'none';
+                jsonView.style.display = 'block';
+                toggleBtn.textContent = '📄 Switch to Form';
+                
+                // Sync form to JSON when switching to JSON view
+                const config = collectServerConfigFromForm();
+                const configJson = JSON.stringify(config, null, 2);
+                document.getElementById('serverConfigEditor').value = configJson;
+            }
+        }
+
+        // Reset JSON editor to original configuration
+        function resetServerConfigJson() {
+            const configJson = JSON.stringify(originalServerConfig, null, 2);
+            document.getElementById('serverConfigEditor').value = configJson;
+            showAlert('JSON editor reset to original values', 'info');
+        }
+
+        // Validate JSON in the editor
+        function validateServerConfig() {
+            try {
+                const jsonText = document.getElementById('serverConfigEditor').value;
+                JSON.parse(jsonText);
+                showAlert('JSON is valid!', 'success');
+            } catch (e) {
+                showAlert(`Invalid JSON: ${e.message}`, 'error');
+            }
+        }
+
+        // Save configuration from JSON editor
+        async function saveServerConfigJson() {
+            try {
+                const jsonText = document.getElementById('serverConfigEditor').value;
+                const config = JSON.parse(jsonText);
+                
+                const response = await fetch(`${basePath}/api/admin/config`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${adminToken}`
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                        originalServerConfig = config; // Update original to new saved version
+                        showAlert('Server configuration saved successfully! ' + (data.data.note || ''), 'success');
+                        closeServerConfigModal();
+                    } else {
+                        showAlert(`Failed to save: ${data.message}`, 'error');
+                    }
+                } else {
+                    const errorData = await response.text();
+                    showAlert(`Error saving configuration: ${errorData}`, 'error');
+                }
+            } catch (error) {
+                if (error instanceof SyntaxError) {
+                    showAlert(`Invalid JSON: ${error.message}`, 'error');
+                } else {
+                    showAlert(`Error saving configuration: ${error.message}`, 'error');
+                }
             }
         }
 
