@@ -6,11 +6,9 @@
   "reconnect_interval": 5,
   "chunk_read_size": null,
   "token": null,
-  "max_recording_age": null,
-  "mqtt": null,
   "ffmpeg": {
     "command": null,
-    "use_wallclock_as_timestamps": null,
+    "use_wallclock_as_timestamps": true,
     "output_format": null,
     "video_codec": null,
     "video_bitrate": null,
@@ -28,5 +26,9 @@
     "extra_output_args": null,
     "log_stderr": null
   },
-  "transcoding_override": null
+  "mqtt": {
+    "publish_interval": 0,
+    "topic_name": "surveillance/cameras/cam2/image"
+  },
+  "max_recording_age": "7d"
 }

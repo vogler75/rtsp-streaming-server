@@ -30,5 +30,5 @@
     "publish_interval": 0,
     "topic_name": "surveillance/cameras/cam2/image"
   },
-  "max_recording_age": null
+  "max_recording_age": "7d"
 }

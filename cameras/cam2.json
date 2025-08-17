@@ -8,7 +8,7 @@
   "token": null,
   "ffmpeg": {
     "command": null,
-    "use_wallclock_as_timestamps": null,
+    "use_wallclock_as_timestamps": true,
     "output_format": null,
     "video_codec": null,
     "video_bitrate": null,
@@ -30,5 +30,5 @@
     "publish_interval": 0,
     "topic_name": "surveillance/cameras/cam2/image"
   },
-  "max_recording_age": "1d"
+  "max_recording_age": "7d"
 }

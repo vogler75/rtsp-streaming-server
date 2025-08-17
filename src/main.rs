@@ -1887,11 +1887,69 @@ impl AppState {
     async fn restart_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
         info!("Restarting camera '{}'...", camera_id);
         
+        // Check if recording is active before removing the camera
+        let was_recording = if let Some(ref recording_manager_ref) = &self.recording_manager {
+            let active_recording = recording_manager_ref.get_active_recording(&camera_id).await;
+            if let Some(recording) = active_recording {
+                info!("Camera '{}' has active recording (session {}), will restart after camera restart", camera_id, recording.session_id);
+                
+                // Try to get the original recording reason from the database
+                let original_reason = match recording_manager_ref.list_recordings(
+                    Some(&camera_id), 
+                    Some(recording.start_time), 
+                    None
+                ).await {
+                    Ok(sessions) => {
+                        sessions.into_iter()
+                            .find(|s| s.id == recording.session_id)
+                            .and_then(|s| s.reason)
+                            .unwrap_or_else(|| "Camera restart".to_string())
+                    }
+                    Err(_) => "Camera restart".to_string()
+                };
+                
+                Some((recording.requested_duration, original_reason))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
         // Remove the old camera
         self.remove_camera(&camera_id).await?;
         
         // Add the new camera with updated config
-        self.add_camera(camera_id, camera_config).await?;
+        self.add_camera(camera_id.clone(), camera_config).await?;
+        
+        // Restart recording if it was previously active
+        if let Some((requested_duration, reason)) = was_recording {
+            info!("Restarting recording for camera '{}' after restart", camera_id);
+            if let Some(ref recording_manager_ref) = &self.recording_manager {
+                // Get the frame sender for this camera
+                if let Some(frame_sender) = {
+                    let camera_streams = self.camera_streams.read().await;
+                    camera_streams.get(&camera_id).map(|info| info.frame_sender.clone())
+                } {
+                    match recording_manager_ref.start_recording(
+                        &camera_id,
+                        "system", // client_id for system restarts
+                        Some(&reason),
+                        requested_duration,
+                        frame_sender,
+                    ).await {
+                        Ok(session_id) => {
+                            info!("Successfully restarted recording for camera '{}' with session ID {}", camera_id, session_id);
+                        }
+                        Err(e) => {
+                            error!("Failed to restart recording for camera '{}': {}", camera_id, e);
+                        }
+                    }
+                } else {
+                    error!("No frame sender found for camera '{}' after restart", camera_id);
+                }
+            }
+        }
         
         Ok(())
     }
