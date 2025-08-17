@@ -827,6 +827,7 @@
                         this.logJson({ message: 'Timeline extended back for live mode' });
                     }
                     
+                    // In live mode, always use goto (can't start playback from a past time in live mode)
                     this.sendCommand({
                         cmd: 'goto',
                         timestamp: newTimestamp.toISOString()
@@ -850,10 +851,24 @@
                     newTimestamp.setTime(endTime.getTime());
                 }
 
-                this.sendCommand({
-                    cmd: 'goto',
-                    timestamp: newTimestamp.toISOString()
-                });
+                // In replay mode: if playing, start from new position; if paused, just goto
+                if (this.streamState === 'replaying') {
+                    // Stream is playing - start playback from the new position
+                    const command = {
+                        cmd: 'start',
+                        from: newTimestamp.toISOString()
+                    };
+                    if (this.selectedRecording.end_time) {
+                        command.to = this.selectedRecording.end_time;
+                    }
+                    this.sendCommand(command);
+                } else {
+                    // Stream is stopped/paused - just seek to the position
+                    this.sendCommand({
+                        cmd: 'goto',
+                        timestamp: newTimestamp.toISOString()
+                    });
+                }
             }
 
             onSliderChange(value) {
