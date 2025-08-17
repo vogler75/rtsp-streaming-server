@@ -1,409 +1,187 @@
 # REST API Documentation
 
-This document describes all REST API endpoints available in the RTSP Streaming Server.
+This document outlines the available REST API endpoints for the RTSP streaming server.
 
-## Authentication
+## General API
 
-### Camera-Specific Endpoints
-Camera endpoints require authentication via the `Authorization` header with a Bearer token:
-```
-Authorization: Bearer <camera_token>
-```
+### `GET /api/status`
 
-### Admin Endpoints
-Admin endpoints require authentication with the admin token configured in `config.toml`:
-```
-Authorization: Bearer <admin_token>
-```
-If no admin token is configured, admin endpoints are accessible without authentication.
+Retrieves the general status of the server.
 
-## Response Format
-
-All API responses follow this JSON structure:
-```json
-{
-  "status": "success|error",
-  "data": {}, // Present on success
-  "error": "Error message", // Present on error
-  "code": 400 // HTTP status code (present on error)
-}
-```
-
-## Global Endpoints
-
-### GET /api/status
-Returns server status and camera information.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "server": {
-      "uptime": "2h 30m 45s",
-      "version": "1.0.0"
-    },
-    "cameras": {
-      "cam1": {
-        "status": "connected|disconnected|error",
-        "last_frame": "2023-12-01T10:30:00Z",
-        "fps": 15.2,
-        "error": "Optional error message"
-      }
+- **Method**: `GET`
+- **Path**: `/api/status`
+- **Response Body**:
+  ```json
+  {
+    "status": "success",
+    "data": {
+      "uptime_secs": 120,
+      "total_clients": 5,
+      "total_cameras": 2
     }
   }
-}
-```
+  ```
 
-### GET /api/cameras
-Returns list of all configured cameras with their configurations.
+### `GET /api/cameras`
 
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "cameras": {
-      "cam1": {
-        "name": "Camera 1",
-        "path": "/cam1",
-        "url": "rtsp://camera-ip:554/stream",
-        "enabled": true,
-        "transport": "tcp",
-        "reconnect_interval": 5000,
-        "status": "connected|disconnected|error"
-      }
+Lists all configured cameras and their current status.
+
+- **Method**: `GET`
+- **Path**: `/api/cameras`
+- **Response Body**:
+  ```json
+  {
+    "status": "success",
+    "data": {
+      "cameras": [
+        {
+          "id": "cam1",
+          "path": "/cam1",
+          "connected": true,
+          "capture_fps": 15.0,
+          "clients_connected": 2,
+          "last_frame_time": "2025-08-17T10:00:00Z",
+          "ffmpeg_running": true,
+          "duplicate_frames": 0,
+          "token_required": true
+        }
+      ],
+      "count": 1
     }
   }
-}
-```
+  ```
 
-## Camera Recording Control Endpoints
+## Camera Management API (`/api/admin/cameras`)
 
-These endpoints are available for each camera at `/<camera_path>/control/api/*`:
+These endpoints are used for managing camera configurations and require an admin token set in the `Authorization` header (e.g., `Authorization: Bearer <your_admin_token>`).
 
-### POST /<camera_path>/control/api/start
-Start recording for the camera.
+### `POST /api/admin/cameras`
 
-**Headers:** `Authorization: Bearer <camera_token>`
+Creates a new camera configuration. The server will automatically detect the new configuration file and start the camera stream.
 
-**Request Body:**
-```json
-{
-  "reason": "Optional recording reason"
-}
-```
-
-**Response (Success):**
-```json
-{
-  "status": "success",
-  "data": {
-    "message": "Recording started",
-    "session_id": 123
+- **Method**: `POST`
+- **Path**: `/api/admin/cameras`
+- **Request Body**:
+  ```json
+  {
+    "camera_id": "new_cam",
+    "config": {
+      "path": "/new_cam",
+      "url": "rtsp://...",
+      "transport": "tcp",
+      "reconnect_interval": 10,
+      "token": "some-secure-token"
+    }
   }
-}
-```
+  ```
+- **Response**: A success or error message.
 
-**Response (Already Recording):**
-```json
-{
-  "status": "error",
-  "error": "Recording already in progress for this camera",
-  "code": 409
-}
-```
+### `GET /api/admin/cameras/:id`
 
-### POST /<camera_path>/control/api/stop
-Stop recording for the camera.
+Retrieves the current configuration for a specific camera.
 
-**Headers:** `Authorization: Bearer <camera_token>`
+- **Method**: `GET`
+- **Path**: `/api/admin/cameras/:id` (e.g., `/api/admin/cameras/cam1`)
+- **Response**: The camera's configuration object.
 
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "message": "Recording stopped"
+### `PUT /api/admin/cameras/:id`
+
+Updates the configuration for a specific camera. The server will detect the change and restart the camera stream.
+
+- **Method**: `PUT`
+- **Path**: `/api/admin/cameras/:id`
+- **Request Body**: A `CameraConfig` JSON object.
+- **Response**: A success or error message.
+
+### `DELETE /api/admin/cameras/:id`
+
+Deletes a camera's configuration file. The server will detect the removal and stop the corresponding camera stream.
+
+- **Method**: `DELETE`
+- **Path**: `/api/admin/cameras/:id`
+- **Response**: A success or error message.
+
+## Camera Control API
+
+These endpoints are available for each camera, identified by its configured `path`. If a `token` is configured for the camera, it must be provided in the `Authorization` header as a Bearer token.
+
+### `POST /<camera_path>/control/recording/start`
+
+Starts a new recording session for the camera.
+
+- **Method**: `POST`
+- **Path**: `/<camera_path>/control/recording/start` (e.g., `/cam1/control/recording/start`)
+- **Request Body** (optional):
+  ```json
+  {
+    "reason": "Motion detected"
   }
-}
-```
-
-### GET /<camera_path>/control/api/recordings
-List recordings for the camera.
-
-**Headers:** `Authorization: Bearer <camera_token>`
-
-**Query Parameters:**
-- `from` (optional): Start time filter (ISO 8601 format)
-- `to` (optional): End time filter (ISO 8601 format)
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "recordings": [
-      {
-        "id": 123,
-        "camera_id": "cam1",
-        "start_time": "2023-12-01T10:00:00Z",
-        "end_time": "2023-12-01T10:30:00Z",
-        "reason": "Motion detected"
-      }
-    ]
+  ```
+- **Response**:
+  ```json
+  {
+    "status": "success",
+    "data": {
+      "session_id": 123,
+      "message": "Recording started",
+      "camera_id": "cam1"
+    }
   }
-}
-```
+  ```
 
-### GET /<camera_path>/control/api/recordings/<session_id>/frames
-Get recorded frames for a specific recording session.
+### `POST /<camera_path>/control/recording/stop`
 
-**Headers:** `Authorization: Bearer <camera_token>`
+Stops the currently active recording session for the camera.
 
-**Query Parameters:**
-- `from` (optional): Start time filter (ISO 8601 format)
-- `to` (optional): End time filter (ISO 8601 format)
+- **Method**: `POST`
+- **Path**: `/<camera_path>/control/recording/stop`
+- **Response**: A success message indicating the recording has been stopped.
 
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "frames": [
-      {
-        "timestamp": "2023-12-01T10:00:01Z",
-        "frame_data": "base64_encoded_frame_data"
-      }
-    ]
-  }
-}
-```
+### `GET /<camera_path>/control/recordings`
 
-### GET /<camera_path>/control/api/active
-Get active recording information for the camera.
+Lists all recorded sessions for the camera.
 
-**Headers:** `Authorization: Bearer <camera_token>`
+- **Method**: `GET`
+- **Path**: `/<camera_path>/control/recordings`
+- **Query Parameters**:
+  - `from`: (Optional) ISO 8601 timestamp to filter recordings that started after this time.
+  - `to`: (Optional) ISO 8601 timestamp to filter recordings that started before this time.
+- **Response**: A list of recording session objects.
 
-**Response (Active Recording):**
-```json
-{
-  "status": "success",
-  "data": {
-    "recording": {
-      "id": 123,
+### `GET /<camera_path>/control/recordings/:session_id/frames`
+
+Retrieves metadata for frames within a specific recording session. Note that this does not return the actual frame data.
+
+- **Method**: `GET`
+- **Path**: `/<camera_path>/control/recordings/:session_id/frames`
+- **Query Parameters**:
+  - `from`: (Optional) ISO 8601 timestamp.
+  - `to`: (Optional) ISO 8601 timestamp.
+- **Response**: A list of frame metadata objects (timestamp, size).
+
+### `GET /<camera_path>/control/recording/active`
+
+Gets the status of the currently active recording for the camera.
+
+- **Method**: `GET`
+- **Path**: `/<camera_path>/control/recording/active`
+- **Response**: Information about the active recording session, or a message indicating no active recording.
+
+### `GET /<camera_path>/control/recording/size`
+
+Gets the total size of the recording database for the camera.
+
+- **Method**: `GET`
+- **Path**: `/<camera_path>/control/recording/size`
+- **Response**:
+  ```json
+  {
+    "status": "success",
+    "data": {
       "camera_id": "cam1",
-      "start_time": "2023-12-01T10:00:00Z",
-      "reason": "Manual start"
+      "size_bytes": 10485760,
+      "size_mb": 10.0,
+      "size_gb": 0.009765625
     }
   }
-}
-```
-
-**Response (No Active Recording):**
-```json
-{
-  "status": "success",
-  "data": {
-    "recording": null
-  }
-}
-```
-
-### GET /<camera_path>/control/api/size
-Get total storage size used by recordings for the camera.
-
-**Headers:** `Authorization: Bearer <camera_token>`
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "size_bytes": 1048576,
-    "size_mb": 1.0,
-    "size_gb": 0.001
-  }
-}
-```
-
-## Admin Camera Management Endpoints
-
-### POST /api/admin/cameras
-Create a new camera configuration.
-
-**Headers:** `Authorization: Bearer <admin_token>`
-
-**Request Body:**
-```json
-{
-  "camera_id": "new_camera",
-  "config": {
-    "enabled": true,
-    "path": "/new_camera",
-    "url": "rtsp://camera-ip:554/stream",
-    "transport": "tcp",
-    "reconnect_interval": 5000,
-    "token": "camera_access_token",
-    "ffmpeg": {
-      "output_format": "mjpeg",
-      "video_codec": "mjpeg",
-      "quality": 80,
-      "output_framerate": 15
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "message": "Camera created successfully",
-    "camera_id": "new_camera"
-  }
-}
-```
-
-### GET /api/admin/cameras/:id
-Get configuration for a specific camera.
-
-**Headers:** `Authorization: Bearer <admin_token>`
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "enabled": true,
-    "path": "/cam1",
-    "url": "rtsp://camera-ip:554/stream",
-    "transport": "tcp",
-    "reconnect_interval": 5000,
-    "token": "camera_token"
-  }
-}
-```
-
-### PUT /api/admin/cameras/:id
-Update configuration for a specific camera.
-
-**Headers:** `Authorization: Bearer <admin_token>`
-
-**Request Body:** Same as camera config in POST request
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "message": "Camera updated successfully"
-  }
-}
-```
-
-### DELETE /api/admin/cameras/:id
-Delete a camera configuration.
-
-**Headers:** `Authorization: Bearer <admin_token>`
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "message": "Camera deleted successfully"
-  }
-}
-```
-
-## Error Responses
-
-### Authentication Errors
-```json
-{
-  "status": "error",
-  "error": "Invalid or missing Authorization header",
-  "code": 401
-}
-```
-
-### Not Found Errors
-```json
-{
-  "status": "error",
-  "error": "Camera not found",
-  "code": 404
-}
-```
-
-### Conflict Errors
-```json
-{
-  "status": "error",
-  "error": "Camera already exists",
-  "code": 409
-}
-```
-
-### Validation Errors
-```json
-{
-  "status": "error",
-  "error": "Path and URL are required",
-  "code": 400
-}
-```
-
-## Camera Configuration Schema
-
-### CameraConfig Object
-```json
-{
-  "enabled": true, // Optional, defaults to true
-  "path": "/cam1", // Required - URL path for camera endpoints
-  "url": "rtsp://camera-ip:554/stream", // Required - RTSP URL
-  "transport": "tcp", // Required - "tcp" or "udp"
-  "reconnect_interval": 5000, // Required - Reconnection interval in ms
-  "chunk_read_size": 8192, // Optional - RTSP chunk size in bytes
-  "token": "access_token", // Optional - Authentication token
-  "max_recording_age": "7d", // Optional - Recording retention (e.g., "10m", "5h", "7d")
-  "ffmpeg": { // Optional - FFmpeg transcoding settings
-    "command": "Custom FFmpeg command", // Optional - Full command override
-    "use_wallclock_as_timestamps": true, // Optional
-    "output_format": "mjpeg", // Optional - Output format
-    "video_codec": "mjpeg", // Optional - Video codec
-    "video_bitrate": "1M", // Optional - Video bitrate
-    "quality": 80, // Optional - JPEG quality (1-100)
-    "output_framerate": 15, // Optional - Output FPS
-    "scale": "640:480", // Optional - Video scaling
-    "rtbufsize": 102400, // Optional - RTSP buffer size
-    "extra_input_args": ["--arg1"], // Optional - Additional input args
-    "extra_output_args": ["--arg2"], // Optional - Additional output args
-    "log_stderr": "console" // Optional - "file", "console", "both"
-  },
-  "mqtt": { // Optional - MQTT publishing settings
-    "enabled": true,
-    "status_topic": "cameras/cam1/status",
-    "image_topic": "cameras/cam1/image",
-    "publish_interval": 30000
-  }
-}
-```
-
-## WebSocket Endpoints
-
-While not REST endpoints, the following WebSocket endpoints are available:
-
-- `/<camera_path>/stream` - Video streaming interface (HTML page)
-- `/<camera_path>/control` - Recording control interface (HTML page) 
-- `/<camera_path>/live` - Raw WebSocket video stream (requires `token` query parameter)
-
-## Static Endpoints
-
-- `/dashboard` - Multi-camera overview page
-- `/admin` - Camera management interface
-- `/<camera_path>` - Individual camera test page
-- `/<camera_path>/test` - Alternative camera test page
-- `/static/*` - Static file serving
+  ```

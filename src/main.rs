@@ -767,7 +767,7 @@ async fn serve_test_with_mode(is_full_mode: bool) -> axum::response::Html<String
 
 async fn dashboard_handler() -> axum::response::Html<String> {
     trace!("Dashboard HTML requested");
-    let html = include_str!("../static/dashboard-admin.html").to_string();
+    let html = include_str!("../static/dashboard.html").to_string();
     axum::response::Html(html)
 }
 
