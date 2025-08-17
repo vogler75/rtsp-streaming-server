@@ -86,7 +86,7 @@ use control::handle_control_websocket;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the configuration file
-    #[arg(short, long, default_value = "config.toml")]
+    #[arg(short, long, default_value = "config.json")]
     config: String,
     
     /// Enable verbose logging

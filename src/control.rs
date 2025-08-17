@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize, Deserializer};
 use chrono::{DateTime, Utc};
-use tracing::{info, error, trace};
+use tracing::{info, error, trace, debug};
 use tokio::sync::broadcast;
 use bytes::Bytes;
 use axum::extract::ws::{WebSocket, Message};

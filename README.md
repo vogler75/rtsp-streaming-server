@@ -76,50 +76,109 @@ The **`/stream`** endpoint provides a clean video streaming interface optimized 
 ## Configuration
 
 The server uses two configuration methods:
-1. **`config.toml`**: Main server configuration (server settings, MQTT, transcoding defaults, recording)
+1. **`config.json`**: Main server configuration (server settings, MQTT, transcoding defaults, recording)
 2. **`cameras/` directory**: Individual camera configurations as JSON files
+
+### Complete Configuration Example
+
+Here's a complete `config.json` file with all sections:
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "cors_allow_origin": "*",
+    "admin_token": "your-secure-admin-token",
+    "tls": {
+      "enabled": false,
+      "cert_path": "certs/server.crt",
+      "key_path": "certs/server.key"
+    }
+  },
+  "mqtt": {
+    "enabled": true,
+    "broker_url": "mqtt://192.168.1.4:1883",
+    "client_id": "videoserver-01",
+    "base_topic": "Videoserver",
+    "qos": 0,
+    "retain": false,
+    "keep_alive_secs": 60,
+    "publish_interval_secs": 1,
+    "publish_picture_arrival": true,
+    "max_packet_size": 268435456
+  },
+  "recording": {
+    "enabled": true,
+    "database_path": "recordings",
+    "max_frame_size": 10485760,
+    "max_recording_age": "7d",
+    "cleanup_interval_hours": 1
+  },
+  "transcoding": {
+    "output_format": "mjpeg",
+    "capture_framerate": 5,
+    "output_framerate": 0,
+    "channel_buffer_size": 50,
+    "debug_capture": false,
+    "debug_duplicate_frames": false
+  }
+}
+```
 
 ### Server Configuration
 
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-cors_allow_origin = "null"  # or "*" for permissive, or specific origin
-
-[server.tls]
-enabled = false
-cert_path = "certs/server.crt"
-key_path = "certs/server.key"
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "cors_allow_origin": "*",
+    "admin_token": "your-secure-admin-token",
+    "tls": {
+      "enabled": false,
+      "cert_path": "certs/server.crt",
+      "key_path": "certs/server.key"
+    }
+  }
+}
 ```
 
 ### MQTT Configuration (Optional)
 
-```toml
-[mqtt]
-enabled = true
-broker_url = "mqtt://192.168.1.4:1883"  # Can also use mqtts:// for TLS
-client_id = "videoserver-01"
-# username = "mqtt_user"  # Optional
-# password = "mqtt_pass"  # Optional
-base_topic = "Videoserver"  # Base topic for all MQTT messages
-qos = 0  # Quality of Service (0, 1, or 2)
-retain = false  # Whether to retain messages
-keep_alive_secs = 60  # Keep-alive interval in seconds
-publish_interval_secs = 5  # How often to publish status updates
-publish_picture_arrival = true  # Enable/disable picture arrival publishing (default: true)
+```json
+{
+  "mqtt": {
+    "enabled": true,
+    "broker_url": "mqtt://192.168.1.4:1883",
+    "client_id": "videoserver-01",
+    "username": "mqtt_user",
+    "password": "mqtt_pass",
+    "base_topic": "Videoserver",
+    "qos": 0,
+    "retain": false,
+    "keep_alive_secs": 60,
+    "publish_interval_secs": 5,
+    "publish_picture_arrival": true,
+    "max_packet_size": 268435456
+  }
+}
 ```
 
 ### Global Transcoding Settings
 
-```toml
-[transcoding]
-output_format = "mjpeg"
-quality = 50
-capture_framerate = 0      # 0 = max available from camera
-output_framerate = 5       # Output FPS (can be overridden per camera)
-channel_buffer_size = 1    # Frame buffer size (1 = only latest)
-debug_capture = true       # Show capture rate debug info
+```json
+{
+  "transcoding": {
+    "output_format": "mjpeg",
+    "quality": 50,
+    "capture_framerate": 0,
+    "output_framerate": 5,
+    "channel_buffer_size": 1,
+    "debug_capture": true,
+    "debug_duplicate_frames": false
+  }
+}
 ```
 
 ### Camera Configuration
@@ -476,13 +535,18 @@ chmod 644 certs/server.crt
 
 ### Enable HTTPS
 
-Once you have certificates, enable HTTPS in your `config.toml`:
+Once you have certificates, enable HTTPS in your `config.json`:
 
-```toml
-[server.tls]
-enabled = true
-cert_path = "certs/server.crt"
-key_path = "certs/server.key"
+```json
+{
+  "server": {
+    "tls": {
+      "enabled": true,
+      "cert_path": "certs/server.crt",
+      "key_path": "certs/server.key"
+    }
+  }
+}
 ```
 
 The server will automatically:
@@ -564,7 +628,7 @@ cargo build --release
 
 ### Testing with Real RTSP Streams
 
-1. Update `config.toml` with your camera details (see Configuration section)
+1. Update `config.json` with your camera details (see Configuration section)
 
 2. Common RTSP URLs:
    - IP Camera: `rtsp://admin:password@192.168.1.100:554/stream`
@@ -617,13 +681,16 @@ The server includes a comprehensive recording system that stores camera streams 
 
 ### Recording Configuration
 
-```toml
-[recording]
-enabled = true
-database_path = "recordings.db"
-max_frame_size = 10485760  # 10MB max frame size
-max_recording_age = "7d"    # Delete recordings older than 7 days
-cleanup_interval_hours = 1   # Run cleanup every hour
+```json
+{
+  "recording": {
+    "enabled": true,
+    "database_path": "recordings",
+    "max_frame_size": 10485760,
+    "max_recording_age": "7d",
+    "cleanup_interval_hours": 1
+  }
+}
 ```
 
 #### Recording Options
@@ -637,17 +704,14 @@ cleanup_interval_hours = 1   # Run cleanup every hour
 
 ### Per-Camera Recording Settings
 
-You can override the global `max_recording_age` for individual cameras:
+You can override the global `max_recording_age` for individual cameras in their JSON configuration files:
 
-```toml
-[cameras.cam1]
-max_recording_age = "1d"  # Keep cam1 recordings for only 1 day
-
-[cameras.cam2]
-max_recording_age = "30d" # Keep cam2 recordings for 30 days
-
-[cameras.cam3]
-# Uses global max_recording_age setting
+```json
+{
+  "path": "/cam1",
+  "url": "rtsp://...",
+  "max_recording_age": "1d"
+}
 ```
 
 ### Automatic Cleanup

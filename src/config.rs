@@ -170,7 +170,11 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let mut config: Config = toml::from_str(&content)?;
+        let mut config: Config = if path.ends_with(".json") {
+            serde_json::from_str(&content)?
+        } else {
+            toml::from_str(&content)?
+        };
         
         // Load cameras from the cameras directory
         config.cameras = Self::load_cameras_from_directory("cameras")?;
