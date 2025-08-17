@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::{RwLock, broadcast};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Timelike};
 use tracing::{info, error, warn, trace};
 use bytes::Bytes;
 
@@ -135,12 +135,15 @@ impl RecordingManager {
         tokio::spawn(async move {
             let mut frame_receiver = frame_sender.subscribe();
             let mut frame_number = 0i64;
+            let mut session_id = session_id; // Make mutable for hourly session splitting
+            let mut last_hour = Utc::now().hour(); // Track the hour of the last frame
 
             loop {
                 match frame_receiver.recv().await {
                     Ok(frame_data) => {
                         frame_number += 1;
                         let timestamp = Utc::now();
+                        let current_hour = timestamp.hour();
 
                         // Check if recording is still active
                         let active_recordings_guard = active_recordings.read().await;
@@ -150,6 +153,53 @@ impl RecordingManager {
                         if !is_active {
                             trace!("Recording stopped for camera '{}', ending task", camera_id);
                             break;
+                        }
+
+                        // Check for hourly session splitting (when hour changes)
+                        if last_hour != current_hour {
+                            info!("Hour changed from {} to {} for camera '{}', splitting recording session {}", 
+                                  last_hour, current_hour, camera_id, session_id);
+                            
+                            // Get the recording reason from the database to use for the new session
+                            if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
+                                if let Some(current_session) = sessions.first() {
+                                    let reason = current_session.reason.clone();
+                                    
+                                    // Stop the current session
+                                    if let Err(e) = database.stop_recording_session(session_id).await {
+                                        error!("Failed to stop recording session for hourly split: {}", e);
+                                    } else {
+                                        info!("Stopped recording session {} for hourly split", session_id);
+                                        
+                                        // Create a new session with the same reason
+                                        match database.create_recording_session(&camera_id, reason.as_deref()).await {
+                                            Ok(new_session_id) => {
+                                                info!("Created new recording session {} for hourly continuation", new_session_id);
+                                                
+                                                // Update the active recording with new session info
+                                                let mut active_recordings_guard = active_recordings.write().await;
+                                                if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
+                                                    recording.session_id = new_session_id;
+                                                    recording.start_time = timestamp;
+                                                    recording.frame_count = 0;
+                                                }
+                                                drop(active_recordings_guard);
+                                                
+                                                // Update the session_id for subsequent frames
+                                                session_id = new_session_id;
+                                                frame_number = 1; // Reset frame number for new session
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to create new recording session for hourly split: {}", e);
+                                                // Continue with the old session rather than stopping
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Update the last hour tracker
+                            last_hour = current_hour;
                         }
 
                         // Check frame size

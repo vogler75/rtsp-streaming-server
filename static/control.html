@@ -704,11 +704,14 @@
                 document.getElementById('timelineSlider').disabled = false;
                 
                 // Start playing the recording from the beginning
-                this.sendCommand({
+                const command = {
                     cmd: 'start',
-                    from: recording.start_time,
-                    to: recording.end_time
-                });
+                    from: recording.start_time
+                };
+                if (recording.end_time) {
+                    command.to = recording.end_time;
+                }
+                this.sendCommand(command);
                 
                 // Update UI to show we're playing
                 this.streamState = 'replaying';
@@ -742,11 +745,14 @@
                     if (this.selectedRecording) {
                         if (this.currentTimestamp) {
                             // Continue from current position
-                            this.sendCommand({
+                            const command = {
                                 cmd: 'start',
-                                from: this.currentTimestamp.toISOString(),
-                                to: this.selectedRecording.end_time
-                            });
+                                from: this.currentTimestamp.toISOString()
+                            };
+                            if (this.selectedRecording.end_time) {
+                                command.to = this.selectedRecording.end_time;
+                            }
+                            this.sendCommand(command);
                         } else {
                             // Start from beginning
                             this.startReplay(this.selectedRecording);
