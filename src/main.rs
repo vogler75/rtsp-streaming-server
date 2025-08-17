@@ -997,7 +997,7 @@ async fn camera_control_handler(
                 
                 // If neither authentication method provided valid token
                 if !token_valid {
-                    warn!("Missing or invalid authentication for camera {} control that requires authentication", camera_id);
+                    debug!("Missing or invalid authentication for camera {} control that requires authentication", camera_id);
                     return (axum::http::StatusCode::UNAUTHORIZED, "Missing or invalid authentication - provide Bearer token in Authorization header or ?token= query parameter").into_response();
                 }
             }

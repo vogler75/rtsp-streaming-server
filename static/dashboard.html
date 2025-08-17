@@ -1055,6 +1055,10 @@
 
         async function updateCameraGrid(cameras) {
             currentCameras = cameras; // Store cameras globally for recording status
+            
+            // Save current scroll position
+            const scrollY = window.scrollY;
+            
             const grid = document.getElementById('camerasGrid');
             grid.innerHTML = '';
             
@@ -1065,6 +1069,11 @@
             tiles.forEach(tile => {
                 grid.appendChild(tile);
             });
+            
+            // Restore scroll position after DOM update
+            setTimeout(() => {
+                window.scrollTo(0, scrollY);
+            }, 0);
         }
 
         async function createCameraTileWithRecording(camera) {
