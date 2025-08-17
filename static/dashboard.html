@@ -514,6 +514,13 @@
                 <button onclick="refreshStatus(true)">🔄 Refresh Now</button>
             </div>
             
+            <div class="stream-section">
+                <label>
+                    <input type="checkbox" id="allStreamsToggle" onchange="toggleAllStreams()">
+                    📺 Enable All Streams
+                </label>
+            </div>
+            
             <div class="admin-section">
                 <button class="admin-btn" onclick="showAdminAuth()">🔐 Admin Mode</button>
                 <button class="add-btn" onclick="showAddCamera()" style="display:none" id="addCameraBtn">➕ Add Camera</button>
@@ -851,7 +858,7 @@
             document.getElementById('cameraForm').reset();
             document.getElementById('cameraId').disabled = false;
             document.querySelector('.modal-header h2').textContent = 'Add New Camera';
-            document.getElementById('editModal').style.display = 'block';
+            document.getElementById('editModal').classList.add('active');
         }
 
         function showEditCamera(cameraId) {
@@ -873,7 +880,7 @@
                         document.getElementById('cameraId').value = cameraId;
                         document.getElementById('cameraId').disabled = true;
                         document.querySelector('.modal-header h2').textContent = 'Edit Camera';
-                        document.getElementById('editModal').style.display = 'block';
+                        document.getElementById('editModal').classList.add('active');
                     } else {
                         showAlert('Failed to load camera configuration', 'error');
                     }
@@ -906,7 +913,7 @@
             if (config.ffmpeg) {
                 document.getElementById('ffmpeg_command').value = config.ffmpeg.command || '';
                 document.getElementById('ffmpeg_quality').value = config.ffmpeg.quality || '';
-                document.getElementById('ffmpeg_use_wallclock_as_timestamps').value = config.ffmpeg.use_wallclock_as_timestamps !== undefined ? config.ffmpeg.use_wallclock_as_timestamps.toString() : 'true';
+                document.getElementById('ffmpeg_use_wallclock_as_timestamps').value = config.ffmpeg.use_wallclock_as_timestamps !== undefined && config.ffmpeg.use_wallclock_as_timestamps !== null ? config.ffmpeg.use_wallclock_as_timestamps.toString() : 'true';
                 document.getElementById('ffmpeg_scale').value = config.ffmpeg.scale || '';
                 document.getElementById('ffmpeg_output_framerate').value = config.ffmpeg.output_framerate || '';
                 document.getElementById('ffmpeg_video_bitrate').value = config.ffmpeg.video_bitrate || '';
@@ -920,7 +927,7 @@
         }
 
         function closeEditModal() {
-            document.getElementById('editModal').style.display = 'none';
+            document.getElementById('editModal').classList.remove('active');
         }
 
         async function deleteCamera(cameraId) {
@@ -1112,6 +1119,9 @@
             for (const camera of cameras) {
                 await updateCameraTile(camera);
             }
+            
+            // Update master stream checkbox
+            setTimeout(updateMasterStreamCheckbox, 100);
         }
 
         async function updateCameraTile(camera) {
@@ -1152,6 +1162,30 @@
                 toggleEmbeddedStream(camera.id, camera.path, requiresToken);
             }
             
+            // Update admin buttons if in admin mode
+            const cameraActionsDiv = document.getElementById(`actions-${camera.id}`);
+            if (cameraActionsDiv && isAdminMode) {
+                // Check if admin buttons already exist
+                if (!cameraActionsDiv.querySelector('.delete-btn')) {
+                    // Add admin buttons if they don't exist
+                    const editBtn = document.createElement('button');
+                    editBtn.onclick = () => showEditCamera(camera.id);
+                    editBtn.textContent = '✏️ Edit';
+                    
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-btn';
+                    deleteBtn.onclick = () => deleteCamera(camera.id);
+                    deleteBtn.textContent = '🗑️ Delete';
+                    
+                    cameraActionsDiv.appendChild(editBtn);
+                    cameraActionsDiv.appendChild(deleteBtn);
+                }
+            } else if (cameraActionsDiv && !isAdminMode) {
+                // Remove admin buttons if not in admin mode
+                const adminButtons = cameraActionsDiv.querySelectorAll('button:not([onclick*="Stream"]):not([onclick*="Control"]):not([onclick*="Recording"])');
+                adminButtons.forEach(btn => btn.remove());
+            }
+            
             // Update recording status (keep existing function)
             updateRecordingStatus(camera.id, camera.path, requiresToken);
         }
@@ -1176,6 +1210,8 @@
             // Restore scroll position after DOM update
             setTimeout(() => {
                 window.scrollTo(0, scrollY);
+                // Update master stream checkbox after tiles are created
+                updateMasterStreamCheckbox();
             }, 0);
         }
 
@@ -1297,7 +1333,7 @@
                     </div>
                     ${tokenSection}
                 </div>
-                <div class="camera-actions">
+                <div id="actions-${camera.id}" class="camera-actions">
                     <button onclick="openCameraStream('${camera.id}', '${camera.path}', ${requiresToken})">🔗 Stream</button>
                     <button onclick="openCameraControl('${camera.id}', '${camera.path}', ${requiresToken})">🎮 Control</button>
                     <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor};">${recordingBtnText}</button>
@@ -1358,6 +1394,76 @@
             window.open(url, '_blank');
         }
 
+        function toggleAllStreams() {
+            const masterCheckbox = document.getElementById('allStreamsToggle');
+            const isEnabled = masterCheckbox.checked;
+            
+            if (!currentCameras || currentCameras.length === 0) {
+                showAlert('No cameras available', 'warning');
+                masterCheckbox.checked = false;
+                return;
+            }
+            
+            let missingTokens = [];
+            
+            // Check for cameras that require tokens but don't have them
+            if (isEnabled) {
+                for (const camera of currentCameras) {
+                    const requiresToken = camera.token_required === true;
+                    if (requiresToken) {
+                        const tokenInput = document.getElementById(`token-${camera.id}`);
+                        if (!tokenInput || !tokenInput.value.trim()) {
+                            missingTokens.push(camera.id);
+                        }
+                    }
+                }
+                
+                if (missingTokens.length > 0) {
+                    showAlert(`Please enter tokens for cameras: ${missingTokens.join(', ')}`, 'error');
+                    masterCheckbox.checked = false;
+                    return;
+                }
+            }
+            
+            // Toggle all individual camera stream checkboxes
+            for (const camera of currentCameras) {
+                const checkbox = document.getElementById(`stream-checkbox-${camera.id}`);
+                if (checkbox && checkbox.checked !== isEnabled) {
+                    checkbox.checked = isEnabled;
+                    const requiresToken = camera.token_required === true;
+                    toggleEmbeddedStream(camera.id, camera.path, requiresToken);
+                }
+            }
+            
+            const action = isEnabled ? 'enabled' : 'disabled';
+            showAlert(`All camera streams ${action}`, 'success');
+        }
+
+        function updateMasterStreamCheckbox() {
+            if (!currentCameras || currentCameras.length === 0) return;
+            
+            const masterCheckbox = document.getElementById('allStreamsToggle');
+            const individualCheckboxes = currentCameras.map(camera => 
+                document.getElementById(`stream-checkbox-${camera.id}`)
+            ).filter(cb => cb !== null);
+            
+            if (individualCheckboxes.length === 0) return;
+            
+            const allChecked = individualCheckboxes.every(cb => cb.checked);
+            const noneChecked = individualCheckboxes.every(cb => !cb.checked);
+            
+            if (allChecked) {
+                masterCheckbox.checked = true;
+                masterCheckbox.indeterminate = false;
+            } else if (noneChecked) {
+                masterCheckbox.checked = false;
+                masterCheckbox.indeterminate = false;
+            } else {
+                masterCheckbox.checked = false;
+                masterCheckbox.indeterminate = true;
+            }
+        }
+
         function toggleEmbeddedStream(cameraId, cameraPath, requiresToken) {
             const checkbox = document.getElementById(`stream-checkbox-${cameraId}`);
             const streamContainer = document.getElementById(`stream-container-${cameraId}`);
@@ -1401,6 +1507,9 @@
                 
                 console.log(`Stopped embedded stream for ${cameraId}`);
             }
+            
+            // Update master checkbox state
+            setTimeout(updateMasterStreamCheckbox, 100);
         }
 
         function toggleStreamPreview(cameraId, cameraPath) {

@@ -872,7 +872,7 @@ async fn camera_live_handler(
                     if provided_token == expected_token {
                         info!("Token authentication successful for camera {}", camera_id);
                     } else {
-                        warn!("Invalid token provided for camera {}", camera_id);
+                        debug!("Invalid token provided for camera {}", camera_id);
                         return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
                     }
                 } else {
@@ -917,7 +917,7 @@ async fn camera_stream_handler(
                     if provided_token == expected_token {
                         info!("Token authentication successful for camera {}", camera_id);
                     } else {
-                        warn!("Invalid token provided for camera {}", camera_id);
+                        debug!("Invalid token provided for camera {}", camera_id);
                         return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
                     }
                 } else {
