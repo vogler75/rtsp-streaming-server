@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
-use tracing::{info, warn, error, trace};
+use tracing::{info, warn, error, debug, trace};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::fmt::format::{Writer, FormatEvent, FormatFields};

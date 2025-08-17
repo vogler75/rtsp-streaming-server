@@ -487,7 +487,7 @@
                     <option value="5000" selected>5s</option>
                     <option value="10000">10s</option>
                 </select>
-                <button onclick="refreshStatus()">🔄 Refresh Now</button>
+                <button onclick="refreshStatus(true)">🔄 Refresh Now</button>
             </div>
             
             <div class="admin-section">
@@ -718,6 +718,7 @@
     <script>
         let refreshTimer;
         let currentCameras = [];
+        let isManualRefresh = false;
         let isAdminMode = false;
         let adminToken = localStorage.getItem('adminToken') || '';
         const basePath = window.location.pathname.replace('/dashboard', '');
@@ -1012,7 +1013,25 @@
             }
         });
 
-        async function refreshStatus() {
+        function hasCameraListChanged(newCameras) {
+            if (currentCameras.length !== newCameras.length) {
+                return true;
+            }
+            
+            // Check if same cameras exist (by ID)
+            const currentIds = new Set(currentCameras.map(c => c.id));
+            const newIds = new Set(newCameras.map(c => c.id));
+            
+            for (const id of newIds) {
+                if (!currentIds.has(id)) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
+        async function refreshStatus(forceFullRebuild = false) {
             try {
                 // Load server status and cameras in parallel
                 const [statusResponse, camerasResponse] = await Promise.all([
@@ -1025,8 +1044,17 @@
                 
                 if (statusData.status === 'success' && camerasData.status === 'success') {
                     updateServerStatus(statusData.data, camerasData.data.cameras);
-                    await updateCameraGrid(camerasData.data.cameras);
-                    // Recording status is now loaded with the tiles, no need for separate update
+                    
+                    const newCameras = camerasData.data.cameras;
+                    const needsFullRebuild = forceFullRebuild || hasCameraListChanged(newCameras);
+                    
+                    if (needsFullRebuild) {
+                        console.log('Performing full camera grid rebuild');
+                        await updateCameraGrid(newCameras);
+                    } else {
+                        console.log('Performing differential camera update');
+                        await updateExistingCameras(newCameras);
+                    }
                 } else {
                     throw new Error('Failed to load server data');
                 }
@@ -1051,6 +1079,49 @@
             
             // MQTT status - assume connected if server is running (could be enhanced later)
             document.getElementById('mqttStatus').textContent = 'Connected';
+        }
+
+        async function updateExistingCameras(cameras) {
+            currentCameras = cameras; // Update stored cameras
+            
+            // Update each existing camera tile with new data
+            for (const camera of cameras) {
+                await updateCameraTile(camera);
+            }
+        }
+
+        async function updateCameraTile(camera) {
+            const requiresToken = camera.token_required === true;
+            const isOnline = camera.ffmpeg_running;
+            
+            // Use specific IDs to update elements
+            const statusElement = document.getElementById(`status-${camera.id}`);
+            if (statusElement) {
+                statusElement.textContent = isOnline ? 'Online' : 'Offline';
+            }
+            
+            const indicatorElement = document.getElementById(`indicator-${camera.id}`);
+            if (indicatorElement) {
+                indicatorElement.className = `status-indicator ${isOnline ? '' : 'offline'}`;
+            }
+            
+            const fpsElement = document.getElementById(`fps-${camera.id}`);
+            if (fpsElement) {
+                fpsElement.textContent = camera.capture_fps.toFixed(1);
+            }
+            
+            const clientsElement = document.getElementById(`clients-${camera.id}`);
+            if (clientsElement) {
+                clientsElement.textContent = camera.clients_connected;
+            }
+            
+            const frameElement = document.getElementById(`frame-${camera.id}`);
+            if (frameElement) {
+                frameElement.textContent = camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
+            }
+            
+            // Update recording status (keep existing function)
+            updateRecordingStatus(camera.id, camera.path, requiresToken);
         }
 
         async function updateCameraGrid(cameras) {
@@ -1155,8 +1226,8 @@
                 <div class="camera-header">
                     <span class="camera-name">${camera.id}</span>
                     <div class="camera-status">
-                        <span class="status-indicator ${isOnline ? '' : 'offline'}"></span>
-                        <span>${isOnline ? 'Online' : 'Offline'}</span>
+                        <span id="indicator-${camera.id}" class="status-indicator ${isOnline ? '' : 'offline'}"></span>
+                        <span id="status-${camera.id}">${isOnline ? 'Online' : 'Offline'}</span>
                     </div>
                 </div>
                 <div class="camera-preview" onclick="toggleStreamPreview('${camera.id}', '${camera.path}')">
@@ -1165,15 +1236,15 @@
                 <div class="camera-info">
                     <div class="info-row">
                         <span class="info-label">FPS:</span>
-                        <span>${camera.capture_fps.toFixed(1)}</span>
+                        <span id="fps-${camera.id}">${camera.capture_fps.toFixed(1)}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Clients:</span>
-                        <span>${camera.clients_connected}</span>
+                        <span id="clients-${camera.id}">${camera.clients_connected}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Last Frame:</span>
-                        <span>${camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never'}</span>
+                        <span id="frame-${camera.id}">${camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never'}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Recording:</span>
@@ -1423,7 +1494,7 @@
         
 
         // Initial load
-        refreshStatus();
+        refreshStatus(true); // Force full rebuild on initial load
         startAutoRefresh();
     </script>
 </body>
