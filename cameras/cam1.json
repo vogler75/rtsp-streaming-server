@@ -26,6 +26,9 @@
     "extra_output_args": null,
     "log_stderr": null
   },
-  "mqtt": null,
+  "mqtt": {
+    "publish_interval": 5,
+    "topic_name": null
+  },
   "max_recording_age": null
 }

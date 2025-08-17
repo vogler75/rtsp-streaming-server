@@ -26,7 +26,7 @@
         
         h1 {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
         
@@ -103,26 +103,6 @@
             background: rgba(0, 0, 0, 0.2);
             border-radius: 5px;
             padding: 10px;
-            scrollbar-width: thin;
-            scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
-        }
-        
-        .recordings-list::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        .recordings-list::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-        }
-        
-        .recordings-list::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
-        }
-        
-        .recordings-list::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.5);
         }
         
         .recording-item {
@@ -162,10 +142,6 @@
             color: #fff;
             border-radius: 5px;
             font-size: 14px;
-        }
-        
-        .control-group input::placeholder {
-            color: rgba(255, 255, 255, 0.5);
         }
         
         .button-group {
@@ -208,20 +184,26 @@
         .speed-controls {
             display: flex;
             align-items: center;
-            gap: 10px;
-            margin-top: 15px;
+            gap: 5px;
+        }
+        
+        .speed-controls button {
+            padding: 5px 8px;
+            font-size: 12px;
+            flex: 0;
+            min-width: 30px;
         }
         
         .speed-display {
-            min-width: 60px;
+            min-width: 50px;
             text-align: center;
             font-weight: bold;
-            font-size: 18px;
+            font-size: 16px;
         }
         
         #jsonOutput {
             width: 100%;
-            height: 200px;
+            height: 150px;
             background: rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 5px;
@@ -230,8 +212,6 @@
             font-family: 'Courier New', monospace;
             font-size: 12px;
             overflow-y: auto;
-            white-space: pre-wrap;
-            word-wrap: break-word;
         }
         
         .status-indicator {
@@ -252,15 +232,9 @@
         }
         
         @keyframes pulse {
-            0% {
-                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
-            }
-            70% {
-                box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
-            }
+            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
         }
         
         .info-text {
@@ -276,156 +250,177 @@
             margin-bottom: 15px;
         }
         
-        .output-header h2 {
-            margin-bottom: 0;
-            padding-bottom: 0;
-            border-bottom: none;
-        }
-        
         .clear-button {
             padding: 8px 12px;
             background: linear-gradient(135deg, #f44336 0%, #e53935 100%);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 600;
-            transition: transform 0.2s;
-            min-width: auto;
             flex: none;
         }
         
-        .clear-button:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(244, 67, 54, 0.3);
+        .admin-toggle {
+            text-align: center;
+            margin-bottom: 20px;
         }
+        
+        #authPanel {
+            display: none; /* Hidden by default */
+        }
+        
+        .video-overlay-controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        #videoContainer:hover .video-overlay-controls {
+            opacity: 1;
+        }
+        
+        .video-main-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .video-main-controls button {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 5px;
+        }
+        
+        .timeline-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        #timelineSlider {
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        .timestamp-display {
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📹 Camera Control Interface</h1>
         
-        <div style="text-align: center; margin-bottom: 20px;">
+        <div style="text-align: center; margin-bottom: 10px;">
             <span class="status-indicator" id="connectionStatus"></span>
             <span id="connectionText">Disconnected</span>
         </div>
         
-        <!-- Authentication Panel -->
-        <div class="panel" style="margin-bottom: 20px;">
+        <div class="admin-toggle">
+            <button id="adminModeButton">⚙️ Admin Mode</button>
+        </div>
+        
+        <div class="panel" id="authPanel" style="margin-bottom: 20px;">
             <h2>Authentication</h2>
             <div class="control-group">
-                <label>Bearer Token (if required):</label>
+                <label>Bearer Token:</label>
                 <input type="password" id="bearerToken" placeholder="Enter token if camera requires authentication" />
             </div>
             <div class="button-group">
-                <button id="connectWithToken">🔗 Connect with Token</button>
+                <button id="connectWithToken">🔗 Connect</button>
                 <button id="reconnect">🔄 Reconnect</button>
             </div>
         </div>
         
         <div class="main-grid">
-            <!-- Left Column: Video Display and Controls -->
             <div class="left-column">
-                <!-- Video Display Panel -->
                 <div class="panel">
-                    <h2>Video Stream</h2>
-                    <div class="info-text" style="margin-bottom: 10px;">🎥 Live Stream or Replay will appear here</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h2>Video Stream</h2>
+                        <button id="startLiveStream" class="success" style="flex: none;">🔴 Live Stream</button>
+                    </div>
+                    
                     <div id="videoContainer">
                         <canvas id="videoCanvas"></canvas>
-                        <div id="statusMessage">Ready for commands - Start Live Stream or Replay to view video</div>
-                    </div>
-                    
-                    <!-- Video Timestamp Display -->
-                    <div style="text-align: center; margin: 10px 0; font-size: 14px; color: rgba(255, 255, 255, 0.8);">
-                        <span id="currentTimestamp">No timestamp</span>
-                    </div>
-                    
-                    <!-- Video Playback Controls -->
-                    <div class="video-controls" style="display: flex; justify-content: center; gap: 10px; margin: 15px 0;">
-                        <button id="rewindButton" title="Rewind 5 seconds">⏪</button>
-                        <button id="playButton" title="Play from current position">▶️</button>
-                        <button id="stopButton" title="Stop playback">⏹</button>
-                        <button id="forwardButton" title="Forward 5 seconds">⏩</button>
-                    </div>
-                    
-                    <!-- Timeline Slider -->
-                    <div class="timeline-container" style="margin: 15px 0;">
-                        <input type="range" id="timelineSlider" style="width: 100%;" min="0" max="100" value="0" disabled>
-                        <div style="display: flex; justify-content: space-between; font-size: 12px; color: rgba(255, 255, 255, 0.6); margin-top: 5px;">
-                            <span id="timelineStart">00:00:00</span>
-                            <span id="timelineEnd">00:00:00</span>
+                        <div id="statusMessage">Ready for commands</div>
+                        
+                        <div class="video-overlay-controls">
+                            <div class="timeline-container" style="width: 100%; display: flex; flex-direction: column;">
+                                <!-- Slider -->
+                                <input type="range" id="timelineSlider" min="0" max="100" value="0" disabled style="width: 100%; margin-bottom: 8px;">
+                                
+                                <!-- From/To times row -->
+                                <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 6px;">
+                                    <span id="timelineStart" class="timestamp-display" style="font-size: 10px; color: rgba(255,255,255,0.7);">00:00:00</span>
+                                    <span id="timelineEnd" class="timestamp-display" style="font-size: 10px; color: rgba(255,255,255,0.7);">00:00:00</span>
+                                </div>
+                                
+                                <!-- Current time row (separate block) -->
+                                <div style="text-align: center; width: 100%; clear: both;">
+                                    <span id="timelineCurrent" class="timestamp-display" style="font-weight: bold; font-size: 11px; color: white; display: block;">Current: 00:00:00</span>
+                                </div>
+                            </div>
+                            <div class="video-main-controls">
+                                <button id="rewindButton" title="Rewind 10s">⏪</button>
+                                <button id="playPauseButton" title="Play/Pause">▶️</button>
+                                <button id="forwardButton" title="Forward 10s">⏩</button>
+                                <div class="speed-controls">
+                                    <button id="decreaseSpeed" title="Slower">-</button>
+                                    <div class="speed-display" id="speedDisplay">1.0x</div>
+                                    <button id="increaseSpeed" title="Faster">+</button>
+                                </div>
+                                <button id="stopButton" title="Stop">⏹</button>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <!-- Speed Controls -->
-                    <div class="speed-controls">
-                        <button id="decreaseSpeed">➖ Slower</button>
-                        <div class="speed-display" id="speedDisplay">1.0x</div>
-                        <button id="increaseSpeed">➕ Faster</button>
                     </div>
                 </div>
                 
-                <!-- Recording Controls Panel -->
                 <div class="panel">
                     <h2>Recording Controls</h2>
-                    
-                    <!-- Day Selection -->
-                    <div class="control-group">
-                        <label>Select Day:</label>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <input type="date" id="selectedDay" style="flex: 1;" />
-                            <button id="setTodayButton" style="flex: none; padding: 5px 10px; font-size: 12px;">Today</button>
-                            <button id="refreshRecordings" style="flex: none; padding: 5px 10px; font-size: 12px;">🔄 Refresh List</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Time Range Selection -->
-                    <div class="control-group">
-                        <label>Time Range:</label>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <input type="datetime-local" id="startTime" style="flex: 1;" />
-                            <span style="color: rgba(255, 255, 255, 0.7);">to</span>
-                            <input type="datetime-local" id="endTime" style="flex: 1;" />
-                        </div>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button id="startReplay" class="success">▶️ Start Replay</button>
-                        <button id="startLiveStream" class="success">📹 Start Live Stream</button>
-                        <button id="stopReplay" class="danger" disabled>⏹ Stop</button>
-                    </div>
-                    <div class="info-text" style="margin-top: 5px;">Replay and Live Stream use WebSocket 🔌</div>
-                    
-                    <!-- Recording Controls -->
-                    <h3 style="margin-top: 25px; margin-bottom: 10px;">Recording Controls</h3>
                     <div class="info-text" style="margin-bottom: 10px;">📡 Uses REST API</div>
                     <div class="control-group">
                         <label>Recording Reason:</label>
-                        <input type="text" id="recordingReason" placeholder="e.g., Security event, Motion detected..." />
+                        <input type="text" id="recordingReason" placeholder="e.g., Security event, motion detected..." />
                     </div>
-                    
                     <div class="button-group">
-                        <button id="startRecording" class="success">🔴 Start Recording</button>
+                        <button id="startRecording" class="success">▶️ Start Recording</button>
                         <button id="stopRecording" class="danger" disabled>⏹ Stop Recording</button>
                     </div>
-                    
                 </div>
             </div>
             
-            <!-- Right Column: Recordings List -->
             <div class="right-column">
                 <div class="panel">
                     <h2>Available Recordings</h2>
-                    <div class="info-text" style="margin-bottom: 10px;">📡 Loaded via REST API</div>
+                    <div class="control-group">
+                        <label>Date Range:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="date" id="fromDate" style="flex: 1;" />
+                            <span>to</span>
+                            <input type="date" id="toDate" style="flex: 1;" />
+                        </div>
+                        <div class="button-group" style="margin-top: 10px;">
+                            <button id="refreshRecordings">🔄 Refresh List</button>
+                        </div>
+                    </div>
                     <div class="recordings-list" id="recordingsList">
-                        <div class="info-text">Click "Refresh List" to load recordings</div>
+                        <div class="info-text">Select a date range and click "Refresh List"</div>
                     </div>
                 </div>
             </div>
         </div>
         
-        <!-- JSON Output Panel -->
         <div class="panel">
             <div class="output-header">
                 <h2>Command Responses</h2>
@@ -442,61 +437,57 @@
                 this.isConnected = false;
                 this.currentSpeed = 1.0;
                 this.selectedRecording = null;
-                this.isReplaying = false;
+                this.streamState = 'stopped'; // 'stopped', 'replaying', 'live'
                 this.isRecording = false;
-                this.isLiveStreaming = false;
+                
                 this.canvas = document.getElementById('videoCanvas');
                 this.ctx = this.canvas.getContext('2d');
-                this.currentTimestamp = null;
                 
-                // Check for token in URL parameters and populate the field
-                const urlParams = new URLSearchParams(window.location.search);
-                const token = urlParams.get('token');
-                if (token) {
-                    document.getElementById('bearerToken').value = token;
-                }
+                this.currentTimestamp = null;
                 this.timelineStart = null;
                 this.timelineEnd = null;
+                
                 this.setupEventListeners();
                 this.connectWebSocket();
+                this.checkActiveRecording();
+                
+                // Auto-load recordings on page load
+                setTimeout(() => this.fetchRecordings(), 1000);
             }
             
             setupEventListeners() {
+                document.getElementById('adminModeButton').addEventListener('click', () => {
+                    const authPanel = document.getElementById('authPanel');
+                    authPanel.style.display = authPanel.style.display === 'none' ? 'block' : 'none';
+                });
+
                 document.getElementById('refreshRecordings').addEventListener('click', () => this.fetchRecordings());
-                document.getElementById('startReplay').addEventListener('click', () => this.startReplay());
-                document.getElementById('stopReplay').addEventListener('click', () => this.stopReplay());
-                document.getElementById('increaseSpeed').addEventListener('click', () => this.changeSpeed(0.5));
-                document.getElementById('decreaseSpeed').addEventListener('click', () => this.changeSpeed(-0.5));
                 document.getElementById('startRecording').addEventListener('click', () => this.startRecording());
                 document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
                 document.getElementById('startLiveStream').addEventListener('click', () => this.startLiveStream());
+                
+                document.getElementById('increaseSpeed').addEventListener('click', () => this.changeSpeed(0.5));
+                document.getElementById('decreaseSpeed').addEventListener('click', () => this.changeSpeed(-0.5));
+                
                 document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
-                document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket());
-                document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket());
-                document.getElementById('setTodayButton').addEventListener('click', () => this.setToday());
-                document.getElementById('selectedDay').addEventListener('change', () => this.updateTimeRangeFromDay());
+                document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket(true));
+                document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket(true));
                 
                 // Video playback controls
-                document.getElementById('rewindButton').addEventListener('click', () => this.rewind());
-                document.getElementById('forwardButton').addEventListener('click', () => this.forward());
-                document.getElementById('playButton').addEventListener('click', () => this.playFromCurrent());
-                document.getElementById('stopButton').addEventListener('click', () => this.stopReplay());
+                document.getElementById('rewindButton').addEventListener('click', () => this.seek(-10));
+                document.getElementById('forwardButton').addEventListener('click', () => this.seek(10));
+                document.getElementById('playPauseButton').addEventListener('click', () => this.togglePlayPause());
+                document.getElementById('stopButton').addEventListener('click', () => this.stopStream());
                 
                 // Timeline slider
-                document.getElementById('timelineSlider').addEventListener('input', (e) => this.seekToPosition(e.target.value));
-                document.getElementById('timelineSlider').addEventListener('change', (e) => this.seekToPosition(e.target.value));
+                document.getElementById('timelineSlider').addEventListener('input', (e) => this.onSliderChange(e.target.value));
                 
-                // Set default day and time range to today
-                this.setToday();
-            }
-            
-            formatDateTimeLocal(date) {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                return `${year}-${month}-${day}T${hours}:${minutes}`;
+                // Set default date range to last week
+                const toDate = new Date();
+                const fromDate = new Date();
+                fromDate.setDate(toDate.getDate() - 7);
+                document.getElementById('toDate').value = this.formatDateLocal(toDate);
+                document.getElementById('fromDate').value = this.formatDateLocal(fromDate);
             }
             
             formatDateLocal(date) {
@@ -506,32 +497,23 @@
                 return `${year}-${month}-${day}`;
             }
             
-            setToday() {
-                const now = new Date();
-                document.getElementById('selectedDay').value = this.formatDateLocal(now);
-            }
-            
-            updateTimeRangeFromDay() {
-                const selectedDay = document.getElementById('selectedDay').value;
-                if (selectedDay) {
-                    const startOfDay = new Date(selectedDay + 'T00:00');
-                    const endOfDay = new Date(selectedDay + 'T23:59');
-                    document.getElementById('startTime').value = this.formatDateTimeLocal(startOfDay);
-                    document.getElementById('endTime').value = this.formatDateTimeLocal(endOfDay);
+            connectWebSocket(forceReconnect = false) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN && !forceReconnect) {
+                    return;
                 }
-            }
-            
-            connectWebSocket() {
+                if (this.ws) {
+                    this.ws.close();
+                }
+
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                let wsUrl = `${protocol}//${window.location.host}${window.location.pathname}`;
+                let wsUrl = `${protocol}//${window.location.host}${window.location.pathname.replace('control.html', 'control')}`;
                 
-                // Add token as query parameter if provided
                 const token = document.getElementById('bearerToken').value.trim();
                 if (token) {
                     wsUrl += `?token=${encodeURIComponent(token)}`;
                 }
                 
-                this.updateStatus('Connecting to control interface...', false);
+                this.updateStatus('Connecting...', false);
                 this.logJson({ status: 'Attempting to connect', url: wsUrl.replace(/token=[^&]*/, 'token=***') });
                 
                 this.ws = new WebSocket(wsUrl);
@@ -539,16 +521,8 @@
                 
                 this.ws.onopen = () => {
                     this.isConnected = true;
-                    this.updateStatus('Control interface ready', true);
-                    this.logJson({ status: 'Connected to control WebSocket' });
-                    // Update the video status message to be more informative
-                    document.getElementById('statusMessage').textContent = 'Ready for commands - Start Live Stream or Replay to view video';
-                    document.getElementById('statusMessage').style.display = 'block';
-                    // Fetch recordings and check active recording status on connect
-                    setTimeout(() => {
-                        this.fetchRecordings();
-                        this.checkActiveRecording();
-                    }, 500);
+                    this.updateStatus('Connected', true);
+                    this.logJson({ status: 'Connected to WebSocket' });
                 };
                 
                 this.ws.onmessage = (event) => {
@@ -557,15 +531,12 @@
                         const contentType = view[0];
                         const data = view.slice(1);
                         
-                        if (contentType === 0x00) {
-                            // Video frame with timestamp
+                        if (contentType === 0x00) { // Video frame
                             this.displayFrameWithTimestamp(data);
-                        } else if (contentType === 0x01) {
-                            // JSON response
+                        } else if (contentType === 0x01) { // JSON response
                             const json = new TextDecoder().decode(data);
                             try {
-                                const response = JSON.parse(json);
-                                this.handleJsonResponse(response);
+                                this.handleJsonResponse(JSON.parse(json));
                             } catch (e) {
                                 this.logJson({ error: 'Invalid JSON', data: json });
                             }
@@ -574,229 +545,119 @@
                 };
                 
                 this.ws.onerror = (error) => {
-                    this.logJson({ error: 'WebSocket error', details: error });
+                    this.logJson({ error: 'WebSocket error' });
+                    console.error('WebSocket Error:', error);
                 };
                 
                 this.ws.onclose = () => {
                     this.isConnected = false;
-                    this.updateStatus('Control interface disconnected', false);
+                    this.updateStatus('Disconnected', false);
                     this.logJson({ status: 'Disconnected from WebSocket' });
-                    // Show disconnected message in video area
-                    document.getElementById('statusMessage').textContent = 'Control interface disconnected - Reconnecting...';
-                    document.getElementById('statusMessage').style.display = 'block';
-                    // Attempt to reconnect after 3 seconds
-                    setTimeout(() => this.connectWebSocket(), 3000);
+                    setTimeout(() => this.connectWebSocket(), 5000); // Reconnect after 5s
                 };
             }
-            
-            displayFrame(frameData) {
-                const blob = new Blob([frameData], { type: 'image/jpeg' });
-                const url = URL.createObjectURL(blob);
-                const img = new Image();
-                
-                img.onload = () => {
-                    // Clear status message when displaying video
-                    document.getElementById('statusMessage').style.display = 'none';
-                    
-                    // Resize canvas to match image aspect ratio
-                    const container = document.getElementById('videoContainer');
-                    const maxWidth = container.clientWidth;
-                    const maxHeight = container.clientHeight;
-                    
-                    const scale = Math.min(maxWidth / img.width, maxHeight / img.height);
-                    this.canvas.width = img.width * scale;
-                    this.canvas.height = img.height * scale;
-                    
-                    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
-                    URL.revokeObjectURL(url);
-                };
-                
-                img.src = url;
-            }
-            
-            displayFrameWithTimestamp(data) {
-                // Extract timestamp (8 bytes after content type)
-                if (data.length < 8) {
-                    console.error('Frame data too short to contain timestamp');
-                    return;
-                }
-                
-                // Read timestamp as little-endian 64-bit integer (milliseconds since epoch)
-                const timestampBytes = data.slice(0, 8);
-                const timestampMs = new DataView(timestampBytes.buffer, timestampBytes.byteOffset).getBigInt64(0, true);
-                const timestamp = new Date(Number(timestampMs));
-                
-                // Extract frame data (everything after the timestamp)
-                const frameData = data.slice(8);
-                
-                // Update current timestamp
-                this.currentTimestamp = timestamp;
-                this.updateTimestampDisplay();
-                
-                // Display the frame
-                this.displayFrame(frameData);
-            }
-            
-            updateTimestampDisplay() {
-                const timestampElement = document.getElementById('currentTimestamp');
-                if (this.currentTimestamp) {
-                    timestampElement.textContent = this.currentTimestamp.toLocaleString();
-                    
-                    // Update slider position
-                    if (this.timelineStart && this.timelineEnd) {
-                        const slider = document.getElementById('timelineSlider');
-                        const startMs = this.timelineStart.getTime();
-                        const endMs = this.timelineEnd.getTime();
-                        const currentMs = this.currentTimestamp.getTime();
-                        const position = ((currentMs - startMs) / (endMs - startMs)) * 100;
-                        slider.value = Math.max(0, Math.min(100, position));
-                    }
-                } else {
-                    timestampElement.textContent = 'No timestamp';
-                }
-            }
-            
+
             handleJsonResponse(response) {
                 this.logJson(response);
-                
-                // Handle specific response types (excluding recording commands - now handled by REST API)
-                if (response.text && response.text.includes('Replay started')) {
-                    this.isReplaying = true;
-                    this.updateStopButton();
-                    document.getElementById('startReplay').disabled = true;
-                } else if (response.text && (response.text.includes('replay stopped') || response.text.includes('Replay stopped'))) {
-                    this.isReplaying = false;
-                    this.updateStopButton();
-                    document.getElementById('startReplay').disabled = false;
-                } else if (response.text && response.text.includes('Live stream started')) {
-                    this.isLiveStreaming = true;
-                    this.updateStopButton();
-                    document.getElementById('startLiveStream').disabled = true;
-                } else if (response.text && (response.text.includes('live stream stopped') || response.text.includes('Live stream stopped'))) {
-                    this.isLiveStreaming = false;
-                    this.updateStopButton();
-                    document.getElementById('startLiveStream').disabled = false;
-                } else if (response.text && response.text.includes('replay and live stream stopped')) {
-                    // Both were stopped
-                    this.isReplaying = false;
-                    this.isLiveStreaming = false;
-                    this.updateStopButton();
-                    document.getElementById('startReplay').disabled = false;
-                    document.getElementById('startLiveStream').disabled = false;
+                if (response.text) {
+                    if (response.text.includes('Live stream started')) {
+                        this.streamState = 'live';
+                        this.updatePlayerUI();
+                    } else if (response.text.includes('Replay started')) {
+                        this.streamState = 'replaying';
+                        this.updatePlayerUI();
+                    } else if (response.text.includes('stopped')) {
+                        this.streamState = 'stopped';
+                        this.updatePlayerUI();
+                    }
                 }
             }
-            
-            updateStopButton() {
-                // Enable stop button if either replay or live stream is active
-                const stopButton = document.getElementById('stopReplay');
-                stopButton.disabled = !(this.isReplaying || this.isLiveStreaming);
-            }
-            
-            displayRecordings(recordings) {
-                const container = document.getElementById('recordingsList');
-                container.innerHTML = '';
-                
-                if (recordings.length === 0) {
-                    container.innerHTML = '<div class="info-text">No recordings found in selected time range</div>';
-                    return;
-                }
-                
-                recordings.forEach(recording => {
-                    const item = document.createElement('div');
-                    item.className = 'recording-item';
-                    
-                    const startTime = new Date(recording.start_time).toLocaleString();
-                    const endTime = recording.end_time ? new Date(recording.end_time).toLocaleString() : 'In Progress';
-                    const duration = recording.duration_seconds ? `${recording.duration_seconds}s` : 'N/A';
-                    
-                    item.innerHTML = `
-                        <strong>Session ${recording.id}</strong><br>
-                        Camera: ${recording.camera_id}<br>
-                        Start: ${startTime}<br>
-                        End: ${endTime}<br>
-                        Duration: ${duration}<br>
-                        ${recording.reason ? `Reason: ${recording.reason}<br>` : ''}
-                        Status: <span style="color: ${recording.status === 'active' ? '#4CAF50' : '#FFC107'}">${recording.status}</span>
-                    `;
-                    
-                    item.addEventListener('click', () => {
-                        // Remove previous selection
-                        document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
-                        item.classList.add('selected');
-                        
-                        this.selectedRecording = recording;
-                        
-                        // Update time inputs
-                        document.getElementById('startTime').value = this.formatDateTimeLocal(new Date(recording.start_time));
-                        if (recording.end_time) {
-                            document.getElementById('endTime').value = this.formatDateTimeLocal(new Date(recording.end_time));
-                        }
-                        
-                        // Update timeline slider
-                        this.updateTimelineSlider();
-                    });
-                    
-                    container.appendChild(item);
-                });
-            }
-            
+
             sendCommand(command) {
                 if (!this.isConnected || !this.ws) {
                     this.logJson({ error: 'Not connected to WebSocket' });
                     return;
                 }
-                
                 const json = JSON.stringify(command);
                 this.ws.send(json);
                 this.logJson({ sent: command });
             }
-            
+
+            displayFrameWithTimestamp(data) {
+                if (data.length < 8) return;
+                
+                const timestampMs = new DataView(data.buffer, data.byteOffset).getBigInt64(0, true);
+                this.currentTimestamp = new Date(Number(timestampMs));
+                const frameData = data.slice(8);
+
+                const blob = new Blob([frameData], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                
+                img.onload = () => {
+                    document.getElementById('statusMessage').style.display = 'none';
+                    const container = document.getElementById('videoContainer');
+                    const scale = Math.min(container.clientWidth / img.width, container.clientHeight / img.height);
+                    this.canvas.width = img.width * scale;
+                    this.canvas.height = img.height * scale;
+                    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+                    URL.revokeObjectURL(url);
+                    this.updateTimeline();
+                };
+                img.src = url;
+            }
+
+            updateTimeline() {
+                if (!this.currentTimestamp) return;
+
+                document.getElementById('timelineCurrent').textContent = `Current: ${this.currentTimestamp.toLocaleTimeString()}`;
+
+                // Update slider position for both replay and live modes
+                if (this.timelineStart && this.timelineEnd) {
+                    const startMs = this.timelineStart.getTime();
+                    const endMs = this.timelineEnd.getTime();
+                    const currentMs = this.currentTimestamp.getTime();
+                    const position = ((currentMs - startMs) / (endMs - startMs)) * 100;
+                    
+                    // In live mode, continuously update the timeline end to "now"
+                    if (this.streamState === 'live') {
+                        const now = new Date();
+                        if (now > this.timelineEnd) {
+                            this.timelineEnd = now;
+                            document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
+                            // Recalculate position with new end time
+                            const newEndMs = this.timelineEnd.getTime();
+                            const newPosition = ((currentMs - startMs) / (newEndMs - startMs)) * 100;
+                            document.getElementById('timelineSlider').value = Math.max(0, Math.min(100, newPosition));
+                        } else {
+                            document.getElementById('timelineSlider').value = Math.max(0, Math.min(100, position));
+                        }
+                    } else {
+                        // Replay mode
+                        document.getElementById('timelineSlider').value = Math.max(0, Math.min(100, position));
+                    }
+                }
+            }
+
             async fetchRecordings() {
-                // Always use selected day as time range for fetching
-                const selectedDay = document.getElementById('selectedDay').value;
-                let startTime, endTime;
-                
-                if (selectedDay) {
-                    // Use selected day as full day range
-                    const startOfDay = new Date(selectedDay + 'T00:00');
-                    const endOfDay = new Date(selectedDay + 'T23:59');
-                    startTime = this.formatDateTimeLocal(startOfDay);
-                    endTime = this.formatDateTimeLocal(endOfDay);
-                } else {
-                    // Fall back to manual time range inputs if no day selected
-                    startTime = document.getElementById('startTime').value;
-                    endTime = document.getElementById('endTime').value;
+                const from = document.getElementById('fromDate').value;
+                const to = document.getElementById('toDate').value;
+                if (!from || !to) {
+                    alert('Please select a date range.');
+                    return;
                 }
-                
-                // Build API URL with query parameters
-                const baseUrl = `${window.location.origin}${window.location.pathname}/recordings`;
-                
-                this.logJson({ debug: 'Fetching recordings', baseUrl: baseUrl, selectedDay: selectedDay });
-                const params = new URLSearchParams();
-                
-                if (startTime) {
-                    params.append('from', new Date(startTime).toISOString());
-                }
-                if (endTime) {
-                    params.append('to', new Date(endTime).toISOString());
-                }
-                
-                const url = params.toString() ? `${baseUrl}?${params}` : baseUrl;
+
+                const fromDate = new Date(from + 'T00:00:00');
+                const toDate = new Date(to + 'T23:59:59');
+
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings?from=${fromDate.toISOString()}&to=${toDate.toISOString()}`;
                 
                 try {
                     const headers = {};
                     const token = document.getElementById('bearerToken').value.trim();
-                    if (token) {
-                        headers['Authorization'] = `Bearer ${token}`;
-                    }
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
                     
-                    this.logJson({ request: 'GET', url: url.replace(/Bearer [^&]*/, 'Bearer ***') });
-                    
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        headers: headers
-                    });
-                    
+                    const response = await fetch(url, { headers });
                     const result = await response.json();
                     this.logJson({ response: result });
                     
@@ -808,300 +669,273 @@
                 } catch (error) {
                     this.logJson({ error: 'Network error fetching recordings', details: error.message });
                 }
-                
-                // Also check active recording status when refreshing
-                this.checkActiveRecording();
             }
-            
-            startReplay() {
-                const startTime = document.getElementById('startTime').value;
-                const endTime = document.getElementById('endTime').value;
-                
-                if (!startTime) {
-                    alert('Please select a start time');
+
+            displayRecordings(recordings) {
+                const container = document.getElementById('recordingsList');
+                container.innerHTML = '';
+                if (recordings.length === 0) {
+                    container.innerHTML = '<div class="info-text">No recordings found.</div>';
                     return;
                 }
                 
-                const command = {
+                recordings.forEach(rec => {
+                    const item = document.createElement('div');
+                    item.className = 'recording-item';
+                    const startTime = new Date(rec.start_time).toLocaleString();
+                    const endTime = rec.end_time ? new Date(rec.end_time).toLocaleString() : 'In Progress';
+                    item.innerHTML = `<strong>Session ${rec.id}</strong><br>Start: ${startTime}<br>End: ${endTime}`;
+                    item.addEventListener('click', () => {
+                        this.selectedRecording = rec;
+                        document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
+                        item.classList.add('selected');
+                        this.startReplay(rec);
+                    });
+                    container.appendChild(item);
+                });
+            }
+
+            startReplay(recording) {
+                // Stop any current stream first
+                if (this.streamState === 'live' || this.streamState === 'replaying') {
+                    this.sendCommand({ cmd: 'stop' });
+                }
+                
+                this.timelineStart = new Date(recording.start_time);
+                this.timelineEnd = recording.end_time ? new Date(recording.end_time) : new Date();
+                document.getElementById('timelineStart').textContent = this.timelineStart.toLocaleTimeString();
+                document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
+                document.getElementById('timelineSlider').disabled = false;
+                
+                // Start playing the recording from the beginning
+                this.sendCommand({
                     cmd: 'start',
-                    from: new Date(startTime).toISOString()
-                };
+                    from: recording.start_time,
+                    to: recording.end_time
+                });
                 
-                // Add end time only if provided
-                if (endTime) {
-                    command.to = new Date(endTime).toISOString();
-                }
-                
-                this.sendCommand(command);
+                // Update UI to show we're playing
+                this.streamState = 'replaying';
+                this.updatePlayerUI();
             }
-            
-            stopReplay() {
-                this.sendCommand({ cmd: 'stop' });
-            }
-            
-            async startRecording() {
-                const reason = document.getElementById('recordingReason').value;
-                
-                const url = `${window.location.origin}${window.location.pathname}/recording/start`;
-                const requestBody = {};
-                
-                if (reason.trim()) {
-                    requestBody.reason = reason.trim();
-                }
-                
-                try {
-                    const headers = {
-                        'Content-Type': 'application/json'
-                    };
-                    const token = document.getElementById('bearerToken').value.trim();
-                    if (token) {
-                        headers['Authorization'] = `Bearer ${token}`;
-                    }
-                    
-                    this.logJson({ request: 'POST', url: url, body: requestBody });
-                    
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify(requestBody)
-                    });
-                    
-                    const result = await response.json();
-                    this.logJson({ response: result });
-                    
-                    if (result.status === 'success') {
-                        this.isRecording = true;
-                        document.getElementById('startRecording').disabled = true;
-                        document.getElementById('stopRecording').disabled = false;
-                        this.logJson({ status: 'Recording started successfully' });
-                    } else {
-                        this.logJson({ error: 'Failed to start recording', details: result });
-                    }
-                } catch (error) {
-                    this.logJson({ error: 'Network error starting recording', details: error.message });
-                }
-            }
-            
-            async stopRecording() {
-                const url = `${window.location.origin}${window.location.pathname}/recording/stop`;
-                
-                try {
-                    const headers = {};
-                    const token = document.getElementById('bearerToken').value.trim();
-                    if (token) {
-                        headers['Authorization'] = `Bearer ${token}`;
-                    }
-                    
-                    this.logJson({ request: 'POST', url: url });
-                    
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: headers
-                    });
-                    
-                    const result = await response.json();
-                    this.logJson({ response: result });
-                    
-                    if (result.status === 'success') {
-                        this.isRecording = false;
-                        document.getElementById('startRecording').disabled = false;
-                        document.getElementById('stopRecording').disabled = true;
-                        this.logJson({ status: 'Recording stopped successfully' });
-                        // Auto-refresh recordings list
-                        setTimeout(() => this.fetchRecordings(), 1000);
-                    } else {
-                        this.logJson({ error: 'Failed to stop recording', details: result });
-                    }
-                } catch (error) {
-                    this.logJson({ error: 'Network error stopping recording', details: error.message });
-                }
-            }
-            
-            async checkActiveRecording() {
-                const url = `${window.location.origin}${window.location.pathname}/recording/active`;
-                
-                this.logJson({ debug: 'Checking active recording', url: url });
-                
-                try {
-                    const headers = {};
-                    const token = document.getElementById('bearerToken').value.trim();
-                    if (token) {
-                        headers['Authorization'] = `Bearer ${token}`;
-                    }
-                    
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        headers: headers
-                    });
-                    
-                    if (response.ok) {
-                        const result = await response.json();
-                        this.logJson({ response: result });
-                        
-                        if (result.data && result.data.active === true) {
-                            // Active recording found
-                            this.isRecording = true;
-                            document.getElementById('startRecording').disabled = true;
-                            document.getElementById('stopRecording').disabled = false;
-                            this.logJson({ status: 'Active recording detected', data: result.data });
-                        } else {
-                            // No active recording
-                            this.isRecording = false;
-                            document.getElementById('startRecording').disabled = false;
-                            document.getElementById('stopRecording').disabled = true;
-                            this.logJson({ status: 'No active recording', data: result.data });
-                        }
-                    } else if (response.status === 404) {
-                        // 404 means no active recording (which is expected)
-                        this.isRecording = false;
-                        document.getElementById('startRecording').disabled = false;
-                        document.getElementById('stopRecording').disabled = true;
-                        this.logJson({ status: 'No active recording found' });
-                    } else {
-                        // Other HTTP errors
-                        const result = await response.json();
-                        this.logJson({ error: 'HTTP error checking active recording', status: response.status, details: result });
-                    }
-                } catch (error) {
-                    this.logJson({ error: 'Error checking active recording', details: error.message });
-                }
-            }
-            
+
             startLiveStream() {
                 this.sendCommand({ cmd: 'live' });
-            }
-            
-            
-            clearOutput() {
-                document.getElementById('jsonOutput').textContent = 'Output cleared...';
-            }
-            
-            changeSpeed(delta) {
-                this.currentSpeed = Math.max(0.5, Math.min(5.0, this.currentSpeed + delta));
-                document.getElementById('speedDisplay').textContent = `${this.currentSpeed.toFixed(1)}x`;
+                this.streamState = 'live';
+                this.updatePlayerUI();
                 
-                if (this.isReplaying) {
-                    this.sendCommand({
-                        cmd: 'speed',
-                        speed: this.currentSpeed
-                    });
+                // Set up timeline for live mode (last hour)
+                const now = new Date();
+                this.timelineEnd = now;
+                this.timelineStart = new Date(now.getTime() - (60 * 60 * 1000)); // 1 hour ago
+                document.getElementById('timelineStart').textContent = this.timelineStart.toLocaleTimeString();
+                document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
+                document.getElementById('timelineSlider').disabled = false; // Allow seeking in live mode
+            }
+
+            stopStream() {
+                this.sendCommand({ cmd: 'stop' });
+                this.streamState = 'stopped';
+                this.updatePlayerUI();
+            }
+
+            togglePlayPause() {
+                const button = document.getElementById('playPauseButton');
+                if (this.streamState === 'stopped') {
+                    // Start playing from current position if we have a selected recording
+                    if (this.selectedRecording) {
+                        if (this.currentTimestamp) {
+                            // Continue from current position
+                            this.sendCommand({
+                                cmd: 'start',
+                                from: this.currentTimestamp.toISOString(),
+                                to: this.selectedRecording.end_time
+                            });
+                        } else {
+                            // Start from beginning
+                            this.startReplay(this.selectedRecording);
+                        }
+                        this.streamState = 'replaying';
+                    } else {
+                        // Start live stream
+                        this.startLiveStream();
+                    }
+                    button.innerHTML = '⏸️';
+                } else if (this.streamState === 'live' || this.streamState === 'replaying') {
+                    // Stop the current stream (pause functionality)
+                    this.sendCommand({ cmd: 'stop' });
+                    this.streamState = 'stopped';
+                    button.innerHTML = '▶️';
                 }
             }
-            
-            // New video control methods
-            rewind() {
-                if (!this.currentTimestamp) return;
+
+            seek(seconds) {
+                let baseTime, startTime, endTime;
                 
-                // Go back 5 seconds
-                const newTimestamp = new Date(this.currentTimestamp.getTime() - 5000);
-                this.sendCommand({
-                    cmd: 'goto',
-                    timestamp: newTimestamp.toISOString()
-                });
-            }
-            
-            forward() {
-                if (!this.currentTimestamp) return;
-                
-                // Go forward 5 seconds
-                const newTimestamp = new Date(this.currentTimestamp.getTime() + 5000);
-                this.sendCommand({
-                    cmd: 'goto',
-                    timestamp: newTimestamp.toISOString()
-                });
-            }
-            
-            playFromCurrent() {
-                if (!this.currentTimestamp) {
-                    alert('No current timestamp available. Please select a recording first.');
+                if (this.streamState === 'live') {
+                    // In live mode, extend timeline if seeking back
+                    baseTime = this.currentTimestamp || new Date();
+                    const newTimestamp = new Date(baseTime.getTime() + (seconds * 1000));
+                    
+                    // If seeking back and would go before current timeline start, extend timeline
+                    if (seconds < 0 && newTimestamp < this.timelineStart) {
+                        this.timelineStart = new Date(newTimestamp.getTime() - (30 * 60 * 1000)); // Add 30 more minutes
+                        document.getElementById('timelineStart').textContent = this.timelineStart.toLocaleTimeString();
+                        this.logJson({ message: 'Timeline extended back for live mode' });
+                    }
+                    
+                    this.sendCommand({
+                        cmd: 'goto',
+                        timestamp: newTimestamp.toISOString()
+                    });
                     return;
                 }
                 
-                // Start replay from current timestamp without end time
+                // For replay mode, only allow seeking if we have a selected recording
+                if (!this.selectedRecording) return;
+                
+                baseTime = this.currentTimestamp || new Date(this.selectedRecording.start_time);
+                const newTimestamp = new Date(baseTime.getTime() + (seconds * 1000));
+                
+                // Make sure we don't seek beyond recording bounds
+                startTime = new Date(this.selectedRecording.start_time);
+                endTime = this.selectedRecording.end_time ? new Date(this.selectedRecording.end_time) : new Date();
+                
+                if (newTimestamp < startTime) {
+                    newTimestamp.setTime(startTime.getTime());
+                } else if (newTimestamp > endTime) {
+                    newTimestamp.setTime(endTime.getTime());
+                }
+
                 this.sendCommand({
-                    cmd: 'start',
-                    from: this.currentTimestamp.toISOString()
+                    cmd: 'goto',
+                    timestamp: newTimestamp.toISOString()
                 });
             }
-            
-            seekToPosition(sliderValue) {
+
+            onSliderChange(value) {
                 if (!this.timelineStart || !this.timelineEnd) return;
                 
-                // Calculate timestamp based on slider position
                 const startMs = this.timelineStart.getTime();
                 const endMs = this.timelineEnd.getTime();
-                const totalMs = endMs - startMs;
-                const positionMs = startMs + (totalMs * (sliderValue / 100));
-                const targetTimestamp = new Date(positionMs);
-                
+                const targetMs = startMs + ((endMs - startMs) * (value / 100));
+                const targetTimestamp = new Date(targetMs);
+
+                // In live mode, if seeking to a time in the past, we need actual recorded data
+                if (this.streamState === 'live' && targetTimestamp < new Date()) {
+                    this.logJson({ message: `Seeking to ${targetTimestamp.toLocaleTimeString()} in live mode` });
+                }
+
                 this.sendCommand({
                     cmd: 'goto',
                     timestamp: targetTimestamp.toISOString()
                 });
             }
-            
-            updateTimelineSlider() {
-                const slider = document.getElementById('timelineSlider');
-                const startElement = document.getElementById('timelineStart');
-                const endElement = document.getElementById('timelineEnd');
+
+            changeSpeed(delta) {
+                this.currentSpeed = Math.max(0.5, Math.min(5.0, this.currentSpeed + delta));
+                document.getElementById('speedDisplay').textContent = `${this.currentSpeed.toFixed(1)}x`;
+                this.sendCommand({ cmd: 'speed', speed: this.currentSpeed });
+            }
+
+            async startRecording() {
+                const reason = document.getElementById('recordingReason').value;
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recording/start`;
+                const body = reason.trim() ? { reason: reason.trim() } : {};
                 
-                if (this.selectedRecording && this.selectedRecording.start_time) {
-                    this.timelineStart = new Date(this.selectedRecording.start_time);
-                    this.timelineEnd = this.selectedRecording.end_time ? 
-                        new Date(this.selectedRecording.end_time) : new Date();
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
                     
-                    startElement.textContent = this.timelineStart.toLocaleTimeString();
-                    endElement.textContent = this.timelineEnd.toLocaleTimeString();
+                    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+                    const result = await response.json();
+                    this.logJson({ response: result });
                     
-                    slider.disabled = false;
-                    
-                    // Update slider position based on current timestamp
-                    if (this.currentTimestamp) {
-                        const startMs = this.timelineStart.getTime();
-                        const endMs = this.timelineEnd.getTime();
-                        const currentMs = this.currentTimestamp.getTime();
-                        const position = ((currentMs - startMs) / (endMs - startMs)) * 100;
-                        slider.value = Math.max(0, Math.min(100, position));
+                    if (result.status === 'success') {
+                        this.isRecording = true;
+                        this.updateRecordingUI();
                     }
-                } else {
-                    startElement.textContent = '00:00:00';
-                    endElement.textContent = '00:00:00';
-                    slider.disabled = true;
-                    slider.value = 0;
-                    this.timelineStart = null;
-                    this.timelineEnd = null;
+                } catch (error) {
+                    this.logJson({ error: 'Network error starting recording', details: error.message });
+                }
+            }
+
+            async stopRecording() {
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recording/stop`;
+                try {
+                    const headers = {};
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+                    
+                    const response = await fetch(url, { method: 'POST', headers });
+                    const result = await response.json();
+                    this.logJson({ response: result });
+
+                    if (result.status === 'success') {
+                        this.isRecording = false;
+                        this.updateRecordingUI();
+                        setTimeout(() => this.fetchRecordings(), 1000);
+                    }
+                } catch (error) {
+                    this.logJson({ error: 'Network error stopping recording', details: error.message });
+                }
+            }
+
+            async checkActiveRecording() {
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recording/active`;
+                try {
+                    const headers = {};
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+                    
+                    const response = await fetch(url, { headers });
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.isRecording = result.data && result.data.active === true;
+                        this.updateRecordingUI();
+                    }
+                } catch (error) {
+                    // Ignore, likely 404 if not active
+                }
+            }
+
+            updateRecordingUI() {
+                document.getElementById('startRecording').disabled = this.isRecording;
+                document.getElementById('stopRecording').disabled = !this.isRecording;
+            }
+
+            updatePlayerUI() {
+                const isPlaying = this.streamState === 'replaying' || this.streamState === 'live';
+                document.getElementById('playPauseButton').innerHTML = isPlaying ? '⏸️' : '▶️';
+                document.getElementById('stopButton').disabled = this.streamState === 'stopped';
+                
+                // Update timeline display
+                if (this.timelineStart) {
+                    document.getElementById('timelineStart').textContent = this.timelineStart.toLocaleTimeString();
+                }
+                if (this.timelineEnd) {
+                    document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
                 }
             }
             
             updateStatus(text, connected) {
-                const indicator = document.getElementById('connectionStatus');
-                const textElement = document.getElementById('connectionText');
-                
-                indicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
-                textElement.textContent = text;
-                
-                if (!connected) {
-                    document.getElementById('statusMessage').style.display = 'block';
-                    document.getElementById('statusMessage').textContent = text;
-                }
+                document.getElementById('connectionStatus').className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+                document.getElementById('connectionText').textContent = text;
             }
             
             logJson(obj) {
                 const output = document.getElementById('jsonOutput');
                 const timestamp = new Date().toLocaleTimeString();
-                const formatted = JSON.stringify(obj, null, 2);
-                
-                output.textContent = `[${timestamp}] ${formatted}\n${output.textContent}`;
-                
-                // Limit output to last 50 entries
-                const lines = output.textContent.split('\n');
-                if (lines.length > 100) {
-                    output.textContent = lines.slice(0, 100).join('\n');
-                }
+                output.textContent = `[${timestamp}] ${JSON.stringify(obj, null, 2)}
+${output.textContent}`;
+            }
+
+            clearOutput() {
+                document.getElementById('jsonOutput').textContent = '';
             }
         }
         
-        // Initialize when page loads
         window.addEventListener('DOMContentLoaded', () => {
             new CameraControl();
         });

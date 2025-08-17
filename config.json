@@ -6,8 +6,8 @@
     "enabled": true,
     "keep_alive_secs": 60,
     "max_packet_size": 268435456,
-    "publish_interval_secs": 1,
-    "publish_picture_arrival": true,
+    "publish_interval_secs": 5,
+    "publish_picture_arrival": false,
     "qos": 0,
     "retain": false
   },
