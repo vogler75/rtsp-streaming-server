@@ -242,6 +242,30 @@
             font-size: 14px;
         }
 
+        .preview-controls {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 8px;
+            border-radius: 4px;
+        }
+
+        .stream-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .stream-container iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
         .camera-info {
             padding: 15px;
         }
@@ -1120,6 +1144,14 @@
                 frameElement.textContent = camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
             }
             
+            // Check if embedded stream needs to be stopped due to camera going offline
+            const checkbox = document.getElementById(`stream-checkbox-${camera.id}`);
+            if (checkbox && checkbox.checked && !isOnline) {
+                showAlert(`Camera ${camera.id} went offline - stopping embedded stream`, 'warning');
+                checkbox.checked = false;
+                toggleEmbeddedStream(camera.id, camera.path, requiresToken);
+            }
+            
             // Update recording status (keep existing function)
             updateRecordingStatus(camera.id, camera.path, requiresToken);
         }
@@ -1230,8 +1262,17 @@
                         <span id="status-${camera.id}">${isOnline ? 'Online' : 'Offline'}</span>
                     </div>
                 </div>
-                <div class="camera-preview" onclick="toggleStreamPreview('${camera.id}', '${camera.path}')">
-                    <div class="no-preview">📷 ${camera.path}</div>
+                <div class="camera-preview">
+                    <div class="preview-controls">
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: white; cursor: pointer;">
+                            <input type="checkbox" id="stream-checkbox-${camera.id}" onchange="toggleEmbeddedStream('${camera.id}', '${camera.path}', ${requiresToken})" style="margin: 0;">
+                            📺 Live Stream
+                        </label>
+                    </div>
+                    <div id="stream-container-${camera.id}" class="stream-container" style="display: none;">
+                        <!-- Embedded stream iframe will be inserted here -->
+                    </div>
+                    <div id="no-preview-${camera.id}" class="no-preview" onclick="toggleStreamPreview('${camera.id}', '${camera.path}')">📷 ${camera.path}</div>
                 </div>
                 <div class="camera-info">
                     <div class="info-row">
@@ -1315,6 +1356,51 @@
             }
             
             window.open(url, '_blank');
+        }
+
+        function toggleEmbeddedStream(cameraId, cameraPath, requiresToken) {
+            const checkbox = document.getElementById(`stream-checkbox-${cameraId}`);
+            const streamContainer = document.getElementById(`stream-container-${cameraId}`);
+            const noPreview = document.getElementById(`no-preview-${cameraId}`);
+            
+            if (checkbox.checked) {
+                // Start embedded stream
+                let streamUrl = `${basePath}${cameraPath}/stream`;
+                
+                if (requiresToken) {
+                    const tokenInput = document.getElementById(`token-${cameraId}`);
+                    if (tokenInput && tokenInput.value.trim()) {
+                        const token = tokenInput.value.trim();
+                        streamUrl += `?token=${encodeURIComponent(token)}`;
+                    } else {
+                        showAlert('Please enter a token for this camera first', 'error');
+                        checkbox.checked = false;
+                        return;
+                    }
+                }
+                
+                // Create iframe for embedded stream
+                const iframe = document.createElement('iframe');
+                iframe.src = streamUrl;
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = 'none';
+                iframe.allowFullscreen = true;
+                
+                streamContainer.innerHTML = '';
+                streamContainer.appendChild(iframe);
+                streamContainer.style.display = 'block';
+                noPreview.style.display = 'none';
+                
+                console.log(`Started embedded stream for ${cameraId}: ${streamUrl}`);
+            } else {
+                // Stop embedded stream
+                streamContainer.innerHTML = '';
+                streamContainer.style.display = 'none';
+                noPreview.style.display = 'flex';
+                
+                console.log(`Stopped embedded stream for ${cameraId}`);
+            }
         }
 
         function toggleStreamPreview(cameraId, cameraPath) {
