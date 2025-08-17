@@ -1,7 +1,11 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error, trace};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::fmt::format::{Writer, FormatEvent, FormatFields};
+use tracing_subscriber::registry::LookupSpan;
 use std::fs::File;
 use std::io::BufReader;
 use axum::response::IntoResponse;
@@ -26,6 +30,48 @@ mod utils;
 
 use config::Config;
 use errors::{Result, StreamError};
+
+// Custom formatter to remove "rtsp_streaming_server::" prefix and pad to 80 chars
+struct CustomFormatter;
+
+impl<S, N> FormatEvent<S, N> for CustomFormatter
+where
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let metadata = event.metadata();
+        
+        // Format timestamp
+        write!(writer, "{} ", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.6fZ"))?;
+        
+        // Format level with color
+        let level = metadata.level();
+        let level_str = match *level {
+            tracing::Level::ERROR => "\x1b[31mERROR\x1b[0m", // Red
+            tracing::Level::WARN => "\x1b[33m WARN\x1b[0m",  // Yellow
+            tracing::Level::INFO => "\x1b[32m INFO\x1b[0m",  // Green
+            tracing::Level::DEBUG => "\x1b[36mDEBUG\x1b[0m", // Cyan
+            tracing::Level::TRACE => "\x1b[37mTRACE\x1b[0m", // White
+        };
+        write!(writer, "{} ", level_str)?;
+        
+        // Format target with prefix removal and padding
+        let target = metadata.target();
+        let clean_target = target.strip_prefix("rtsp_streaming_server::").unwrap_or(target);
+        let clean_target = if clean_target == "rtsp_streaming_server" { "main" } else { clean_target };
+        write!(writer, "{:<40}: ", clean_target)?;
+        
+        // Format the message
+        ctx.format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
 use video_stream::VideoStream;
 use websocket::websocket_handler;
 use mqtt::{MqttPublisher, MqttHandle};
@@ -39,6 +85,10 @@ struct Args {
     /// Path to the configuration file
     #[arg(short, long, default_value = "config.toml")]
     config: String,
+    
+    /// Enable verbose logging
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 #[derive(Clone)]
@@ -57,14 +107,27 @@ struct AppState {
     start_time: std::time::Instant,
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter("rtsp_streaming_server=debug,info")
-        .init();
-
-    // Parse command line arguments
+    // Parse command line arguments first to get verbose flag
     let args = Args::parse();
+    
+    // Configure logging based on verbose flag
+    let log_level = if args.verbose {
+        "rtsp_streaming_server=trace,debug,info"
+    } else {
+        "rtsp_streaming_server=info"
+    };
+    
+    // Custom formatter to pad target names and remove prefix
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .event_format(CustomFormatter)
+        .fmt_fields(tracing_subscriber::fmt::format::DefaultFields::new());
+    
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(log_level))
+        .with(fmt_layer)
+        .init();
 
     let config = match Config::load(&args.config) {
         Ok(cfg) => {
@@ -474,7 +537,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/status", axum::routing::get(move || {
         let state = api_state.clone();
         async move {
-            info!("[API] /api/status endpoint called");
+            trace!("[API] /api/status endpoint called");
             let uptime_secs = state.start_time.elapsed().as_secs();
             let camera_streams = state.camera_streams.read().await;
             let total_cameras = camera_streams.len();
@@ -497,7 +560,7 @@ async fn main() -> Result<()> {
                 "total_cameras": total_cameras
             });
             
-            info!("[API] /api/status returning response with uptime={}, clients={}, cameras={}", 
+            trace!("[API] /api/status returning response with uptime={}, clients={}, cameras={}", 
                   uptime_secs, total_clients, total_cameras);
             Json(ApiResponse::success(status)).into_response()
         }
@@ -507,9 +570,9 @@ async fn main() -> Result<()> {
     app = app.route("/api/cameras", axum::routing::get(move || {
         let state = api_state2.clone();
         async move {
-            info!("[API] /api/cameras endpoint called");
+            trace!("[API] /api/cameras endpoint called");
             let camera_streams = state.camera_streams.read().await;
-            info!("[API] Got camera_streams lock, {} cameras found", camera_streams.len());
+            trace!("[API] Got camera_streams lock, {} cameras found", camera_streams.len());
             
             let mut cameras = Vec::new();
             
@@ -562,7 +625,7 @@ async fn main() -> Result<()> {
                 "count": cameras.len()
             });
             
-            info!("[API] /api/cameras returning {} cameras", cameras.len());
+            trace!("[API] /api/cameras returning {} cameras", cameras.len());
             Json(ApiResponse::success(response)).into_response()
         }
     }));
@@ -627,9 +690,8 @@ async fn serve_test_with_mode(is_full_mode: bool) -> axum::response::Html<String
 
 
 async fn dashboard_handler() -> axum::response::Html<String> {
-    info!("[DASHBOARD] Dashboard HTML requested");
+    trace!("Dashboard HTML requested");
     let html = include_str!("../static/dashboard.html").to_string();
-    info!("[DASHBOARD] Returning dashboard HTML ({} bytes)", html.len());
     axum::response::Html(html)
 }
 
@@ -643,6 +705,10 @@ async fn camera_live_handler(
     mqtt_handle: Option<MqttHandle>,
     camera_config: config::CameraConfig,
 ) -> axum::response::Response {
+    // Trace-level logging for request tracking
+    let current_connections = frame_sender.receiver_count();
+    trace!("Live handler called for camera {} (connections: {}), WS upgrade: {}", 
+          camera_id, current_connections, ws.is_some());
     match ws {
         Some(ws_upgrade) => {
             // Check token authentication before upgrading WebSocket
@@ -662,13 +728,13 @@ async fn camera_live_handler(
             }
             
             if let Some(connect_info) = addr {
-                debug!("Starting live WebSocket handler for camera {} from {}", camera_id, connect_info.0);
+                trace!("Starting live WebSocket handler for camera {} from {}", camera_id, connect_info.0);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             } else {
                 // Fallback with unknown IP
                 let fallback_addr = "127.0.0.1:0".parse().unwrap();
                 let connect_info = axum::extract::ConnectInfo(fallback_addr);
-                debug!("Starting live WebSocket handler for camera {} (fallback addr)", camera_id);
+                trace!("Starting live WebSocket handler for camera {} (fallback addr)", camera_id);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             }
         },
@@ -707,13 +773,13 @@ async fn camera_stream_handler(
             }
             
             if let Some(connect_info) = addr {
-                debug!("Starting stream WebSocket handler for camera {} from {}", camera_id, connect_info.0);
+                trace!("Starting stream WebSocket handler for camera {} from {}", camera_id, connect_info.0);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             } else {
                 // Fallback with unknown IP
                 let fallback_addr = "127.0.0.1:0".parse().unwrap();
                 let connect_info = axum::extract::ConnectInfo(fallback_addr);
-                debug!("Starting stream WebSocket handler for camera {} (fallback addr)", camera_id);
+                trace!("Starting stream WebSocket handler for camera {} (fallback addr)", camera_id);
                 websocket_handler(ws_upgrade, State(frame_sender), connect_info, camera_id, mqtt_handle, camera_config).await
             }
         },
@@ -789,16 +855,16 @@ async fn camera_control_handler(
             }
             
             let client_id = uuid::Uuid::new_v4().to_string();
-            info!("[CONTROL] Starting control WebSocket upgrade for camera {} with client {}", camera_id, client_id);
+            trace!("[CONTROL] Starting control WebSocket upgrade for camera {} with client {}", camera_id, client_id);
             let camera_id_clone = camera_id.clone();
             let client_id_clone = client_id.clone();
             let socket = ws_upgrade.on_upgrade(move |socket| async move {
-                info!("[CONTROL] WebSocket upgraded for camera {} client {}", camera_id_clone, client_id_clone);
+                trace!("[CONTROL] WebSocket upgraded for camera {} client {}", camera_id_clone, client_id_clone);
                 // Spawn control handler as separate task to prevent blocking
                 let camera_id_task = camera_id.clone();
                 let client_id_task = client_id.clone();
                 let _handle = tokio::spawn(async move {
-                    info!("[CONTROL] Spawned control handler task for camera {} client {}", camera_id_task, client_id_task);
+                    trace!("[CONTROL] Spawned control handler task for camera {} client {}", camera_id_task, client_id_task);
                     handle_control_websocket(
                         socket,
                         camera_id,
@@ -806,9 +872,9 @@ async fn camera_control_handler(
                         recording_manager.unwrap(),
                         frame_sender,
                     ).await;
-                    info!("[CONTROL] Control handler task completed for camera {} client {}", camera_id_task, client_id_task);
+                    trace!("[CONTROL] Control handler task completed for camera {} client {}", camera_id_task, client_id_task);
                 });
-                info!("[CONTROL] Control handler spawned, waiting for completion");
+                trace!("[CONTROL] Control handler spawned, waiting for completion");
             });
             socket.into_response()
         },
@@ -1102,10 +1168,31 @@ async fn api_get_recording_size(
 }
 
 async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!("HTTP server listening on http://{}", addr);
+    use socket2::{Domain, Protocol, Socket, Type};
+    use std::net::SocketAddr;
     
-    // Configure server with higher connection limits
+    let addr: SocketAddr = addr.parse()?;
+    
+    // Create socket with custom settings for better connection handling
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    
+    // Set socket options for better performance
+    socket.set_reuse_address(true)?;
+    socket.set_nodelay(true)?;
+    socket.set_keepalive(true)?;
+    
+    // Set socket to non-blocking mode for Tokio compatibility
+    socket.set_nonblocking(true)?;
+    
+    // Set a larger backlog for pending connections
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?; // Increased from default (usually 128)
+    
+    let std_listener: std::net::TcpListener = socket.into();
+    let listener = tokio::net::TcpListener::from_std(std_listener)?;
+    info!("HTTP server listening on http://{} with enhanced socket configuration", addr);
+    
+    // Configure server with higher connection limits and better performance
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             tokio::signal::ctrl_c().await.expect("failed to listen for ctrl+c");

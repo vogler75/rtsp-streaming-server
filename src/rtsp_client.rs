@@ -3,7 +3,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{sleep, Duration};
-use tracing::{info, error, debug, warn};
+use tracing::{info, error, warn, trace};
 use bytes::Bytes;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -710,10 +710,10 @@ impl RtspClient {
                                 
                                 if self.debug_capture {
                                     if self.capture_framerate > 0 {
-                                        debug!("[{}] Capturing: {:2}/s Target: {:2}/s", 
+                                        trace!("[{}] Capturing: {:2}/s Target: {:2}/s", 
                                                self.camera_id, frame_count, self.capture_framerate);
                                     } else {
-                                        debug!("[{}] Capturing: {:2}/s", self.camera_id, frame_count);
+                                        trace!("[{}] Capturing: {:2}/s", self.camera_id, frame_count);
                                     }
                                 }
                                 frame_count = 0;

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::{RwLock, broadcast};
 use chrono::{DateTime, Utc};
-use tracing::{info, error, debug, warn};
+use tracing::{info, error, warn, trace};
 use bytes::Bytes;
 
 use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery};
@@ -148,7 +148,7 @@ impl RecordingManager {
                         drop(active_recordings_guard);
 
                         if !is_active {
-                            debug!("Recording stopped for camera '{}', ending task", camera_id);
+                            trace!("Recording stopped for camera '{}', ending task", camera_id);
                             break;
                         }
 

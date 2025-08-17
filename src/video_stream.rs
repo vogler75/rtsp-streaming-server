@@ -33,7 +33,7 @@ impl VideoStream {
         // Use camera-specific transcoding config if available, otherwise use default
         let transcoding = camera_config.transcoding_override.as_ref().unwrap_or(&default_transcoding);
         
-        let channel_buffer_size = transcoding.channel_buffer_size.unwrap_or(1);
+        let channel_buffer_size = transcoding.channel_buffer_size.unwrap_or(1024);
         info!("Creating video stream for camera '{}' on path '{}' with buffer size: {} frames", 
               camera_id, camera_config.path, channel_buffer_size);
         

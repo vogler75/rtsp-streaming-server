@@ -146,7 +146,7 @@ impl Default for Config {
                 output_format: "mjpeg".to_string(),
                 capture_framerate: 30,
                 output_framerate: None,
-                channel_buffer_size: Some(1),
+                channel_buffer_size: Some(1024),
                 debug_capture: Some(true),
                 debug_duplicate_frames: Some(false),
             },

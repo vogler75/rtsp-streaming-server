@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize, Deserializer};
 use chrono::{DateTime, Utc};
-use tracing::{info, error, debug};
+use tracing::{info, error, trace};
 use tokio::sync::broadcast;
 use bytes::Bytes;
 use axum::extract::ws::{WebSocket, Message};
@@ -260,11 +260,11 @@ impl ControlHandler {
     }
 
     pub async fn handle_websocket(&mut self, socket: WebSocket) {
-        info!("[CONTROL] handle_websocket starting for camera '{}' client '{}'", self.camera_id, self.client_id);
+        trace!("[CONTROL] handle_websocket starting for camera '{}' client '{}'", self.camera_id, self.client_id);
         let (sender, mut receiver) = socket.split();
-        info!("[CONTROL] WebSocket split completed for camera '{}' client '{}'", self.camera_id, self.client_id);
+        trace!("[CONTROL] WebSocket split completed for camera '{}' client '{}'", self.camera_id, self.client_id);
         let sender = Arc::new(tokio::sync::Mutex::new(sender));
-        info!("[CONTROL] WebSocket sender wrapped in Arc<Mutex> for camera '{}' client '{}'", self.camera_id, self.client_id);
+        trace!("[CONTROL] WebSocket sender wrapped in Arc<Mutex> for camera '{}' client '{}'", self.camera_id, self.client_id);
         info!("Control WebSocket connected for camera '{}' client '{}'", self.camera_id, self.client_id);
 
         // Create a channel to signal cleanup when connection closes
@@ -283,7 +283,7 @@ impl ControlHandler {
             while let Some(msg) = receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
-                        info!("[CONTROL-CMD] Received control command: {}", text);
+                        trace!("[CONTROL-CMD] Received control command: {}", text);
                         
                         match serde_json::from_str::<ControlCommand>(&text) {
                             Ok(command) => {
@@ -345,7 +345,7 @@ impl ControlHandler {
             std::time::Duration::from_secs(5),
             recv_task
         ).await {
-            Ok(_) => debug!("Control receive task completed normally"),
+            Ok(_) => trace!("Control receive task completed normally"),
             Err(_) => {
                 error!("Timeout waiting for control receive task to complete");
             }
@@ -561,14 +561,14 @@ impl ControlHandler {
         let (stop_sender, mut stop_receiver) = broadcast::channel::<()>(1);
         
         let subscriber_count_before = frame_sender.receiver_count();
-        info!("[CONTROL-LIVE] Subscriber count before subscribe: {} for camera", subscriber_count_before);
+        trace!("[CONTROL-LIVE] Subscriber count before subscribe: {} for camera", subscriber_count_before);
         
-        info!("[CONTROL-LIVE] About to call frame_sender.subscribe()...");
+        trace!("[CONTROL-LIVE] About to call frame_sender.subscribe()...");
         let mut frame_receiver = frame_sender.subscribe();
-        info!("[CONTROL-LIVE] Successfully subscribed to frame_sender");
+        trace!("[CONTROL-LIVE] Successfully subscribed to frame_sender");
         
         let subscriber_count_after = frame_sender.receiver_count();
-        info!("[CONTROL-LIVE] Subscriber count after subscribe: {} (delta: +{})", 
+        trace!("[CONTROL-LIVE] Subscriber count after subscribe: {} (delta: +{})", 
              subscriber_count_after, subscriber_count_after.saturating_sub(subscriber_count_before));
 
         // Start the live streaming task
@@ -618,7 +618,7 @@ impl ControlHandler {
                                     }
                                     Err(_) => {
                                         // Timeout - client is too slow, skip this frame
-                                        debug!("Skipped frame due to slow client");
+                                        trace!("Skipped frame due to slow client");
                                         continue;
                                     }
                                 }
@@ -711,9 +711,9 @@ pub async fn handle_control_websocket(
     recording_manager: Arc<RecordingManager>,
     frame_sender: Arc<broadcast::Sender<Bytes>>,
 ) {
-    info!("[CONTROL] handle_control_websocket started for camera {} client {}", camera_id, client_id);
+    trace!("[CONTROL] handle_control_websocket started for camera {} client {}", camera_id, client_id);
     let mut handler = ControlHandler::new(camera_id.clone(), client_id.clone(), recording_manager, frame_sender);
-    info!("[CONTROL] ControlHandler created for camera {} client {}", camera_id, client_id);
+    trace!("[CONTROL] ControlHandler created for camera {} client {}", camera_id, client_id);
     handler.handle_websocket(socket).await;
-    info!("[CONTROL] handle_control_websocket completed for camera {} client {}", camera_id, client_id);
+    trace!("[CONTROL] handle_control_websocket completed for camera {} client {}", camera_id, client_id);
 }
