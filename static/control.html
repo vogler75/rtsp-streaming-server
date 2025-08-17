@@ -360,15 +360,11 @@
                                 <!-- Slider -->
                                 <input type="range" id="timelineSlider" min="0" max="100" value="0" disabled style="width: 100%; margin-bottom: 8px;">
                                 
-                                <!-- From/To times row -->
-                                <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 6px;">
+                                <!-- From/Current/To times row -->
+                                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                                     <span id="timelineStart" class="timestamp-display" style="font-size: 10px; color: rgba(255,255,255,0.7);">00:00:00</span>
+                                    <span id="timelineCurrent" class="timestamp-display" style="font-weight: bold; font-size: 11px; color: white;">Current: 00:00:00</span>
                                     <span id="timelineEnd" class="timestamp-display" style="font-size: 10px; color: rgba(255,255,255,0.7);">00:00:00</span>
-                                </div>
-                                
-                                <!-- Current time row (separate block) -->
-                                <div style="text-align: center; width: 100%; clear: both;">
-                                    <span id="timelineCurrent" class="timestamp-display" style="font-weight: bold; font-size: 11px; color: white; display: block;">Current: 00:00:00</span>
                                 </div>
                             </div>
                             <div class="video-main-controls">
