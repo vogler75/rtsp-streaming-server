@@ -82,7 +82,7 @@ use database::SqliteDatabase;
 use recording::{RecordingManager, RecordingConfig};
 use control::handle_control_websocket;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the configuration file
@@ -685,6 +685,23 @@ async fn main() -> Result<()> {
         let state = admin_state4.clone();
         async move {
             api_delete_camera(headers, path, state).await
+        }
+    }));
+
+    // Server configuration management API endpoints
+    let args_get = args.clone();
+    app = app.route("/api/admin/config", axum::routing::get(move |headers: axum::http::HeaderMap| {
+        let args = args_get.clone();
+        async move {
+            api_get_config(headers, args).await
+        }
+    }));
+
+    let args_put = args.clone();
+    app = app.route("/api/admin/config", axum::routing::put(move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
+        let args = args_put.clone();
+        async move {
+            api_update_config(headers, body, args).await
         }
     }));
     
@@ -1614,6 +1631,127 @@ async fn api_delete_camera(
         "message": "Camera deleted successfully",
         "camera_id": camera_id
     }))).into_response()
+}
+
+async fn api_get_config(
+    headers: axum::http::HeaderMap,
+    args: Args,
+) -> axum::response::Response {
+    // Check admin token from app state would be better, but for now check against loaded config
+    let config_path = &args.config;
+    
+    // Load current config to get admin token for validation
+    let current_config = match config::Config::load(config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                   Json(ApiResponse::<()>::error(&format!("Failed to load config: {}", e), 500)))
+                  .into_response();
+        }
+    };
+    
+    // Check admin token
+    if !check_admin_token(&headers, &current_config.server.admin_token) {
+        return (axum::http::StatusCode::UNAUTHORIZED,
+                Json(ApiResponse::<()>::error("Unauthorized", 401)))
+               .into_response();
+    }
+    
+    // Read config file directly as JSON
+    match std::fs::read_to_string(config_path) {
+        Ok(content) => {
+            if config_path.ends_with(".json") {
+                match serde_json::from_str::<serde_json::Value>(&content) {
+                    Ok(json_value) => Json(ApiResponse::success(json_value)).into_response(),
+                    Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                              Json(ApiResponse::<()>::error(&format!("Failed to parse config JSON: {}", e), 500)))
+                             .into_response()
+                }
+            } else {
+                // For TOML configs, convert to JSON
+                match toml::from_str::<serde_json::Value>(&content) {
+                    Ok(toml_value) => Json(ApiResponse::success(toml_value)).into_response(),
+                    Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                              Json(ApiResponse::<()>::error(&format!("Failed to parse config TOML: {}", e), 500)))
+                             .into_response()
+                }
+            }
+        }
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                  Json(ApiResponse::<()>::error(&format!("Failed to read config file: {}", e), 500)))
+                 .into_response()
+    }
+}
+
+async fn api_update_config(
+    headers: axum::http::HeaderMap,
+    body: axum::extract::Json<serde_json::Value>,
+    args: Args,
+) -> axum::response::Response {
+    let config_path = &args.config;
+    
+    // Load current config to get admin token for validation
+    let current_config = match config::Config::load(config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                   Json(ApiResponse::<()>::error(&format!("Failed to load config: {}", e), 500)))
+                  .into_response();
+        }
+    };
+    
+    // Check admin token
+    if !check_admin_token(&headers, &current_config.server.admin_token) {
+        return (axum::http::StatusCode::UNAUTHORIZED,
+                Json(ApiResponse::<()>::error("Unauthorized", 401)))
+               .into_response();
+    }
+    
+    // Validate the new config by trying to deserialize it
+    match serde_json::from_value::<config::Config>(body.0.clone()) {
+        Ok(_) => {
+            // Config is valid, write it to file
+            let content = if config_path.ends_with(".json") {
+                match serde_json::to_string_pretty(&body.0) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        return (axum::http::StatusCode::BAD_REQUEST,
+                               Json(ApiResponse::<()>::error(&format!("Failed to serialize JSON: {}", e), 400)))
+                              .into_response();
+                    }
+                }
+            } else {
+                match toml::to_string_pretty(&body.0) {
+                    Ok(toml) => toml,
+                    Err(e) => {
+                        return (axum::http::StatusCode::BAD_REQUEST,
+                               Json(ApiResponse::<()>::error(&format!("Failed to serialize TOML: {}", e), 400)))
+                              .into_response();
+                    }
+                }
+            };
+            
+            match std::fs::write(config_path, content) {
+                Ok(_) => {
+                    info!("Server configuration updated successfully");
+                    Json(ApiResponse::success(serde_json::json!({
+                        "message": "Configuration updated successfully",
+                        "note": "Server restart may be required for some changes to take effect"
+                    }))).into_response()
+                }
+                Err(e) => {
+                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                     Json(ApiResponse::<()>::error(&format!("Failed to write config file: {}", e), 500)))
+                    .into_response()
+                }
+            }
+        }
+        Err(e) => {
+            (axum::http::StatusCode::BAD_REQUEST,
+             Json(ApiResponse::<()>::error(&format!("Invalid configuration: {}", e), 400)))
+            .into_response()
+        }
+    }
 }
 
 async fn admin_page() -> axum::response::Response {

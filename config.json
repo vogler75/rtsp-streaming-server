@@ -1,40 +1,40 @@
 {
+  "mqtt": {
+    "base_topic": "Videoserver/2",
+    "broker_url": "mqtt://192.168.1.4:1883",
+    "client_id": "videoserver-02",
+    "enabled": true,
+    "keep_alive_secs": 60,
+    "max_packet_size": 268435456,
+    "publish_interval_secs": 1,
+    "publish_picture_arrival": true,
+    "qos": 0,
+    "retain": false
+  },
+  "recording": {
+    "cleanup_interval_hours": 1,
+    "database_path": "recordings",
+    "enabled": true,
+    "max_frame_size": 10485760,
+    "max_recording_age": "7d"
+  },
   "server": {
+    "admin_token": "test",
+    "cors_allow_origin": "*",
     "host": "0.0.0.0",
     "port": 8080,
-    "cors_allow_origin": "*",
-    "admin_token": "test",
     "tls": {
-      "enabled": false,
       "cert_path": "certs/server.crt",
+      "enabled": false,
       "key_path": "certs/server.key"
     }
   },
-  "mqtt": {
-    "enabled": true,
-    "broker_url": "mqtt://192.168.1.4:1883",
-    "client_id": "videoserver-02",
-    "base_topic": "Videoserver/2",
-    "qos": 0,
-    "retain": false,
-    "keep_alive_secs": 60,
-    "publish_interval_secs": 1,
-    "publish_picture_arrival": true,
-    "max_packet_size": 268435456
-  },
-  "recording": {
-    "enabled": true,
-    "database_path": "recordings",
-    "max_frame_size": 10485760,
-    "max_recording_age": "1h",
-    "cleanup_interval_hours": 1
-  },
   "transcoding": {
-    "output_format": "mjpeg",
     "capture_framerate": 5,
-    "output_framerate": 0,
     "channel_buffer_size": 50,
     "debug_capture": false,
-    "debug_duplicate_frames": false
+    "debug_duplicate_frames": false,
+    "output_format": "mjpeg",
+    "output_framerate": 0
   }
 }

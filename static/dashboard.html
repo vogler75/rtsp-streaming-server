@@ -97,6 +97,10 @@
             background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
         }
 
+        button.config-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
         button.delete-btn {
             background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
         }
@@ -524,6 +528,7 @@
             <div class="admin-section">
                 <button class="admin-btn" onclick="showAdminAuth()">🔐 Admin Mode</button>
                 <button class="add-btn" onclick="showAddCamera()" style="display:none" id="addCameraBtn">➕ Add Camera</button>
+                <button class="config-btn" onclick="showServerConfig()" style="display:none" id="serverConfigBtn">⚙️ Server Config</button>
             </div>
         </div>
 
@@ -746,6 +751,33 @@
         </div>
     </div>
 
+    <!-- Server Config Modal -->
+    <div id="serverConfigModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2>Server Configuration</h2>
+                <button class="close-button" onclick="closeServerConfigModal()">✕</button>
+            </div>
+            
+            <div style="margin: 20px 0;">
+                <p style="color: #ddd; margin-bottom: 15px;">
+                    Edit the server configuration directly as JSON. Changes will be saved to the config file.
+                    <strong>Note:</strong> Some changes may require a server restart to take effect.
+                </p>
+                
+                <textarea id="serverConfigEditor" 
+                          style="width: 100%; height: 400px; background: #1a1a1a; color: #f0f0f0; border: 1px solid #444; border-radius: 8px; padding: 15px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.4; resize: vertical;"
+                          placeholder="Loading configuration..."></textarea>
+                
+                <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="resetServerConfig()" style="background: #666;">Reset</button>
+                    <button onclick="validateServerConfig()" style="background: #f39c12;">Validate</button>
+                    <button onclick="saveServerConfig()" style="background: #27ae60;">Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let refreshTimer;
         let currentCameras = [];
@@ -829,6 +861,7 @@
         function enableAdminMode() {
             isAdminMode = true;
             document.getElementById('addCameraBtn').style.display = 'inline-block';
+            document.getElementById('serverConfigBtn').style.display = 'inline-block';
             document.querySelector('.admin-btn').textContent = '✓ Admin Mode';
             document.querySelector('.admin-btn').style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
         }
@@ -928,6 +961,91 @@
 
         function closeEditModal() {
             document.getElementById('editModal').classList.remove('active');
+        }
+
+        let originalServerConfig = '';
+
+        async function showServerConfig() {
+            if (!isAdminMode) {
+                showAdminAuth();
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${basePath}/api/admin/config`, {
+                    headers: {
+                        'Authorization': `Bearer ${adminToken}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                        originalServerConfig = JSON.stringify(data.data, null, 2);
+                        document.getElementById('serverConfigEditor').value = originalServerConfig;
+                        document.getElementById('serverConfigModal').classList.add('active');
+                    } else {
+                        showAlert('Failed to load server configuration', 'error');
+                    }
+                } else {
+                    showAlert('Unauthorized or failed to load configuration', 'error');
+                }
+            } catch (error) {
+                showAlert(`Error loading configuration: ${error.message}`, 'error');
+            }
+        }
+
+        function closeServerConfigModal() {
+            document.getElementById('serverConfigModal').classList.remove('active');
+        }
+
+        function resetServerConfig() {
+            document.getElementById('serverConfigEditor').value = originalServerConfig;
+            showAlert('Configuration reset to original values', 'info');
+        }
+
+        function validateServerConfig() {
+            const configText = document.getElementById('serverConfigEditor').value;
+            
+            try {
+                JSON.parse(configText);
+                showAlert('Configuration JSON is valid ✓', 'success');
+            } catch (error) {
+                showAlert(`Invalid JSON: ${error.message}`, 'error');
+            }
+        }
+
+        async function saveServerConfig() {
+            const configText = document.getElementById('serverConfigEditor').value;
+            
+            try {
+                const configData = JSON.parse(configText);
+                
+                const response = await fetch(`${basePath}/api/admin/config`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${adminToken}`
+                    },
+                    body: configText
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                        originalServerConfig = configText; // Update original to new saved version
+                        showAlert('Server configuration saved successfully! ' + (data.data.note || ''), 'success');
+                        closeServerConfigModal();
+                    } else {
+                        showAlert(`Failed to save: ${data.message}`, 'error');
+                    }
+                } else {
+                    const errorData = await response.text();
+                    showAlert(`Error saving configuration: ${errorData}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Invalid JSON or save error: ${error.message}`, 'error');
+            }
         }
 
         async function deleteCamera(cameraId) {
