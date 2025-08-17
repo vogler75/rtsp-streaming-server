@@ -342,21 +342,6 @@ impl RecordingManager {
         }
     }
 
-    pub async fn get_replay_frames(
-        &self,
-        camera_id: &str,
-        from: DateTime<Utc>,
-        to: Option<DateTime<Utc>>,
-    ) -> Result<Vec<RecordedFrame>> {
-        // Get the database for this camera
-        let database = self.get_camera_database(camera_id).await
-            .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
-
-        // If no end time specified, use start time plus 1 hour
-        let end_time = to.unwrap_or_else(|| from + chrono::Duration::hours(1));
-        database.get_frames_in_range(camera_id, from, end_time).await
-    }
-
     pub async fn create_replay_stream(
         &self,
         camera_id: &str,

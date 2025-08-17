@@ -100,13 +100,6 @@ pub trait DatabaseProvider: Send + Sync {
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>>;
     
-    async fn get_frames_in_range(
-        &self,
-        camera_id: &str,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> Result<Vec<RecordedFrame>>;
-    
     async fn delete_old_recordings(
         &self,
         camera_id: Option<&str>,
@@ -478,37 +471,6 @@ impl DatabaseProvider for SqliteDatabase {
         Ok(frames)
     }
 
-    async fn get_frames_in_range(
-        &self,
-        camera_id: &str,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> Result<Vec<RecordedFrame>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT rf.* FROM recorded_frames rf
-            JOIN recording_sessions rs ON rf.session_id = rs.id
-            WHERE rs.camera_id = ? AND rf.timestamp >= ? AND rf.timestamp <= ?
-            ORDER BY rf.timestamp ASC
-            "#,
-        )
-        .bind(camera_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut frames = Vec::new();
-        for row in rows {
-            frames.push(RecordedFrame {
-                timestamp: row.get("timestamp"),
-                frame_data: row.get("frame_data"),
-            });
-        }
-
-        Ok(frames)
-    }
-    
     async fn delete_old_recordings(
         &self,
         camera_id: Option<&str>,
