@@ -347,7 +347,7 @@ impl ControlHandler {
         ).await {
             Ok(_) => trace!("Control receive task completed normally"),
             Err(_) => {
-                error!("Timeout waiting for control receive task to complete");
+                debug!("Timeout waiting for control receive task to complete (this is normal for slow client disconnections)");
             }
         }
         
