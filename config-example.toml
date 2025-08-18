@@ -2,6 +2,8 @@
 host = "0.0.0.0"
 port = 8080
 cors_allow_origin = "*"
+# admin_token = "your-secure-admin-token"  # Optional: Admin token for API access
+# cameras_directory = "cameras"  # Optional: Directory path for camera config files (default: "cameras")
 
 [server.tls]
 enabled = false

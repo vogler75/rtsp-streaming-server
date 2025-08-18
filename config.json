@@ -27,7 +27,8 @@
       "cert_path": "certs/server.crt",
       "enabled": false,
       "key_path": "certs/server.key"
-    }
+    },
+    "cameras_directory": "cameras"
   },
   "transcoding": {
     "capture_framerate": 5,

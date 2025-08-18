@@ -112,6 +112,7 @@ struct AppState {
     transcoding_config: Arc<config::TranscodingConfig>,
     recording_config: Option<Arc<config::RecordingConfig>>,
     admin_token: Option<String>,
+    cameras_directory: String,
     start_time: std::time::Instant,
 }
 
@@ -414,6 +415,7 @@ async fn main() -> Result<()> {
         transcoding_config: Arc::new(config.transcoding.clone()),
         recording_config: config.recording.clone().map(Arc::new),
         admin_token: config.server.admin_token.clone(),
+        cameras_directory: config.server.cameras_directory.clone().unwrap_or_else(|| "cameras".to_string()),
         start_time: std::time::Instant::now(),
     };
 
@@ -1523,7 +1525,7 @@ async fn api_create_camera(
     }
     
     // Save camera config
-    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config) {
+    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config, Some(&state.cameras_directory)) {
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse::<()>::error(&format!("Failed to save camera config: {}", e), 500)))
                .into_response();
@@ -1572,7 +1574,7 @@ async fn api_update_camera(
     }
     
     // Save updated camera config
-    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config) {
+    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config, Some(&state.cameras_directory)) {
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse::<()>::error(&format!("Failed to save camera config: {}", e), 500)))
                .into_response();
@@ -1619,7 +1621,7 @@ async fn api_delete_camera(
     }
     
     // Delete camera config file
-    if let Err(e) = config::Config::delete_camera_config(&camera_id) {
+    if let Err(e) = config::Config::delete_camera_config(&camera_id, Some(&state.cameras_directory)) {
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse::<()>::error(&format!("Failed to delete camera config: {}", e), 500)))
                .into_response();

@@ -75,6 +75,7 @@ pub struct ServerConfig {
     pub tls: Option<TlsConfig>,
     pub cors_allow_origin: Option<String>,
     pub admin_token: Option<String>,  // Optional token for admin operations
+    pub cameras_directory: Option<String>,  // Directory path for camera configuration files (default: "cameras")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +149,7 @@ impl Default for Config {
                 }),
                 cors_allow_origin: Some("*".to_string()),
                 admin_token: None,
+                cameras_directory: None,  // Default: "cameras"
             },
             cameras,
             transcoding: TranscodingConfig {
@@ -179,8 +181,9 @@ impl Config {
             toml::from_str(&content)?
         };
         
-        // Load cameras from the cameras directory
-        config.cameras = Self::load_cameras_from_directory("cameras")?;
+        // Load cameras from the configured cameras directory (default: "cameras")
+        let cameras_dir = config.server.cameras_directory.as_deref().unwrap_or("cameras");
+        config.cameras = Self::load_cameras_from_directory(cameras_dir)?;
         
         Ok(config)
     }
@@ -250,8 +253,8 @@ impl Config {
         Ok(cameras)
     }
 
-    pub fn save_camera_config(camera_id: &str, config: &CameraConfig) -> Result<()> {
-        let cameras_dir = "cameras";
+    pub fn save_camera_config(camera_id: &str, config: &CameraConfig, cameras_dir: Option<&str>) -> Result<()> {
+        let cameras_dir = cameras_dir.unwrap_or("cameras");
         
         // Ensure cameras directory exists
         if !Path::new(cameras_dir).exists() {
@@ -266,8 +269,8 @@ impl Config {
         Ok(())
     }
 
-    pub fn delete_camera_config(camera_id: &str) -> Result<()> {
-        let cameras_dir = "cameras";
+    pub fn delete_camera_config(camera_id: &str, cameras_dir: Option<&str>) -> Result<()> {
+        let cameras_dir = cameras_dir.unwrap_or("cameras");
         
         // Try to delete both JSON and TOML files for backward compatibility
         let json_path = format!("{}/{}.json", cameras_dir, camera_id);
