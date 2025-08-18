@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamVault - Professional RTSP Camera Streaming & Recording Server</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <i class="fas fa-shield-alt"></i>
+                <span>StreamVault</span>
+            </div>
+            <div class="nav-menu">
+                <a href="#home" class="nav-link">Home</a>
+                <a href="#features" class="nav-link">Features</a>
+                <a href="#integration" class="nav-link">Integration</a>
+                <a href="#about" class="nav-link">About</a>
+                <a href="#contact" class="nav-link">Contact</a>
+                <a href="/dashboard" class="nav-button">Launch Dashboard</a>
+            </div>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-background">
+            <div class="hero-particles"></div>
+        </div>
+        <div class="container">
+            <div class="hero-content">
+                <div class="hero-text">
+                    <h1 class="hero-title">
+                        Professional <span class="gradient-text">RTSP Camera</span><br>
+                        Streaming &amp; Recording Server
+                    </h1>
+                    <p class="hero-description">
+                        Transform your RTSP camera feeds into web-accessible streams with comprehensive recording capabilities. 
+                        Built for surveillance, monitoring, and industrial applications with enterprise-grade reliability.
+                    </p>
+                    <div class="hero-buttons">
+                        <a href="/dashboard" class="btn-primary">
+                            <i class="fas fa-play"></i>
+                            Launch Dashboard
+                        </a>
+                        <a href="#features" class="btn-secondary">
+                            <i class="fas fa-info-circle"></i>
+                            Learn More
+                        </a>
+                    </div>
+                    <div class="hero-stats">
+                        <div class="stat">
+                            <span class="stat-number">99.9%</span>
+                            <span class="stat-label">Uptime</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number">Real-time</span>
+                            <span class="stat-label">Streaming</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number">Multi-camera</span>
+                            <span class="stat-label">Support</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hero-visual">
+                    <div class="dashboard-preview">
+                        <div class="preview-header">
+                            <div class="preview-controls">
+                                <div class="control red"></div>
+                                <div class="control yellow"></div>
+                                <div class="control green"></div>
+                            </div>
+                            <span class="preview-title">StreamVault Dashboard</span>
+                        </div>
+                        <div class="preview-content">
+                            <div class="camera-grid">
+                                <div class="camera-tile active">
+                                    <div class="camera-status">
+                                        <div class="status-dot online"></div>
+                                        <span>Camera 01</span>
+                                    </div>
+                                    <div class="camera-feed"></div>
+                                    <div class="camera-info">
+                                        <span>1920x1080 • 30fps</span>
+                                        <span class="recording">● REC</span>
+                                    </div>
+                                </div>
+                                <div class="camera-tile">
+                                    <div class="camera-status">
+                                        <div class="status-dot online"></div>
+                                        <span>Camera 02</span>
+                                    </div>
+                                    <div class="camera-feed"></div>
+                                    <div class="camera-info">
+                                        <span>1920x1080 • 25fps</span>
+                                    </div>
+                                </div>
+                                <div class="camera-tile">
+                                    <div class="camera-status">
+                                        <div class="status-dot offline"></div>
+                                        <span>Camera 03</span>
+                                    </div>
+                                    <div class="camera-feed offline"></div>
+                                    <div class="camera-info">
+                                        <span>Offline</span>
+                                    </div>
+                                </div>
+                                <div class="camera-tile">
+                                    <div class="camera-status">
+                                        <div class="status-dot online"></div>
+                                        <span>Camera 04</span>
+                                    </div>
+                                    <div class="camera-feed"></div>
+                                    <div class="camera-info">
+                                        <span>1280x720 • 15fps</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2>Powerful Features</h2>
+                <p>Everything you need for professional camera streaming and recording</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-video"></i>
+                    </div>
+                    <h3>Real-time Streaming</h3>
+                    <p>Low-latency MJPEG streaming with WebSocket delivery. Support for RTSP, HTTP, and HTTPS camera sources with automatic transcoding.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <h3>Smart Recording</h3>
+                    <p>Frame-by-frame SQLite storage with automatic session management. Hourly session splitting and configurable retention policies.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>Enterprise Security</h3>
+                    <p>Token-based authentication, per-camera access control, and TLS encryption support for secure deployments.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-cogs"></i>
+                    </div>
+                    <h3>Advanced Configuration</h3>
+                    <p>Flexible FFmpeg pipelines, quality settings, frame rate control, and runtime camera management without restart.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>Real-time Monitoring</h3>
+                    <p>Live FPS metrics, client connection counts, health status monitoring, and automatic FFmpeg process recovery.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-mobile-alt"></i>
+                    </div>
+                    <h3>Web-based Interface</h3>
+                    <p>Responsive dashboard accessible from any device. Timeline-based playback controls and mobile-optimized viewing.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Integration Section -->
+    <section id="integration" class="integration">
+        <div class="container">
+            <div class="section-header">
+                <h2>SCADA Integration</h2>
+                <p>Seamless integration with Siemens WinCC Unified ecosystem</p>
+            </div>
+            <div class="integration-content">
+                <div class="integration-text">
+                    <div class="integration-item">
+                        <div class="integration-icon">
+                            <i class="fas fa-desktop"></i>
+                        </div>
+                        <div class="integration-details">
+                            <h3>WinCC Unified SCADA System</h3>
+                            <p>Direct integration with WinCC Unified SCADA systems through RESTful APIs and MQTT messaging. Real-time camera status updates, alarm-triggered recording, and process visualization integration.</p>
+                            <ul>
+                                <li>Process-driven recording triggers</li>
+                                <li>Real-time status feedback via MQTT</li>
+                                <li>Embedded video widgets in SCADA HMI</li>
+                                <li>Event-based camera switching</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="integration-item">
+                        <div class="integration-icon">
+                            <i class="fas fa-tablet-alt"></i>
+                        </div>
+                        <div class="integration-details">
+                            <h3>WinCC Unified Comfort Panels</h3>
+                            <p>Native support for Comfort Panel integration with optimized streaming protocols and touch-friendly interfaces designed for industrial environments.</p>
+                            <ul>
+                                <li>Touch-optimized control interface</li>
+                                <li>Panel-specific video quality optimization</li>
+                                <li>Industrial network compatibility</li>
+                                <li>Seamless authentication integration</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="integration-visual">
+                    <div class="scada-diagram">
+                        <div class="scada-node central">
+                            <i class="fas fa-server"></i>
+                            <span>StreamVault Server</span>
+                        </div>
+                        <div class="scada-node wincc">
+                            <i class="fas fa-desktop"></i>
+                            <span>WinCC Unified SCADA</span>
+                        </div>
+                        <div class="scada-node panel">
+                            <i class="fas fa-tablet-alt"></i>
+                            <span>Comfort Panel</span>
+                        </div>
+                        <div class="scada-node camera">
+                            <i class="fas fa-video"></i>
+                            <span>RTSP Cameras</span>
+                        </div>
+                        <div class="connection-line line1"></div>
+                        <div class="connection-line line2"></div>
+                        <div class="connection-line line3"></div>
+                        <div class="data-flow flow1">MQTT/REST</div>
+                        <div class="data-flow flow2">WebSocket</div>
+                        <div class="data-flow flow3">RTSP</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technology Stack Section -->
+    <section class="tech-stack">
+        <div class="container">
+            <div class="section-header">
+                <h2>Built with Modern Technology</h2>
+                <p>High-performance Rust backend with enterprise-grade reliability</p>
+            </div>
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <i class="fab fa-rust"></i>
+                    <span>Rust</span>
+                </div>
+                <div class="tech-item">
+                    <i class="fas fa-video"></i>
+                    <span>FFmpeg</span>
+                </div>
+                <div class="tech-item">
+                    <i class="fas fa-database"></i>
+                    <span>SQLite</span>
+                </div>
+                <div class="tech-item">
+                    <i class="fas fa-wifi"></i>
+                    <span>WebSocket</span>
+                </div>
+                <div class="tech-item">
+                    <i class="fas fa-code"></i>
+                    <span>REST API</span>
+                </div>
+                <div class="tech-item">
+                    <i class="fas fa-share-alt"></i>
+                    <span>MQTT</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section id="about" class="about">
+        <div class="container">
+            <div class="about-content">
+                <div class="about-text">
+                    <h2>About the Developer</h2>
+                    <p class="about-intro">
+                        StreamVault is developed by <strong>Andreas Vogler</strong>, a passionate software engineer specializing in industrial automation and video streaming technologies.
+                    </p>
+                    <p>
+                        With extensive experience in SCADA systems, industrial networks, and real-time video processing, Andreas has created StreamVault to bridge the gap between traditional IP cameras and modern web-based monitoring systems.
+                    </p>
+                    <p>
+                        The project combines cutting-edge Rust performance with practical industrial requirements, delivering a robust solution for surveillance, monitoring, and integration with automation systems like Siemens WinCC Unified.
+                    </p>
+                    <div class="expertise-tags">
+                        <span class="tag">Industrial Automation</span>
+                        <span class="tag">Video Streaming</span>
+                        <span class="tag">Rust Development</span>
+                        <span class="tag">SCADA Integration</span>
+                        <span class="tag">Real-time Systems</span>
+                    </div>
+                </div>
+                <div class="about-visual">
+                    <div class="developer-card">
+                        <div class="developer-avatar">
+                            <i class="fas fa-user-tie"></i>
+                        </div>
+                        <h3>Andreas Vogler</h3>
+                        <p class="developer-title">Software Engineer & Industrial Automation Specialist</p>
+                        <div class="developer-stats">
+                            <div class="dev-stat">
+                                <span class="dev-number">10+</span>
+                                <span class="dev-label">Years Experience</span>
+                            </div>
+                            <div class="dev-stat">
+                                <span class="dev-number">Industrial</span>
+                                <span class="dev-label">Focus</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <div class="container">
+            <div class="cta-content">
+                <h2>Ready to Get Started?</h2>
+                <p>Deploy StreamVault in your environment and start streaming your cameras today.</p>
+                <div class="cta-buttons">
+                    <a href="/dashboard" class="btn-primary large">
+                        <i class="fas fa-rocket"></i>
+                        Launch Dashboard
+                    </a>
+                    <a href="https://github.com/your-username/streamvault" class="btn-secondary large">
+                        <i class="fab fa-github"></i>
+                        View on GitHub
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="footer-logo">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>StreamVault</span>
+                    </div>
+                    <p>Professional RTSP Camera Streaming & Recording Server</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-section">
+                        <h4>Product</h4>
+                        <a href="#features">Features</a>
+                        <a href="/dashboard">Dashboard</a>
+                        <a href="/docs">Documentation</a>
+                    </div>
+                    <div class="footer-section">
+                        <h4>Integration</h4>
+                        <a href="#integration">SCADA Integration</a>
+                        <a href="#integration">WinCC Unified</a>
+                        <a href="#integration">Comfort Panels</a>
+                    </div>
+                    <div class="footer-section">
+                        <h4>Developer</h4>
+                        <a href="#about">Andreas Vogler</a>
+                        <a href="https://github.com/your-username">GitHub</a>
+                        <a href="#contact">Contact</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 StreamVault by Andreas Vogler. Built with Rust.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
