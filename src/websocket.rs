@@ -141,6 +141,7 @@ async fn handle_socket_inner(
         let mut last_stats_time = tokio::time::Instant::now();
         let mut fps_frame_count = 0u64;
         let mut frame_receiver = frame_receiver; // Move the frame_receiver into the task
+        let mut last_ping_time = tokio::time::Instant::now();
         
         trace!("[{}] Starting frame receive loop", client_id_clone);
         
@@ -192,8 +193,18 @@ async fn handle_socket_inner(
                 }
             }
             
-            // Update client stats periodically
+            // Send periodic ping to keep connection alive
             let now = tokio::time::Instant::now();
+            if now.duration_since(last_ping_time) >= std::time::Duration::from_secs(8) {
+                if let Err(_) = sender.send(Message::Ping(vec![])).await {
+                    trace!("[{}] Failed to send ping, connection may be closed", client_id_clone);
+                    break;
+                }
+                last_ping_time = now;
+                trace!("[{}] Sent WebSocket ping", client_id_clone);
+            }
+            
+            // Update client stats periodically
             if now.duration_since(last_stats_time) >= std::time::Duration::from_secs(1) {
                 let fps = fps_frame_count as f32;
                 
@@ -217,6 +228,13 @@ async fn handle_socket_inner(
                 Ok(Message::Binary(_)) => {
                     trace!("Received binary message");
                 }
+                Ok(Message::Ping(_)) => {
+                    trace!("Received ping - should send pong but sender is in different task");
+                    // TODO: Implement proper ping/pong handling with channel communication
+                }
+                Ok(Message::Pong(_)) => {
+                    trace!("Received pong");
+                }
                 Ok(Message::Close(_)) => {
                     info!("WebSocket client disconnected");
                     break;
@@ -225,7 +243,6 @@ async fn handle_socket_inner(
                     error!("WebSocket error: {}", e);
                     break;
                 }
-                _ => {}
             }
         }
         info!("WebSocket receive task ended");
