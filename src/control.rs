@@ -643,7 +643,7 @@ impl ControlHandler {
                                 let message = Message::Binary(message_data);
                                 // Use timeout instead of try_lock to avoid skipping frames unnecessarily
                                 match tokio::time::timeout(
-                                    std::time::Duration::from_millis(5), // Reduced timeout for faster dropping
+                                    std::time::Duration::from_millis(100), // Reduced timeout for faster dropping
                                     async {
                                         let mut sender_guard = sender_clone.lock().await;
                                         sender_guard.send(message).await

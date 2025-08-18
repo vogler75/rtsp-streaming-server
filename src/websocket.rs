@@ -158,7 +158,7 @@ async fn handle_socket_inner(
                     
                     // Use timeout for non-blocking send - drop frame if it takes too long
                     match tokio::time::timeout(
-                        std::time::Duration::from_millis(50), // Reasonable timeout for network communication
+                        std::time::Duration::from_millis(100), // Reasonable timeout for network communication
                         sender.send(Message::Binary(frame_data.to_vec()))
                     ).await {
                         Ok(Ok(())) => {
