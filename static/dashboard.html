@@ -1643,6 +1643,9 @@
                 console.error('Error fetching status:', error);
                 document.getElementById('serverStatus').textContent = 'Offline';
                 document.getElementById('serverStatus').style.color = '#f44336';
+            } finally {
+                // Always reset the refresh flag
+                isRefreshing = false;
             }
         }
 
