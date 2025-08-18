@@ -107,6 +107,7 @@ struct CameraStreamInfo {
 #[derive(Clone)]
 struct AppState {
     camera_streams: Arc<tokio::sync::RwLock<HashMap<String, CameraStreamInfo>>>,
+    camera_configs: Arc<tokio::sync::RwLock<HashMap<String, config::CameraConfig>>>, // All camera configs (enabled and disabled)
     mqtt_handle: Option<MqttHandle>,
     recording_manager: Option<Arc<RecordingManager>>,
     transcoding_config: Arc<config::TranscodingConfig>,
@@ -288,14 +289,17 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create video streams for each camera
+    // Store all camera configurations (enabled and disabled)
+    let all_camera_configs = config.cameras.clone();
+    
+    // Create video streams only for enabled cameras
     let mut camera_streams: HashMap<String, CameraStreamInfo> = HashMap::new();
     
     for (camera_id, camera_config) in config.cameras.clone() {
         // Check if camera is enabled (default to true if not specified)
         let is_enabled = camera_config.enabled.unwrap_or(true);
         if !is_enabled {
-            info!("Camera '{}' is disabled, skipping", camera_id);
+            info!("Camera '{}' is disabled, loading config but not starting stream", camera_id);
             continue;
         }
         
@@ -410,6 +414,7 @@ async fn main() -> Result<()> {
     
     let app_state = AppState {
         camera_streams: Arc::new(tokio::sync::RwLock::new(camera_streams_by_id)),
+        camera_configs: Arc::new(tokio::sync::RwLock::new(all_camera_configs)),
         mqtt_handle: mqtt_handle.clone(),
         recording_manager: recording_manager.clone(),
         transcoding_config: Arc::new(config.transcoding.clone()),
@@ -598,17 +603,24 @@ async fn main() -> Result<()> {
         let state = api_state2.clone();
         async move {
             trace!("[API] /api/cameras endpoint called");
+            
+            // Get all camera configurations (enabled and disabled)
+            let camera_configs = state.camera_configs.read().await;
             let camera_streams = state.camera_streams.read().await;
-            trace!("[API] Got camera_streams lock, {} cameras found", camera_streams.len());
+            
+            trace!("[API] Got locks, {} total configs, {} active streams", 
+                   camera_configs.len(), camera_streams.len());
             
             let mut cameras = Vec::new();
             
-            // Collect camera data first and sort by camera ID
-            let mut camera_data: Vec<(String, String, bool)> = camera_streams.iter()
-                .map(|(id, info)| (id.clone(), info.camera_config.path.clone(), info.camera_config.token.is_some()))
+            // Collect all camera data from configs and sort by camera ID
+            let mut camera_data: Vec<(String, config::CameraConfig, bool)> = camera_configs.iter()
+                .map(|(id, config)| (id.clone(), config.clone(), camera_streams.contains_key(id)))
                 .collect();
             camera_data.sort_by(|a, b| a.0.cmp(&b.0));
-            drop(camera_streams); // Release lock before async operations
+            
+            drop(camera_configs); // Release locks before async operations
+            drop(camera_streams);
             
             // Get all camera statuses at once for efficiency
             let all_camera_statuses = if let Some(mqtt_handle) = &state.mqtt_handle {
@@ -617,23 +629,45 @@ async fn main() -> Result<()> {
                 HashMap::new()
             };
             
-            for (camera_id, camera_path, token_required) in camera_data {
-                let camera_status = if let Some(real_status) = all_camera_statuses.get(&camera_id) {
-                    serde_json::json!({
-                        "id": real_status.id,
-                        "path": camera_path,
-                        "connected": real_status.connected,
-                        "capture_fps": real_status.capture_fps,
-                        "clients_connected": real_status.clients_connected,
-                        "last_frame_time": real_status.last_frame_time,
-                        "ffmpeg_running": real_status.ffmpeg_running,
-                        "duplicate_frames": real_status.duplicate_frames,
-                        "token_required": token_required
-                    })
+            for (camera_id, camera_config, is_active) in camera_data {
+                let is_enabled = camera_config.enabled.unwrap_or(true);
+                let token_required = camera_config.token.is_some();
+                
+                let camera_status = if is_active && is_enabled {
+                    // Camera is enabled and has an active stream
+                    if let Some(real_status) = all_camera_statuses.get(&camera_id) {
+                        serde_json::json!({
+                            "id": real_status.id,
+                            "path": camera_config.path,
+                            "enabled": is_enabled,
+                            "connected": real_status.connected,
+                            "capture_fps": real_status.capture_fps,
+                            "clients_connected": real_status.clients_connected,
+                            "last_frame_time": real_status.last_frame_time,
+                            "ffmpeg_running": real_status.ffmpeg_running,
+                            "duplicate_frames": real_status.duplicate_frames,
+                            "token_required": token_required
+                        })
+                    } else {
+                        serde_json::json!({
+                            "id": camera_id,
+                            "path": camera_config.path,
+                            "enabled": is_enabled,
+                            "connected": false,
+                            "capture_fps": 0.0,
+                            "clients_connected": 0,
+                            "last_frame_time": null,
+                            "ffmpeg_running": false,
+                            "duplicate_frames": 0,
+                            "token_required": token_required
+                        })
+                    }
                 } else {
+                    // Camera is disabled or not active
                     serde_json::json!({
                         "id": camera_id,
-                        "path": camera_path,
+                        "path": camera_config.path,
+                        "enabled": is_enabled,
                         "connected": false,
                         "capture_fps": 0.0,
                         "clients_connected": 0,
@@ -1768,19 +1802,37 @@ async fn admin_page() -> axum::response::Response {
 
 impl AppState {
     async fn add_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
-        // Check if camera already exists
+        // Always update camera configuration (enabled or disabled)
         {
-            let camera_streams = self.camera_streams.read().await;
-            if camera_streams.contains_key(&camera_id) {
-                info!("Camera '{}' already exists, skipping add operation", camera_id);
-                return Ok(());
-            }
+            let mut camera_configs = self.camera_configs.write().await;
+            camera_configs.insert(camera_id.clone(), camera_config.clone());
         }
         
         // Check if camera is enabled
-        if !camera_config.enabled.unwrap_or(true) {
-            info!("Camera '{}' is disabled, skipping", camera_id);
+        let is_enabled = camera_config.enabled.unwrap_or(true);
+        if !is_enabled {
+            info!("Camera '{}' is disabled, config updated but not starting stream", camera_id);
+            // Remove from active streams if it was previously enabled
+            {
+                let mut camera_streams = self.camera_streams.write().await;
+                if let Some(stream_info) = camera_streams.remove(&camera_id) {
+                    info!("Removed disabled camera '{}' from active streams", camera_id);
+                    // Stop the video stream
+                    if let Some(task_handle) = stream_info.task_handle {
+                        task_handle.abort();
+                    }
+                }
+            }
             return Ok(());
+        }
+        
+        // Check if camera stream already exists
+        {
+            let camera_streams = self.camera_streams.read().await;
+            if camera_streams.contains_key(&camera_id) {
+                info!("Camera '{}' stream already exists, updating config only", camera_id);
+                return Ok(());
+            }
         }
         
         info!("Adding camera '{}' on path '{}'...", camera_id, camera_config.path);
@@ -1849,6 +1901,12 @@ impl AppState {
     
     async fn remove_camera(&self, camera_id: &str) -> Result<()> {
         info!("Removing camera '{}'...", camera_id);
+        
+        // Remove from camera configurations
+        {
+            let mut camera_configs = self.camera_configs.write().await;
+            camera_configs.remove(camera_id);
+        }
         
         // Remove from camera streams and get the camera info for cleanup
         let removed = {
