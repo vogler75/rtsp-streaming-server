@@ -78,6 +78,12 @@
                 this.canvas = document.getElementById('videoCanvas');
                 this.ctx = this.canvas.getContext('2d');
                 this.statusMessage = document.getElementById('statusMessage');
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 10;
+                this.reconnectDelay = 3000; // Start with 3 seconds
+                this.maxReconnectDelay = 60000; // Max 60 seconds
+                this.lastFrameTime = Date.now();
+                this.frameTimeout = null;
                 this.connectWebSocket();
             }
             
@@ -101,12 +107,17 @@
                 
                 this.ws.onopen = () => {
                     this.isConnected = true;
+                    this.reconnectAttempts = 0; // Reset attempts on successful connection
+                    this.reconnectDelay = 3000; // Reset delay
                     this.updateStatus('Connected - Waiting for video...', 'connected');
+                    this.startFrameTimeout();
                 };
                 
                 this.ws.onmessage = (event) => {
                     if (event.data instanceof ArrayBuffer) {
+                        this.lastFrameTime = Date.now();
                         this.displayFrame(new Uint8Array(event.data));
+                        this.resetFrameTimeout();
                     }
                 };
                 
@@ -117,18 +128,33 @@
                 
                 this.ws.onclose = (event) => {
                     this.isConnected = false;
+                    this.clearFrameTimeout();
                     
-                    if (event.code === 1006) {
-                        this.updateStatus('Connection lost - Reconnecting...', 'connecting');
-                    } else if (event.code === 1002 || event.code === 1003) {
+                    if (event.code === 1002 || event.code === 1003) {
                         this.updateStatus('Authentication failed - Invalid token', 'error');
                         return; // Don't attempt to reconnect on auth failure
-                    } else {
-                        this.updateStatus('Disconnected - Reconnecting...', 'connecting');
                     }
                     
-                    // Attempt to reconnect after 3 seconds
-                    setTimeout(() => this.connectWebSocket(), 3000);
+                    // Check if we've exceeded max reconnection attempts
+                    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                        this.updateStatus('Connection failed - Max reconnection attempts reached', 'error');
+                        console.log('Max reconnection attempts reached. Stopping reconnection.');
+                        return;
+                    }
+                    
+                    this.reconnectAttempts++;
+                    
+                    // Calculate exponential backoff delay
+                    const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), this.maxReconnectDelay);
+                    
+                    if (event.code === 1006) {
+                        this.updateStatus(`Connection lost - Reconnecting in ${Math.round(delay/1000)}s... (Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'connecting');
+                    } else {
+                        this.updateStatus(`Disconnected - Reconnecting in ${Math.round(delay/1000)}s... (Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'connecting');
+                    }
+                    
+                    // Attempt to reconnect with exponential backoff
+                    setTimeout(() => this.connectWebSocket(), delay);
                 };
             }
             
@@ -167,11 +193,65 @@
                 this.statusMessage.className = className;
                 this.statusMessage.style.display = 'block';
             }
+            
+            startFrameTimeout() {
+                // Start timeout to detect no frames being received
+                this.frameTimeout = setTimeout(() => {
+                    if (this.isConnected) {
+                        this.updateStatus('No video frames received - Stream may be offline', 'error');
+                        // Close connection to trigger reconnection with backoff
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            this.ws.close();
+                        }
+                    }
+                }, 10000); // 10 seconds timeout
+            }
+            
+            resetFrameTimeout() {
+                this.clearFrameTimeout();
+                this.startFrameTimeout();
+            }
+            
+            clearFrameTimeout() {
+                if (this.frameTimeout) {
+                    clearTimeout(this.frameTimeout);
+                    this.frameTimeout = null;
+                }
+            }
         }
         
         // Initialize when page loads
+        let videoStream = null;
+        
         window.addEventListener('DOMContentLoaded', () => {
-            new VideoStream();
+            videoStream = new VideoStream();
+        });
+        
+        // Stop the stream when page is hidden/unloaded
+        window.addEventListener('beforeunload', () => {
+            if (videoStream && videoStream.ws) {
+                videoStream.ws.close();
+                videoStream.clearFrameTimeout();
+            }
+        });
+        
+        // Handle page visibility changes to pause/resume streaming
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Page is hidden, close the connection to save resources
+                if (videoStream && videoStream.ws && videoStream.isConnected) {
+                    console.log('Page hidden, closing WebSocket connection');
+                    videoStream.ws.close();
+                    videoStream.clearFrameTimeout();
+                }
+            } else {
+                // Page is visible again, reconnect if needed
+                if (videoStream && (!videoStream.ws || videoStream.ws.readyState !== WebSocket.OPEN)) {
+                    console.log('Page visible, reconnecting WebSocket');
+                    videoStream.reconnectAttempts = 0; // Reset attempts
+                    videoStream.connectWebSocket();
+                }
+            }
         });
         
         // Handle window resize

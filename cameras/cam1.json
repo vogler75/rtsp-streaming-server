@@ -24,7 +24,7 @@
     "flush_packets": null,
     "extra_input_args": null,
     "extra_output_args": null,
-    "log_stderr": null
+    "log_stderr": "console"
   },
   "mqtt": {
     "publish_interval": 5,

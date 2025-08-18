@@ -206,7 +206,9 @@
             height: 10px;
             border-radius: 50%;
             background: #4caf50;
-            animation: pulse 2s infinite;
+            /* Disabled animation to reduce CPU usage */
+            /* animation: pulse 2s infinite; */
+            box-shadow: 0 0 4px rgba(76, 175, 80, 0.5);
         }
 
         .status-indicator.offline {
@@ -510,10 +512,11 @@
                     Auto Refresh
                 </label>
                 <select id="refreshInterval">
-                    <option value="1000">1s</option>
                     <option value="2000">2s</option>
                     <option value="5000" selected>5s</option>
                     <option value="10000">10s</option>
+                    <option value="30000">30s</option>
+                    <option value="60000">60s</option>
                 </select>
                 <button onclick="refreshStatus(true)">🔄 Refresh Now</button>
             </div>
@@ -1014,6 +1017,7 @@
         let currentCameras = [];
         let isManualRefresh = false;
         let isAdminMode = false;
+        let isRefreshing = false; // Prevent overlapping refresh calls
         let adminToken = localStorage.getItem('adminToken') || '';
         const basePath = window.location.pathname.replace('/dashboard', '');
         
@@ -1095,6 +1099,8 @@
             document.getElementById('serverConfigBtn').style.display = 'inline-block';
             document.querySelector('.admin-btn').textContent = '✓ Admin Mode';
             document.querySelector('.admin-btn').style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
+            // Refresh camera list to show admin buttons (edit/delete)
+            refreshStatus(true);
         }
 
         function showAlert(message, type = 'info') {
@@ -1593,6 +1599,14 @@
         }
 
         async function refreshStatus(forceFullRebuild = false) {
+            // Prevent overlapping refresh calls
+            if (isRefreshing) {
+                console.log('Refresh already in progress, skipping...');
+                return;
+            }
+            
+            isRefreshing = true;
+            
             try {
                 // Load server status and cameras in parallel
                 const [statusResponse, camerasResponse] = await Promise.all([
@@ -1610,10 +1624,10 @@
                     const needsFullRebuild = forceFullRebuild || hasCameraListChanged(newCameras);
                     
                     if (needsFullRebuild) {
-                        console.log('Performing full camera grid rebuild');
+                        // console.log('Performing full camera grid rebuild');
                         await updateCameraGrid(newCameras);
                     } else {
-                        console.log('Performing differential camera update');
+                        // console.log('Performing differential camera update');
                         await updateExistingCameras(newCameras);
                     }
                 } else {
@@ -2031,6 +2045,14 @@
                 console.log(`Started embedded stream for ${cameraId}: ${streamUrl}`);
             } else {
                 // Stop embedded stream
+                // First, properly dispose of the iframe to stop its JavaScript execution
+                const existingIframe = streamContainer.querySelector('iframe');
+                if (existingIframe) {
+                    // Set src to about:blank to stop the iframe's execution
+                    existingIframe.src = 'about:blank';
+                    // Remove the iframe from DOM
+                    existingIframe.remove();
+                }
                 streamContainer.innerHTML = '';
                 streamContainer.style.display = 'none';
                 noPreview.style.display = 'flex';
@@ -2051,7 +2073,7 @@
             // Note: This would require API endpoints to start/stop individual camera streams
             // For now, we'll just refresh the status to show current state
             showAlert('Stream control coming soon - use the streaming server controls for now', 'info');
-            setTimeout(refreshStatus, 1000);
+            setTimeout(refreshStatus, 5000); // Increased delay to reduce CPU usage
         }
 
         function formatUptime(seconds) {
