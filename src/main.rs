@@ -604,23 +604,26 @@ async fn main() -> Result<()> {
         async move {
             trace!("[API] /api/cameras endpoint called");
             
-            // Get all camera configurations (enabled and disabled)
-            let camera_configs = state.camera_configs.read().await;
-            let camera_streams = state.camera_streams.read().await;
+            // Get camera configurations first
+            let camera_data = {
+                let camera_configs = state.camera_configs.read().await;
+                let mut data: Vec<(String, config::CameraConfig)> = camera_configs.iter()
+                    .map(|(id, config)| (id.clone(), config.clone()))
+                    .collect();
+                data.sort_by(|a, b| a.0.cmp(&b.0));
+                data
+            };
             
-            trace!("[API] Got locks, {} total configs, {} active streams", 
-                   camera_configs.len(), camera_streams.len());
+            // Get active stream IDs separately to avoid holding both locks
+            let active_stream_ids = {
+                let camera_streams = state.camera_streams.read().await;
+                camera_streams.keys().cloned().collect::<std::collections::HashSet<String>>()
+            };
+            
+            trace!("[API] Got {} total configs, {} active streams", 
+                   camera_data.len(), active_stream_ids.len());
             
             let mut cameras = Vec::new();
-            
-            // Collect all camera data from configs and sort by camera ID
-            let mut camera_data: Vec<(String, config::CameraConfig, bool)> = camera_configs.iter()
-                .map(|(id, config)| (id.clone(), config.clone(), camera_streams.contains_key(id)))
-                .collect();
-            camera_data.sort_by(|a, b| a.0.cmp(&b.0));
-            
-            drop(camera_configs); // Release locks before async operations
-            drop(camera_streams);
             
             // Get all camera statuses at once for efficiency
             let all_camera_statuses = if let Some(mqtt_handle) = &state.mqtt_handle {
@@ -629,8 +632,9 @@ async fn main() -> Result<()> {
                 HashMap::new()
             };
             
-            for (camera_id, camera_config, is_active) in camera_data {
+            for (camera_id, camera_config) in camera_data {
                 let is_enabled = camera_config.enabled.unwrap_or(true);
+                let is_active = active_stream_ids.contains(&camera_id);
                 let token_required = camera_config.token.is_some();
                 
                 let camera_status = if is_active && is_enabled {
@@ -1802,31 +1806,34 @@ async fn admin_page() -> axum::response::Response {
 
 impl AppState {
     async fn add_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
+        // Check if camera is enabled first (before acquiring any locks)
+        let is_enabled = camera_config.enabled.unwrap_or(true);
+        
         // Always update camera configuration (enabled or disabled)
         {
             let mut camera_configs = self.camera_configs.write().await;
             camera_configs.insert(camera_id.clone(), camera_config.clone());
         }
         
-        // Check if camera is enabled
-        let is_enabled = camera_config.enabled.unwrap_or(true);
         if !is_enabled {
             info!("Camera '{}' is disabled, config updated but not starting stream", camera_id);
-            // Remove from active streams if it was previously enabled
-            {
+            // Remove from active streams if it was previously enabled (separate lock scope)
+            let stream_info_to_stop = {
                 let mut camera_streams = self.camera_streams.write().await;
-                if let Some(stream_info) = camera_streams.remove(&camera_id) {
-                    info!("Removed disabled camera '{}' from active streams", camera_id);
-                    // Stop the video stream
-                    if let Some(task_handle) = stream_info.task_handle {
-                        task_handle.abort();
-                    }
+                camera_streams.remove(&camera_id)
+            };
+            
+            // Stop the video stream outside the lock
+            if let Some(stream_info) = stream_info_to_stop {
+                info!("Removed disabled camera '{}' from active streams", camera_id);
+                if let Some(task_handle) = stream_info.task_handle {
+                    task_handle.abort();
                 }
             }
             return Ok(());
         }
         
-        // Check if camera stream already exists
+        // Check if camera stream already exists (separate lock scope)
         {
             let camera_streams = self.camera_streams.read().await;
             if camera_streams.contains_key(&camera_id) {
