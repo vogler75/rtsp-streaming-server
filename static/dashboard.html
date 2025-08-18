@@ -700,6 +700,11 @@
                                     <option value="both">Both</option>
                                 </select>
                             </div>
+                            <div class="form-group">
+                                <label>Data Timeout (seconds)</label>
+                                <input type="number" id="ffmpeg_data_timeout_secs" name="ffmpeg_data_timeout_secs" placeholder="5" min="1">
+                                <span class="help-text">Restart FFmpeg if no data received for this many seconds (default: 5)</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1193,6 +1198,7 @@
                 document.getElementById('ffmpeg_flags').value = config.ffmpeg.flags || '';
                 document.getElementById('ffmpeg_avioflags').value = config.ffmpeg.avioflags || '';
                 document.getElementById('ffmpeg_fps_mode').value = config.ffmpeg.fps_mode || '';
+                document.getElementById('ffmpeg_data_timeout_secs').value = config.ffmpeg.data_timeout_secs || '';
             }
         }
 
@@ -1529,13 +1535,13 @@
             const ffmpegConfig = {};
             const ffmpegFields = [
                 'command', 'quality', 'use_wallclock_as_timestamps', 'scale', 'output_framerate', 'video_bitrate',
-                'rtbufsize', 'log_stderr', 'fflags', 'flags', 'avioflags', 'fps_mode'
+                'rtbufsize', 'log_stderr', 'fflags', 'flags', 'avioflags', 'fps_mode', 'data_timeout_secs'
             ];
             
             ffmpegFields.forEach(field => {
                 const value = formData.get(`ffmpeg_${field}`);
                 if (value) {
-                    if (field === 'quality' || field === 'output_framerate' || field === 'rtbufsize') {
+                    if (field === 'quality' || field === 'output_framerate' || field === 'rtbufsize' || field === 'data_timeout_secs') {
                         ffmpegConfig[field] = parseInt(value);
                     } else if (field === 'use_wallclock_as_timestamps') {
                         ffmpegConfig[field] = value === 'true';

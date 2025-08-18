@@ -529,10 +529,30 @@ impl RtspClient {
         let mut frame_count = 0u64;
         let mut buffer = Vec::new();
         let mut last_log_time = tokio::time::Instant::now();
+        let mut last_data_time = tokio::time::Instant::now();
+        
+        // Get data timeout from configuration (default: 5 seconds)
+        let data_timeout_secs = ffmpeg
+            .and_then(|c| c.data_timeout_secs)
+            .unwrap_or(5);
+        let data_timeout_duration = Duration::from_secs(data_timeout_secs);
+        
+        info!("[{}] FFmpeg data timeout configured for {} seconds", self.camera_id, data_timeout_secs);
         
         // Read MJPEG frames from FFmpeg stdout with process monitoring
         loop {
             tokio::select! {
+                // Check for data timeout
+                _ = tokio::time::sleep_until(last_data_time + data_timeout_duration) => {
+                    error!("[{}] FFmpeg data timeout after {} seconds - no data received, restarting FFmpeg process", 
+                           self.camera_id, data_timeout_secs);
+                    
+                    // Kill the FFmpeg process
+                    let _ = ffmpeg_cmd.kill().await;
+                    
+                    return Err(StreamError::ffmpeg("FFmpeg data timeout - process will be restarted"));
+                }
+                
                 // Monitor FFmpeg process status
                 exit_status = ffmpeg_cmd.wait() => {
                     match exit_status {
@@ -554,6 +574,9 @@ impl RtspClient {
                 frame_result = self.read_mjpeg_frame(&mut reader, &mut buffer) => {
                     match frame_result {
                         Ok(frame_data) => {
+                            // Update data timeout timer - we received data successfully
+                            last_data_time = tokio::time::Instant::now();
+                            
                             // Validate frame is not empty or too small (minimum JPEG is ~100 bytes)
                             if frame_data.len() == 0 {
                                 warn!("[{}] Skipping invalid frame: too small ({} bytes)", self.camera_id, frame_data.len());
