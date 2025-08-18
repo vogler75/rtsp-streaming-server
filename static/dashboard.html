@@ -1031,7 +1031,15 @@
         // - Not using cookies for compatibility and explicit control
         // - Tokens are cleared when admin mode is disabled or session expires
         let adminToken = localStorage.getItem('adminToken') || '';
-        const basePath = window.location.pathname.replace('/dashboard', '');
+        // Get base path by removing '/dashboard' from the end of the pathname
+        const pathname = window.location.pathname;
+        const basePath = pathname.endsWith('/dashboard') 
+            ? pathname.slice(0, -'/dashboard'.length) 
+            : pathname.replace(/\/dashboard$/, '');
+        
+        // Log base path for debugging proxy setups
+        console.log('Dashboard loaded from:', pathname);
+        console.log('Using base path for API calls:', basePath || '(root)');
         
         // Session timeout: 4 hours (in milliseconds)
         const SESSION_TIMEOUT = 4 * 60 * 60 * 1000;

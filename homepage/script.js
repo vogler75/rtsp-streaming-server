@@ -1,6 +1,10 @@
 // Configuration - Update URLs here
+// Automatically detect base path from current location
+const currentPath = window.location.pathname;
+const basePath = currentPath.replace(/\/[^\/]*$/, ''); // Remove last segment (e.g., /index.html)
+
 const CONFIG = {
-    dashboardUrl: '/dashboard',
+    dashboardUrl: basePath ? `${basePath}/dashboard` : '/dashboard',
     githubUrl: 'https://github.com/your-username/streamvault',
     // Add other configurable URLs here as needed
 };
