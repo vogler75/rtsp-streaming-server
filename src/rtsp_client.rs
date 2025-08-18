@@ -531,10 +531,10 @@ impl RtspClient {
         let mut last_log_time = tokio::time::Instant::now();
         let mut last_data_time = tokio::time::Instant::now();
         
-        // Get data timeout from configuration (default: 30 seconds)
+        // Get data timeout from configuration (default: 60 seconds)
         let data_timeout_secs = ffmpeg
             .and_then(|c| c.data_timeout_secs)
-            .unwrap_or(30);
+            .unwrap_or(60);
         let data_timeout_duration = Duration::from_secs(data_timeout_secs);
         
         info!("[{}] FFmpeg data timeout configured for {} seconds", self.camera_id, data_timeout_secs);
