@@ -201,18 +201,6 @@
             font-size: 16px;
         }
         
-        #jsonOutput {
-            width: 100%;
-            height: 150px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            padding: 10px;
-            color: #0f0;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            overflow-y: auto;
-        }
         
         .status-indicator {
             display: inline-block;
@@ -243,18 +231,6 @@
             margin-top: 5px;
         }
         
-        .output-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        
-        .clear-button {
-            padding: 8px 12px;
-            background: linear-gradient(135deg, #f44336 0%, #e53935 100%);
-            flex: none;
-        }
         
         .admin-toggle {
             text-align: center;
@@ -353,7 +329,7 @@
                     
                     <div id="videoContainer">
                         <canvas id="videoCanvas"></canvas>
-                        <div id="statusMessage">Ready for commands</div>
+                        <div id="statusMessage">Ready for commands (responses logged to console)</div>
                         
                         <div class="video-overlay-controls">
                             <div class="timeline-container" style="width: 100%; display: flex; flex-direction: column;">
@@ -420,13 +396,6 @@
             </div>
         </div>
         
-        <div class="panel">
-            <div class="output-header">
-                <h2>Command Responses</h2>
-                <button id="clearOutput" class="clear-button">🗑 Clear</button>
-            </div>
-            <div id="jsonOutput">Waiting for responses...</div>
-        </div>
     </div>
     
     <script>
@@ -467,8 +436,6 @@
                 
                 document.getElementById('increaseSpeed').addEventListener('click', () => this.changeSpeed(0.5));
                 document.getElementById('decreaseSpeed').addEventListener('click', () => this.changeSpeed(-0.5));
-                
-                document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
                 document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket(true));
                 document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket(true));
                 
@@ -990,14 +957,8 @@
             }
             
             logJson(obj) {
-                const output = document.getElementById('jsonOutput');
                 const timestamp = new Date().toLocaleTimeString();
-                output.textContent = `[${timestamp}] ${JSON.stringify(obj, null, 2)}
-${output.textContent}`;
-            }
-
-            clearOutput() {
-                document.getElementById('jsonOutput').textContent = '';
+                console.log(`[${timestamp}] Camera Control:`, obj);
             }
         }
         
