@@ -105,6 +105,30 @@ impl RtspClient {
             }
             Err(e) => {
                 error!("[{}] Failed to connect to RTSP stream: {}", self.camera_id, e);
+                
+                // Check if FFmpeg repeatedly failed (gave up after max retries)
+                if e.to_string().contains("repeatedly failed") {
+                    error!("[{}] FFmpeg repeatedly failed, not falling back to test frames", self.camera_id);
+                    
+                    // Update MQTT status to show camera is disconnected
+                    if let Some(ref mqtt) = self.mqtt_handle {
+                        let status = CameraStatus {
+                            id: self.camera_id.clone(),
+                            connected: false,
+                            capture_fps: 0.0,
+                            clients_connected: self.frame_sender.receiver_count(),
+                            last_frame_time: None,
+                            ffmpeg_running: false,
+                            duplicate_frames: 0,
+                        };
+                        mqtt.update_camera_status(self.camera_id.clone(), status).await;
+                    }
+                    
+                    // Return the error to propagate it up
+                    return Err(e);
+                }
+                
+                // For other errors, fall back to test frames
                 info!("[{}] Falling back to test frame generation", self.camera_id);
                 self.generate_test_frames().await?;
             }
