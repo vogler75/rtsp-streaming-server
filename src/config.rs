@@ -64,7 +64,7 @@ pub struct FfmpegConfig {
     pub log_stderr: Option<String>,       // FFmpeg stderr logging: "file", "console", "both"
     
     // Timeout and restart settings
-    pub data_timeout_secs: Option<u64>,   // Timeout in seconds to restart FFmpeg if no data (default: 5)
+    pub data_timeout_secs: Option<u64>,   // Timeout in seconds to restart FFmpeg if no data (default: 30)
 }
 
 
