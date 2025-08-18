@@ -1023,8 +1023,34 @@
         let isManualRefresh = false;
         let isAdminMode = false;
         let isRefreshing = false; // Prevent overlapping refresh calls
+        
+        // Token Storage:
+        // - Admin token: Stored in localStorage as 'adminToken'  
+        // - Camera tokens: Stored in localStorage as 'cameraTokens' (JSON object)
+        // - Session timestamp: Stored as 'adminTokenTimestamp' for auto-logout
+        // - Not using cookies for compatibility and explicit control
+        // - Tokens are cleared when admin mode is disabled or session expires
         let adminToken = localStorage.getItem('adminToken') || '';
         const basePath = window.location.pathname.replace('/dashboard', '');
+        
+        // Session timeout: 4 hours (in milliseconds)
+        const SESSION_TIMEOUT = 4 * 60 * 60 * 1000;
+        
+        // Check token expiration on load
+        function checkTokenExpiration() {
+            const tokenTimestamp = localStorage.getItem('adminTokenTimestamp');
+            if (adminToken && tokenTimestamp) {
+                const now = Date.now();
+                const tokenAge = now - parseInt(tokenTimestamp);
+                if (tokenAge > SESSION_TIMEOUT) {
+                    // Token expired
+                    adminToken = '';
+                    localStorage.removeItem('adminToken');
+                    localStorage.removeItem('adminTokenTimestamp');
+                    showAlert('Admin session expired. Please authenticate again.', 'warning');
+                }
+            }
+        }
         
         // Storage for camera tokens
         const cameraTokens = {};
@@ -1040,6 +1066,9 @@
             }
         }
 
+        // Check token expiration first
+        checkTokenExpiration();
+        
         // Check if admin token is valid on load
         if (adminToken) {
             checkAdminAccess();
@@ -1059,6 +1088,7 @@
                 } else if (response.status === 401) {
                     adminToken = '';
                     localStorage.removeItem('adminToken');
+                    localStorage.removeItem('adminTokenTimestamp');
                 }
             } catch (error) {
                 console.error('Error checking admin access:', error);
@@ -1087,6 +1117,7 @@
                 if (response.ok) {
                     adminToken = token;
                     localStorage.setItem('adminToken', token);
+                    localStorage.setItem('adminTokenTimestamp', Date.now().toString());
                     enableAdminMode();
                     closeAuthModal();
                     showAlert('Admin mode enabled', 'success');
@@ -1102,10 +1133,34 @@
             isAdminMode = true;
             document.getElementById('addCameraBtn').style.display = 'inline-block';
             document.getElementById('serverConfigBtn').style.display = 'inline-block';
-            document.querySelector('.admin-btn').textContent = '✓ Admin Mode';
-            document.querySelector('.admin-btn').style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
+            const adminBtn = document.querySelector('.admin-btn');
+            adminBtn.textContent = '✓ Admin Mode (Click to Disable)';
+            adminBtn.style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
+            adminBtn.onclick = disableAdminMode;
             // Refresh camera list to show admin buttons (edit/delete)
             refreshStatus(true);
+        }
+
+        function disableAdminMode() {
+            isAdminMode = false;
+            adminToken = '';
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminTokenTimestamp');
+            
+            // Hide admin buttons
+            document.getElementById('addCameraBtn').style.display = 'none';
+            document.getElementById('serverConfigBtn').style.display = 'none';
+            
+            // Reset admin button
+            const adminBtn = document.querySelector('.admin-btn');
+            adminBtn.textContent = '🔐 Admin Mode';
+            adminBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            adminBtn.onclick = showAdminAuth;
+            
+            // Refresh camera list to hide admin buttons (edit/delete)
+            refreshStatus(true);
+            
+            showAlert('Admin mode disabled', 'info');
         }
 
         function showAlert(message, type = 'info') {
