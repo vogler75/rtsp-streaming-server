@@ -22,7 +22,6 @@ pub struct RecordedFrame {
 #[derive(Debug, Clone, FromRow)]
 pub struct VideoSegment {
     pub id: i64,
-    pub camera_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub file_path: Option<String>,  // Optional for database storage
@@ -31,6 +30,9 @@ pub struct VideoSegment {
     pub session_id: i64,  // Reference to recording_sessions table
     #[sqlx(default)]  // This field might not exist when not joining with recording_sessions
     pub recording_reason: Option<String>,  // Recording reason from recording_sessions
+    #[sqlx(default)]  // This field comes from the JOIN with recording_sessions
+    #[allow(dead_code)]  // Available from JOIN but not always used
+    pub camera_id: Option<String>,  // Camera ID from recording_sessions when needed
 }
 
 
@@ -345,7 +347,6 @@ impl DatabaseProvider for SqliteDatabase {
             r#"
             CREATE TABLE IF NOT EXISTS video_segments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                camera_id TEXT NOT NULL,
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP NOT NULL,
                 file_path TEXT,
@@ -359,7 +360,7 @@ impl DatabaseProvider for SqliteDatabase {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_camera_time ON video_segments(camera_id, start_time, end_time)")
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_time ON video_segments(start_time, end_time)")
             .execute(&self.pool)
             .await?;
         
@@ -764,11 +765,10 @@ impl DatabaseProvider for SqliteDatabase {
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO video_segments (camera_id, start_time, end_time, file_path, size_bytes, mp4_data, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO video_segments (start_time, end_time, file_path, size_bytes, mp4_data, session_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&segment.camera_id)
         .bind(segment.start_time)
         .bind(segment.end_time)
         .bind(&segment.file_path)
@@ -790,10 +790,11 @@ impl DatabaseProvider for SqliteDatabase {
         let start_time = std::time::Instant::now();
         
         let query_str = r#"
-            SELECT vs.id, vs.camera_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, NULL as mp4_data, vs.session_id, rs.reason as recording_reason
+            SELECT vs.id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.session_id, 
+                   rs.reason as recording_reason, rs.camera_id
             FROM video_segments vs
             LEFT JOIN recording_sessions rs ON vs.session_id = rs.id
-            WHERE vs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
+            WHERE rs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
             ORDER BY vs.start_time ASC
             "#;
         
@@ -822,14 +823,14 @@ impl DatabaseProvider for SqliteDatabase {
         for row in rows {
             segments.push(VideoSegment {
                 id: row.get("id"),
-                camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
-                mp4_data: row.get("mp4_data"),
+                mp4_data: None,  // Not loaded for listing performance
                 session_id: row.get("session_id"),
                 recording_reason: row.get("recording_reason"),
+                camera_id: row.get("camera_id"),
             });
         }
 
@@ -913,13 +914,14 @@ impl DatabaseProvider for SqliteDatabase {
         let start_time = std::time::Instant::now();
         
         let query_str = r#"
-            SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data, session_id
-            FROM video_segments
-            WHERE camera_id = ? AND (
-                file_path LIKE '%' || ? || '%' OR
-                ? LIKE '%' || strftime('%Y-%m-%dT%H-%M-%SZ', start_time) || '%'
+            SELECT vs.id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, vs.session_id, rs.camera_id
+            FROM video_segments vs
+            JOIN recording_sessions rs ON vs.session_id = rs.id
+            WHERE rs.camera_id = ? AND (
+                vs.file_path LIKE '%' || ? || '%' OR
+                ? LIKE '%' || strftime('%Y-%m-%dT%H-%M-%SZ', vs.start_time) || '%'
             )
-            ORDER BY start_time DESC
+            ORDER BY vs.start_time DESC
             LIMIT 1
             "#;
         
@@ -947,14 +949,14 @@ impl DatabaseProvider for SqliteDatabase {
         if let Some(row) = row {
             Ok(Some(VideoSegment {
                 id: row.get("id"),
-                camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
                 session_id: row.get("session_id"),
-                recording_reason: None, // This method doesn't join with recording_sessions
+                recording_reason: None, // Not fetched in this query
+                camera_id: row.get("camera_id"),
             }))
         } else {
             Ok(None)

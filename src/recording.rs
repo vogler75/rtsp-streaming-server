@@ -628,7 +628,7 @@ impl RecordingManager {
     async fn create_video_segment(
         config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
-        camera_id: String,
+        camera_id: String,  // Only needed for filesystem path
         session_id: i64,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
@@ -684,7 +684,6 @@ impl RecordingManager {
         
         let segment = VideoSegment {
             id: 0, // DB will assign
-            camera_id,
             start_time,
             end_time,
             file_path: Some(file_path),
@@ -692,6 +691,7 @@ impl RecordingManager {
             mp4_data: None, // No blob data for filesystem storage
             session_id,
             recording_reason: None, // Will be filled by the database query when retrieved
+            camera_id: None, // Not stored in segment, available via session
         };
 
         database.add_video_segment(&segment).await?;
@@ -701,7 +701,7 @@ impl RecordingManager {
     async fn create_database_video_segment(
         config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
-        camera_id: String,
+        _camera_id: String,  // Not needed for database storage
         session_id: i64,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
@@ -711,7 +711,6 @@ impl RecordingManager {
         
         let segment = VideoSegment {
             id: 0, // DB will assign
-            camera_id,
             start_time,
             end_time,
             file_path: None, // No file path for database storage
@@ -719,6 +718,7 @@ impl RecordingManager {
             mp4_data: Some(mp4_data), // Store as BLOB
             session_id,
             recording_reason: None, // Will be filled by the database query when retrieved
+            camera_id: None, // Not stored in segment, available via session
         };
 
         database.add_video_segment(&segment).await?;
