@@ -25,8 +25,10 @@ pub struct VideoSegment {
     pub camera_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
-    pub file_path: String,
+    pub file_path: Option<String>,  // Optional for database storage
     pub size_bytes: i64,
+    #[sqlx(default)]  // This field might not exist in older database versions
+    pub mp4_data: Option<Vec<u8>>,  // Optional blob data for database storage
 }
 
 
@@ -148,6 +150,13 @@ pub trait DatabaseProvider: Send + Sync {
     ) -> Result<usize>;
 
     async fn cleanup_database(&self, config: &crate::config::RecordingConfig) -> Result<()>;
+    
+    /// Get a specific video segment by filename (for HTTP streaming)
+    async fn get_video_segment_by_filename(
+        &self,
+        camera_id: &str,
+        filename: &str,
+    ) -> Result<Option<VideoSegment>>;
 }
 
 pub struct SqliteDatabase {
@@ -337,13 +346,20 @@ impl DatabaseProvider for SqliteDatabase {
                 camera_id TEXT NOT NULL,
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP NOT NULL,
-                file_path TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL
+                file_path TEXT,
+                size_bytes INTEGER NOT NULL,
+                mp4_data BLOB
             )
             "#,
         )
         .execute(&self.pool)
         .await?;
+
+        // Add migration for existing databases - add mp4_data column if it doesn't exist
+        sqlx::query("ALTER TABLE video_segments ADD COLUMN mp4_data BLOB")
+            .execute(&self.pool)
+            .await
+            .ok(); // Ignore errors if column already exists
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_camera_time ON video_segments(camera_id, start_time, end_time)")
             .execute(&self.pool)
@@ -680,8 +696,8 @@ impl DatabaseProvider for SqliteDatabase {
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO video_segments (camera_id, start_time, end_time, file_path, size_bytes)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO video_segments (camera_id, start_time, end_time, file_path, size_bytes, mp4_data)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&segment.camera_id)
@@ -689,6 +705,7 @@ impl DatabaseProvider for SqliteDatabase {
         .bind(segment.end_time)
         .bind(&segment.file_path)
         .bind(segment.size_bytes)
+        .bind(&segment.mp4_data)
         .execute(&self.pool)
         .await?;
 
@@ -703,7 +720,7 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Vec<VideoSegment>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, camera_id, start_time, end_time, file_path, size_bytes
+            SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data
             FROM video_segments
             WHERE camera_id = ? AND start_time < ? AND end_time > ?
             ORDER BY start_time ASC
@@ -724,6 +741,7 @@ impl DatabaseProvider for SqliteDatabase {
                 end_time: row.get("end_time"),
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
+                mp4_data: row.get("mp4_data"),
             });
         }
 
@@ -736,17 +754,20 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<usize> {
         // First, select the file paths of the segments to be deleted
         let segments_to_delete = sqlx::query_as::<_, VideoSegment>(
-            "SELECT id, camera_id, start_time, end_time, file_path, size_bytes FROM video_segments WHERE end_time < ?",
+            "SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data FROM video_segments WHERE end_time < ?",
         )
         .bind(older_than)
         .fetch_all(&self.pool)
         .await?;
 
-        // Delete the files from the filesystem
+        // Delete the files from the filesystem (only if they have file_path set)
         for segment in &segments_to_delete {
-            if let Err(e) = tokio::fs::remove_file(&segment.file_path).await {
-                tracing::error!("Failed to delete video segment file {}: {}", segment.file_path, e);
+            if let Some(file_path) = &segment.file_path {
+                if let Err(e) = tokio::fs::remove_file(file_path).await {
+                    tracing::error!("Failed to delete video segment file {}: {}", file_path, e);
+                }
             }
+            // No action needed for database-stored segments - they'll be deleted with the record
         }
 
         // Then, delete the records from the database
@@ -777,7 +798,7 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         // Cleanup video segments
-        if config.video_storage_enabled {
+        if config.video_storage_type != crate::config::Mp4StorageType::Disabled {
             if let Ok(duration) = humantime::parse_duration(&config.video_storage_retention) {
                 if duration.as_secs() > 0 {
                     let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
@@ -794,5 +815,44 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         Ok(())
+    }
+    
+    async fn get_video_segment_by_filename(
+        &self,
+        camera_id: &str,
+        filename: &str,
+    ) -> Result<Option<VideoSegment>> {
+        // Try to find by exact filename match first (for filesystem storage)
+        let row = sqlx::query(
+            r#"
+            SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data
+            FROM video_segments
+            WHERE camera_id = ? AND (
+                file_path LIKE '%' || ? || '%' OR
+                ? LIKE '%' || strftime('%Y-%m-%dT%H-%M-%SZ', start_time) || '%'
+            )
+            ORDER BY start_time DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(camera_id)
+        .bind(filename)
+        .bind(filename)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        if let Some(row) = row {
+            Ok(Some(VideoSegment {
+                id: row.get("id"),
+                camera_id: row.get("camera_id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                file_path: row.get("file_path"),
+                size_bytes: row.get("size_bytes"),
+                mp4_data: row.get("mp4_data"),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }

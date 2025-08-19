@@ -22,13 +22,13 @@ pub struct ActiveRecording {
 #[derive(Clone)]
 pub struct RecordingManager {
     config: Arc<RecordingConfig>,
-    databases: Arc<RwLock<HashMap<String, Arc<dyn DatabaseProvider>>>>, // camera_id -> database
+    pub databases: Arc<RwLock<HashMap<String, Arc<dyn DatabaseProvider>>>>, // camera_id -> database
     active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>, // camera_id -> recording
     frame_subscribers: Arc<RwLock<HashMap<String, broadcast::Receiver<Bytes>>>>, // camera_id -> receiver
 }
 
 impl RecordingManager {
-    pub async fn new(config: Arc<RecordingConfig>) -> crate::errors::Result<Self> {
+    pub async fn new(config: Arc<RecordingConfig>) -> crate::errors::Result<Self> {        
         Ok(Self {
             config,
             databases: Arc::new(RwLock::new(HashMap::new())),
@@ -57,6 +57,14 @@ impl RecordingManager {
     async fn get_camera_database(&self, camera_id: &str) -> Option<Arc<dyn DatabaseProvider>> {
         let databases = self.databases.read().await;
         databases.get(camera_id).cloned()
+    }
+
+
+    /// Get the effective storage type for a camera
+    pub fn get_storage_type_for_camera(&self, camera_config: &crate::config::CameraConfig) -> crate::config::Mp4StorageType {
+        camera_config.video_storage_type
+            .clone()
+            .unwrap_or(self.config.video_storage_type.clone())
     }
 
     pub async fn start_recording(
@@ -258,7 +266,7 @@ impl RecordingManager {
                 tasks.push(task);
             }
 
-            if config.video_storage_enabled {
+            if config.video_storage_type != crate::config::Mp4StorageType::Disabled {
                 let segmenter_task = tokio::spawn(Self::video_segmenter_loop(
                     config.clone(),
                     database.clone(),
@@ -620,6 +628,24 @@ impl RecordingManager {
             return Ok(());
         }
 
+        // Create video segment based on storage type
+        if config.video_storage_type == crate::config::Mp4StorageType::Database {
+            // Store MP4 data in database as BLOB
+            Self::create_database_video_segment(config, database, camera_id, start_time, end_time, frames).await
+        } else {
+            // Store MP4 file on filesystem
+            Self::create_filesystem_video_segment(config, database, camera_id, start_time, end_time, frames).await
+        }
+    }
+
+    async fn create_filesystem_video_segment(
+        config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        camera_id: String,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        frames: Vec<Bytes>,
+    ) -> crate::errors::Result<()> {
         let recordings_dir = &config.database_path;
         
         // Create hierarchical directory structure: recordings/cam1/2025/08/19/
@@ -638,24 +664,71 @@ impl RecordingManager {
         
         // Use ISO 8601 format for filename (filesystem-safe): 2025-08-19T10-54-00Z.mp4
         let iso_timestamp = start_time.format("%Y-%m-%dT%H-%M-%SZ");
-        let temp_file_path = format!("{}/{}.mp4", camera_dir, iso_timestamp);
+        let file_path = format!("{}/{}.mp4", camera_dir, iso_timestamp);
 
+        let mp4_data = Self::create_mp4_from_frames(frames).await?;
+        
+        // Write MP4 data to file
+        tokio::fs::write(&file_path, &mp4_data).await?;
+        
+        let segment = VideoSegment {
+            id: 0, // DB will assign
+            camera_id,
+            start_time,
+            end_time,
+            file_path: Some(file_path),
+            size_bytes: mp4_data.len() as i64,
+            mp4_data: None, // No blob data for filesystem storage
+        };
+
+        database.add_video_segment(&segment).await?;
+        Ok(())
+    }
+
+    async fn create_database_video_segment(
+        _config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        camera_id: String,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        frames: Vec<Bytes>,
+    ) -> crate::errors::Result<()> {
+        let mp4_data = Self::create_mp4_from_frames(frames).await?;
+        
+        let segment = VideoSegment {
+            id: 0, // DB will assign
+            camera_id,
+            start_time,
+            end_time,
+            file_path: None, // No file path for database storage
+            size_bytes: mp4_data.len() as i64,
+            mp4_data: Some(mp4_data), // Store as BLOB
+        };
+
+        database.add_video_segment(&segment).await?;
+        Ok(())
+    }
+    
+    async fn create_mp4_from_frames(frames: Vec<Bytes>) -> crate::errors::Result<Vec<u8>> {
         let mut cmd = Command::new("ffmpeg");
         cmd.args([
             "-f", "mjpeg",
             "-i", "-",
             "-c:v", "libx264",
             "-preset", "ultrafast",
-            "-y", // Overwrite output file if it exists
-            &temp_file_path,
+            "-f", "mp4", // Output format
+            "-movflags", "frag_keyframe+empty_moov", // Enable streaming-friendly MP4
+            "-", // Output to stdout
         ]);
         cmd.stdin(std::process::Stdio::piped());
-        cmd.stdout(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::null());
 
         let mut child = cmd.spawn()?;
         let mut stdin = child.stdin.take().expect("Failed to open ffmpeg stdin");
+        let stdout = child.stdout.take().expect("Failed to open ffmpeg stdout");
 
+        // Write frames to FFmpeg stdin
         let write_task = tokio::spawn(async move {
             for frame in frames {
                 if let Err(e) = stdin.write_all(&frame).await {
@@ -666,27 +739,22 @@ impl RecordingManager {
             drop(stdin);
         });
 
+        // Read MP4 data from FFmpeg stdout
+        let read_task = tokio::spawn(async move {
+            let mut output = Vec::new();
+            let mut reader = tokio::io::BufReader::new(stdout);
+            tokio::io::copy(&mut reader, &mut output).await.map(|_| output)
+        });
+
         let status = child.wait().await?;
         write_task.await.map_err(|e| crate::errors::StreamError::server(format!("Task join error: {}", e)))?;
-
+        
         if !status.success() {
             return Err(crate::errors::StreamError::ffmpeg("ffmpeg command failed"));
         }
-
-        let metadata = tokio::fs::metadata(&temp_file_path).await?;
-        let size_bytes = metadata.len() as i64;
-
-        let segment = VideoSegment {
-            id: 0, // DB will assign
-            camera_id,
-            start_time,
-            end_time,
-            file_path: temp_file_path,
-            size_bytes,
-        };
-
-        database.add_video_segment(&segment).await?;
-
-        Ok(())
+        
+        let mp4_data = read_task.await.map_err(|e| crate::errors::StreamError::server(format!("Task join error: {}", e)))??;
+        
+        Ok(mp4_data)
     }
 }

@@ -785,17 +785,23 @@ impl ControlHandler {
                     .into_iter()
                     .map(|s| {
                         // Make the file path relative to the recordings directory
-                        let relative_path = Path::new(&s.file_path)
-                            .strip_prefix(&recording_manager.get_recordings_path())
-                            .unwrap_or_else(|_| Path::new(&s.file_path))
-                            .to_str()
-                            .unwrap_or_default();
+                        let relative_path = match &s.file_path {
+                            Some(path) => Path::new(path)
+                                .strip_prefix(&recording_manager.get_recordings_path())
+                                .unwrap_or_else(|_| Path::new(path))
+                                .to_str()
+                                .unwrap_or_default(),
+                            None => {
+                                // For database storage, generate a filename based on timestamp
+                                &s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                            }
+                        };
 
                         serde_json::json!({
                             "id": s.id,
                             "start_time": s.start_time,
                             "end_time": s.end_time,
-                            "url": format!("/recordings/{}", relative_path),
+                            "url": format!("/api/recordings/{}/{}", camera_id, relative_path),
                             "size_bytes": s.size_bytes,
                         })
                     })

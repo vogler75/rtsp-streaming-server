@@ -650,13 +650,14 @@
                                 <span class="help-text">Override global frame-by-frame recording setting</span>
                             </div>
                             <div class="form-group">
-                                <label>MP4 Video Storage</label>
-                                <select id="video_storage_enabled" name="video_storage_enabled">
-                                    <option value="">Use Global Setting</option>
-                                    <option value="true">Enabled</option>
-                                    <option value="false">Disabled</option>
+                                <label>MP4 Video Storage Override</label>
+                                <select id="video_storage_type" name="video_storage_type">
+                                    <option value="">Use system default</option>
+                                    <option value="disabled">Disabled</option>
+                                    <option value="filesystem">Filesystem</option>
+                                    <option value="database">Database</option>
                                 </select>
-                                <span class="help-text">Override global MP4 video recording setting</span>
+                                <span class="help-text">Override system MP4 storage setting for this camera</span>
                             </div>
                             <div class="form-group">
                                 <label>MP4 Retention Period</label>
@@ -955,12 +956,13 @@
                                 <span class="help-text">Enable frame-by-frame recording to database</span>
                             </div>
                             <div class="form-group">
-                                <label>Enable MP4 Video Storage</label>
-                                <select id="config_recording_video_storage_enabled">
-                                    <option value="false">Disabled</option>
-                                    <option value="true">Enabled</option>
+                                <label>MP4 Video Storage</label>
+                                <select id="config_recording_video_storage_type">
+                                    <option value="disabled">Disabled - No MP4 recordings</option>
+                                    <option value="filesystem">Filesystem - Store files on disk</option>
+                                    <option value="database">Database - Store in database (diskless)</option>
                                 </select>
-                                <span class="help-text">Enable MP4 video file recording</span>
+                                <span class="help-text">Choose how MP4 recordings are stored</span>
                             </div>
                             <div class="form-group">
                                 <label>Database Path</label>
@@ -1307,7 +1309,7 @@
             
             // Per-camera MP4 recording settings
             document.getElementById('frame_storage_enabled').value = (config.frame_storage_enabled !== undefined && config.frame_storage_enabled !== null) ? config.frame_storage_enabled.toString() : '';
-            document.getElementById('video_storage_enabled').value = (config.video_storage_enabled !== undefined && config.video_storage_enabled !== null) ? config.video_storage_enabled.toString() : '';
+            document.getElementById('video_storage_type').value = config.video_storage_type || '';
             document.getElementById('video_storage_retention').value = config.video_storage_retention || '';
             document.getElementById('video_segment_minutes').value = config.video_segment_minutes || '';
             
@@ -1400,7 +1402,7 @@
             
             // Recording settings
             document.getElementById('config_recording_frame_storage_enabled').value = (config.recording?.frame_storage_enabled || false).toString();
-            document.getElementById('config_recording_video_storage_enabled').value = (config.recording?.video_storage_enabled || false).toString();
+            document.getElementById('config_recording_video_storage_type').value = config.recording?.video_storage_type || 'filesystem';
             document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
             document.getElementById('config_recording_max_frame_size').value = config.recording?.max_frame_size || '';
             document.getElementById('config_recording_frame_storage_retention').value = config.recording?.frame_storage_retention || '';
@@ -1444,7 +1446,7 @@
                 },
                 recording: {
                     frame_storage_enabled: document.getElementById('config_recording_frame_storage_enabled').value === 'true',
-                    video_storage_enabled: document.getElementById('config_recording_video_storage_enabled').value === 'true',
+                    video_storage_type: document.getElementById('config_recording_video_storage_type').value || 'filesystem',
                     database_path: document.getElementById('config_recording_database_path').value || "recordings",
                     max_frame_size: parseInt(document.getElementById('config_recording_max_frame_size').value) || 10485760,
                     frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
@@ -1662,15 +1664,15 @@
             
             // Add per-camera MP4 recording settings if configured
             const frameStorageEnabled = formData.get('frame_storage_enabled');
-            const videoStorageEnabled = formData.get('video_storage_enabled');
+            const videoStorageType = formData.get('video_storage_type');
             const videoStorageRetention = formData.get('video_storage_retention');
             const videoSegmentMinutes = formData.get('video_segment_minutes');
             
             if (frameStorageEnabled !== '' && frameStorageEnabled !== null) {
                 config.frame_storage_enabled = frameStorageEnabled === 'true';
             }
-            if (videoStorageEnabled !== '' && videoStorageEnabled !== null) {
-                config.video_storage_enabled = videoStorageEnabled === 'true';
+            if (videoStorageType !== '' && videoStorageType !== null) {
+                config.video_storage_type = videoStorageType;
             }
             if (videoStorageRetention) {
                 config.video_storage_retention = videoStorageRetention;
