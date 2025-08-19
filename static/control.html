@@ -359,7 +359,7 @@
                     </div>
                 </div>
                 
-                <div class="panel">
+                <div class="panel" id="recordingControlsPanel">
                     <h2>Recording Controls</h2>
                     <div class="info-text" style="margin-bottom: 10px;">📡 Uses REST API</div>
                     <div class="control-group">
@@ -424,6 +424,7 @@
                 this.timelineEnd = null;
                 
                 this.setupEventListeners();
+                this.updateRecordingControlsVisibility();
                 this.connectWebSocket();
                 this.checkActiveRecording();
                 
@@ -464,7 +465,10 @@
                 document.getElementById('fromDate').value = this.formatDateLocal(fromDate);
 
                 document.querySelectorAll('input[name="playbackMode"]').forEach(radio => {
-                    radio.addEventListener('change', () => this.fetchRecordings());
+                    radio.addEventListener('change', () => {
+                        this.updateRecordingControlsVisibility();
+                        this.fetchRecordings();
+                    });
                 });
             }
             
@@ -1017,6 +1021,19 @@
             updateRecordingUI() {
                 document.getElementById('startRecording').disabled = this.isRecording;
                 document.getElementById('stopRecording').disabled = !this.isRecording;
+            }
+
+            updateRecordingControlsVisibility() {
+                const mode = document.querySelector('input[name="playbackMode"]:checked').value;
+                const videoOverlayControls = document.querySelector('.video-overlay-controls');
+                
+                if (mode === 'segments') {
+                    // Hide timeline/playback controls overlay in video segments mode
+                    videoOverlayControls.style.display = 'none';
+                } else {
+                    // Show timeline/playback controls overlay in frame-by-frame mode
+                    videoOverlayControls.style.display = 'block';
+                }
             }
 
             updatePlayerUI() {
