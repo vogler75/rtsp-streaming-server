@@ -21,13 +21,12 @@ pub struct RecordedFrame {
 
 #[derive(Debug, Clone, FromRow)]
 pub struct VideoSegment {
-    pub id: i64,
-    pub start_time: DateTime<Utc>,
+    pub session_id: i64,  // Part of composite primary key with start_time
+    pub start_time: DateTime<Utc>,  // Part of composite primary key with session_id
     pub end_time: DateTime<Utc>,
     pub file_path: Option<String>,  // Optional for database storage
     pub size_bytes: i64,
     pub mp4_data: Option<Vec<u8>>,  // Optional blob data for database storage
-    pub session_id: i64,  // Reference to recording_sessions table
     #[sqlx(default)]  // This field might not exist when not joining with recording_sessions
     pub recording_reason: Option<String>,  // Recording reason from recording_sessions
     #[sqlx(default)]  // This field comes from the JOIN with recording_sessions
@@ -346,13 +345,13 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS video_segments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP NOT NULL,
                 file_path TEXT,
                 size_bytes INTEGER NOT NULL,
                 mp4_data BLOB,
-                session_id INTEGER NOT NULL,
+                PRIMARY KEY (session_id, start_time),
                 FOREIGN KEY (session_id) REFERENCES recording_sessions(id) ON DELETE CASCADE
             )
             "#,
@@ -765,20 +764,20 @@ impl DatabaseProvider for SqliteDatabase {
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO video_segments (start_time, end_time, file_path, size_bytes, mp4_data, session_id)
+            INSERT INTO video_segments (session_id, start_time, end_time, file_path, size_bytes, mp4_data)
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
+        .bind(segment.session_id)
         .bind(segment.start_time)
         .bind(segment.end_time)
         .bind(&segment.file_path)
         .bind(segment.size_bytes)
         .bind(&segment.mp4_data)
-        .bind(segment.session_id)
         .execute(&self.pool)
         .await?;
 
-        Ok(result.last_insert_rowid())
+        Ok(result.rows_affected() as i64)
     }
 
     async fn list_video_segments(
@@ -790,7 +789,7 @@ impl DatabaseProvider for SqliteDatabase {
         let start_time = std::time::Instant::now();
         
         let query_str = r#"
-            SELECT vs.id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.session_id, 
+            SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM video_segments vs
             LEFT JOIN recording_sessions rs ON vs.session_id = rs.id
@@ -822,13 +821,12 @@ impl DatabaseProvider for SqliteDatabase {
         let mut segments = Vec::new();
         for row in rows {
             segments.push(VideoSegment {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: None,  // Not loaded for listing performance
-                session_id: row.get("session_id"),
                 recording_reason: row.get("recording_reason"),
                 camera_id: row.get("camera_id"),
             });
@@ -843,7 +841,7 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<usize> {
         // First, select the file paths of the segments to be deleted
         let segments_to_delete = sqlx::query_as::<_, VideoSegment>(
-            "SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data FROM video_segments WHERE end_time < ?",
+            "SELECT session_id, start_time, end_time, file_path, size_bytes, mp4_data FROM video_segments WHERE end_time < ?",
         )
         .bind(older_than)
         .fetch_all(&self.pool)
@@ -914,7 +912,7 @@ impl DatabaseProvider for SqliteDatabase {
         let start_time = std::time::Instant::now();
         
         let query_str = r#"
-            SELECT vs.id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, vs.session_id, rs.camera_id
+            SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.camera_id
             FROM video_segments vs
             JOIN recording_sessions rs ON vs.session_id = rs.id
             WHERE rs.camera_id = ? AND (
@@ -948,13 +946,12 @@ impl DatabaseProvider for SqliteDatabase {
         
         if let Some(row) = row {
             Ok(Some(VideoSegment {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
-                session_id: row.get("session_id"),
                 recording_reason: None, // Not fetched in this query
                 camera_id: row.get("camera_id"),
             }))

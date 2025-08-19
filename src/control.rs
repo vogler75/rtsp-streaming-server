@@ -811,7 +811,7 @@ impl ControlHandler {
                         };
 
                         serde_json::json!({
-                            "id": s.id,
+                            "id": format!("{}_{}", s.session_id, s.start_time.timestamp()),
                             "start_time": s.start_time,
                             "end_time": s.end_time,
                             "url": format!("/api/recordings/{}/{}", camera_id, relative_path),

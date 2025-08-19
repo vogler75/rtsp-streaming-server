@@ -683,13 +683,12 @@ impl RecordingManager {
         tokio::fs::write(&file_path, &mp4_data).await?;
         
         let segment = VideoSegment {
-            id: 0, // DB will assign
+            session_id,
             start_time,
             end_time,
             file_path: Some(file_path),
             size_bytes: mp4_data.len() as i64,
             mp4_data: None, // No blob data for filesystem storage
-            session_id,
             recording_reason: None, // Will be filled by the database query when retrieved
             camera_id: None, // Not stored in segment, available via session
         };
@@ -710,13 +709,12 @@ impl RecordingManager {
         let mp4_data = Self::create_mp4_from_frames(frames, config.mp4_framerate).await?;
         
         let segment = VideoSegment {
-            id: 0, // DB will assign
+            session_id,
             start_time,
             end_time,
             file_path: None, // No file path for database storage
             size_bytes: mp4_data.len() as i64,
             mp4_data: Some(mp4_data), // Store as BLOB
-            session_id,
             recording_reason: None, // Will be filled by the database query when retrieved
             camera_id: None, // Not stored in segment, available via session
         };
