@@ -141,6 +141,10 @@ where
     deserializer.deserialize_option(OptionalTimestampVisitor)
 }
 
+fn default_sort_order() -> String {
+    "newest".to_string()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd")]
 pub enum ControlCommand {
@@ -170,6 +174,8 @@ pub enum ControlCommand {
         from: DateTime<Utc>,
         #[serde(deserialize_with = "deserialize_optional_timestamp", default)]
         to: Option<DateTime<Utc>>,
+        #[serde(default = "default_sort_order")]
+        sort_order: String, // "newest" or "oldest"
     },
 }
 
@@ -394,8 +400,8 @@ impl ControlHandler {
             ControlCommand::GoToTimestamp { timestamp } => {
                 Self::handle_goto_timestamp(camera_id, timestamp, recording_manager, sender).await
             }
-            ControlCommand::ListSegments { from, to } => {
-                Self::handle_list_segments(camera_id, from, to, recording_manager).await
+            ControlCommand::ListSegments { from, to, sort_order } => {
+                Self::handle_list_segments(camera_id, from, to, &sort_order, recording_manager).await
             }
         }
     }
@@ -776,11 +782,18 @@ impl ControlHandler {
         camera_id: &str,
         from: DateTime<Utc>,
         to: Option<DateTime<Utc>>,
+        sort_order: &str,
         recording_manager: &RecordingManager,
     ) -> CommandResponse {
         let to = to.unwrap_or_else(Utc::now);
         match recording_manager.list_video_segments(camera_id, from, to).await {
-            Ok(segments) => {
+            Ok(mut segments) => {
+                // Sort segments based on sort_order parameter
+                match sort_order {
+                    "oldest" => segments.sort_by(|a, b| a.start_time.cmp(&b.start_time)),
+                    _ => segments.sort_by(|a, b| b.start_time.cmp(&a.start_time)), // "newest" (default)
+                }
+                
                 let segments_data: Vec<serde_json::Value> = segments
                     .into_iter()
                     .map(|s| {

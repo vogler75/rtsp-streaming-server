@@ -397,6 +397,13 @@
                             <label><input type="radio" name="playbackMode" value="segments"> Video Segments</label>
                         </div>
                     </div>
+                    <div class="control-group">
+                        <label>Sort Order:</label>
+                        <select id="sortOrder" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="newest">Newest First</option>
+                            <option value="oldest">Oldest First</option>
+                        </select>
+                    </div>
                     <div class="recordings-list" id="recordingsList">
                         <div class="info-text">Select a date range and click "Refresh List"</div>
                     </div>
@@ -469,6 +476,11 @@
                         this.updateRecordingControlsVisibility();
                         this.fetchRecordings();
                     });
+                });
+
+                // Add sort order change listener
+                document.getElementById('sortOrder').addEventListener('change', () => {
+                    this.fetchRecordings();
                 });
             }
             
@@ -684,10 +696,12 @@
                 const fromDate = new Date(from + 'T00:00:00');
                 const toDate = new Date(to + 'T23:59:59');
 
+                const sortOrder = document.getElementById('sortOrder').value;
                 this.sendCommand({
                     cmd: 'list_segments',
                     from: fromDate.toISOString(),
                     to: toDate.toISOString(),
+                    sort_order: sortOrder,
                 });
             }
 
