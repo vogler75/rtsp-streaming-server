@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use tokio::sync::{broadcast, RwLock};
@@ -31,6 +32,7 @@ pub struct RtspClient {
     last_frame_hash: Arc<RwLock<Option<u64>>>, // Hash of last frame for deduplication
     duplicate_frame_count: Arc<RwLock<u64>>, // Count of duplicate frames since last status update
     last_mqtt_publish_time: Arc<RwLock<Option<u128>>>, // Last MQTT image publish timestamp
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl RtspClient {
@@ -60,9 +62,10 @@ impl RtspClient {
             last_frame_hash: Arc::new(RwLock::new(None)),
             duplicate_frame_count: Arc::new(RwLock::new(0)),
             last_mqtt_publish_time: Arc::new(RwLock::new(None)),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
     }
-
+    
     pub async fn start(&self) -> Result<()> {
         // Main capture loop
         loop {
@@ -252,12 +255,24 @@ impl RtspClient {
         let max_retries = 10;
         
         loop {
+            // Check for shutdown signal before starting
+            if self.shutdown_flag.load(Ordering::Relaxed) {
+                info!("[{}] Shutdown detected, stopping FFmpeg retry loop", self.camera_id);
+                return Ok(());
+            }
+            
             match self.run_ffmpeg_process().await {
                 Ok(_) => {
                     info!("FFmpeg process ended normally");
                     retry_count = 0; // Reset on successful run
                 }
                 Err(e) => {
+                    // Check for shutdown before retrying
+                    if self.shutdown_flag.load(Ordering::Relaxed) {
+                        info!("[{}] Shutdown detected during error handling, stopping FFmpeg", self.camera_id);
+                        return Ok(());
+                    }
+                    
                     retry_count += 1;
                     error!("FFmpeg process failed (attempt {}): {}", retry_count, e);
                     
@@ -269,7 +284,15 @@ impl RtspClient {
                     // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
                     let delay = std::cmp::min(1u64 << (retry_count - 1), 30);
                     warn!("[{}] Waiting {} seconds before retrying FFmpeg...", self.camera_id, delay);
-                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                    
+                    // Check for shutdown during delay
+                    for _ in 0..delay {
+                        if self.shutdown_flag.load(Ordering::Relaxed) {
+                            info!("[{}] Shutdown detected during retry delay, stopping FFmpeg", self.camera_id);
+                            return Ok(());
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
             }
         }
@@ -565,6 +588,13 @@ impl RtspClient {
         
         // Read MJPEG frames from FFmpeg stdout with process monitoring
         loop {
+            // Check for shutdown signal with a short timeout
+            if self.shutdown_flag.load(Ordering::Relaxed) {
+                info!("[{}] Shutdown detected, killing FFmpeg process", self.camera_id);
+                let _ = ffmpeg_cmd.kill().await;
+                return Ok(());
+            }
+            
             tokio::select! {
                 // Check for data timeout
                 _ = tokio::time::sleep_until(last_data_time + data_timeout_duration) => {

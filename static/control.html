@@ -1026,13 +1026,16 @@
             updateRecordingControlsVisibility() {
                 const mode = document.querySelector('input[name="playbackMode"]:checked').value;
                 const videoOverlayControls = document.querySelector('.video-overlay-controls');
+                const statusMessage = document.getElementById('statusMessage');
                 
                 if (mode === 'segments') {
-                    // Hide timeline/playback controls overlay in video segments mode
+                    // Hide timeline/playback controls overlay and status message in video segments mode
                     videoOverlayControls.style.display = 'none';
+                    statusMessage.style.display = 'none';
                 } else {
-                    // Show timeline/playback controls overlay in frame-by-frame mode
+                    // Show timeline/playback controls overlay and status message in frame-by-frame mode
                     videoOverlayControls.style.display = 'block';
+                    statusMessage.style.display = 'block';
                 }
             }
 
