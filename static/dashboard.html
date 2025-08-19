@@ -1114,9 +1114,15 @@
         async function authenticateAdmin() {
             const token = document.getElementById('adminToken').value;
             
+            if (!token) {
+                showAlert('Please enter an admin token', 'error');
+                return;
+            }
+            
             try {
-                // Test admin access by trying to get a camera config (using cam1 as test)
-                const response = await fetch(`${basePath}/api/admin/cameras/cam1`, {
+                // Test admin access by trying to get server config (requires admin token)
+                const response = await fetch(`${basePath}/api/admin/config`, {
+                    method: 'GET',
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -1129,11 +1135,14 @@
                     enableAdminMode();
                     closeAuthModal();
                     showAlert('Admin mode enabled', 'success');
-                } else {
+                } else if (response.status === 401) {
                     showAlert('Invalid admin token', 'error');
+                    document.getElementById('adminToken').value = '';
+                } else {
+                    showAlert('Authentication failed: ' + response.statusText, 'error');
                 }
             } catch (error) {
-                showAlert('Authentication failed', 'error');
+                showAlert('Authentication failed: ' + error.message, 'error');
             }
         }
 

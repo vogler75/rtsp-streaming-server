@@ -745,10 +745,6 @@ async fn main() -> Result<()> {
         }
     }));
     
-    // Add admin web interface
-    app = app.route("/admin", axum::routing::get(admin_page));
-    app = app.route("/admin/", axum::routing::get(admin_page));
-    
     // Add fallback handler for dynamic camera routes
     let fallback_state = app_state.clone();
     app = app.fallback(move |uri: axum::http::Uri, ws: Option<axum::extract::WebSocketUpgrade>, query: axum::extract::Query<std::collections::HashMap<String, String>>, addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: axum::http::HeaderMap| {
@@ -1792,14 +1788,6 @@ async fn api_update_config(
             .into_response()
         }
     }
-}
-
-async fn admin_page() -> axum::response::Response {
-    let html = include_str!("../static/admin.html");
-    (
-        [(axum::http::header::CONTENT_TYPE, "text/html")],
-        html
-    ).into_response()
 }
 
 // Camera management functions for dynamic reload
