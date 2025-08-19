@@ -669,71 +669,170 @@ This makes it easy to identify issues with specific cameras.
 
 ## Recording System
 
-The server includes a comprehensive recording system that stores camera streams to a SQLite database for later playback.
+The server includes a comprehensive dual-format recording system that provides both granular frame-by-frame access and efficient video segment storage.
 
 ### Recording Features
 
+- **Dual Storage System**: 
+  - Frame-by-frame SQLite database for precise playback control
+  - MP4 video segments for efficient long-term storage
 - **Manual Recording**: Start/stop recording via REST API or control interface
-- **Frame Storage**: Stores individual JPEG frames with timestamps
-- **Playback**: Replay recorded footage at variable speeds
+- **Frame Storage**: Stores individual JPEG frames with timestamps for precise seeking
+- **Video Segments**: Creates time-based MP4 files for efficient storage and playback
+- **Playback**: Replay recorded footage at variable speeds from either storage format
 - **Time-based Filtering**: Query recordings by date/time ranges
-- **Automatic Cleanup**: Periodically delete old recordings to manage disk space
+- **Automatic Cleanup**: Independent retention policies for frames vs. video segments
 
 ### Recording Configuration
+
+The recording system supports two storage formats with independent configuration:
 
 ```json
 {
   "recording": {
-    "enabled": true,
+    "frame_storage_enabled": true,
+    "video_storage_enabled": true,
     "database_path": "recordings",
     "max_frame_size": 10485760,
-    "max_recording_age": "7d",
+    "frame_storage_retention": "7d",
+    "video_storage_retention": "30d",
+    "video_segment_minutes": 5,
     "cleanup_interval_hours": 1
   }
 }
 ```
 
+Or using TOML format:
+
+```toml
+[recording]
+# Frame-by-frame recording for high-granularity, short-term playback
+frame_storage_enabled = true
+database_path = "recordings"
+max_frame_size = 10485760
+frame_storage_retention = "7d"  # Delete frame recordings older than this
+
+# MP4 video segment recording for efficient, long-term storage  
+video_storage_enabled = true
+video_storage_retention = "30d"  # Delete video segments older than this
+video_segment_minutes = 5        # Duration of each MP4 video segment in minutes
+
+# Global cleanup settings
+cleanup_interval_hours = 1  # How often to run the cleanup process
+```
+
 #### Recording Options
-- **enabled**: Enable/disable recording system
-- **database_path**: SQLite database file location
-- **max_frame_size**: Maximum size for a single frame in bytes
-- **max_recording_age**: Maximum age for recordings before deletion
+- **frame_storage_enabled**: Enable/disable frame-by-frame SQLite storage
+- **video_storage_enabled**: Enable/disable MP4 video segment creation
+- **database_path**: Base path for database files and video segments
+- **max_frame_size**: Maximum size for a single frame in bytes (SQLite storage)
+- **frame_storage_retention**: Maximum age for frame recordings before deletion
   - Format: `"10m"` (minutes), `"5h"` (hours), `"7d"` (days)
-  - Set to `"0"` or omit to disable automatic cleanup
+  - Typically shorter for high-granularity access (e.g., 1-7 days)
+- **video_storage_retention**: Maximum age for video segments before deletion
+  - Format: `"10m"` (minutes), `"5h"` (hours), `"30d"` (days)
+  - Typically longer for archival storage (e.g., 30-90 days)
+- **video_segment_minutes**: Duration of each MP4 video segment in minutes (default: 5)
 - **cleanup_interval_hours**: How often to run the cleanup task (default: 1 hour)
 
 ### Per-Camera Recording Settings
 
-You can override the global `max_recording_age` for individual cameras in their JSON configuration files:
+You can override global recording settings for individual cameras in their configuration files:
 
 ```json
 {
   "path": "/cam1",
   "url": "rtsp://...",
-  "max_recording_age": "1d"
+  "frame_storage_retention": "1d",
+  "video_storage_retention": "14d"
 }
 ```
 
+Note: The legacy `max_recording_age` setting is still supported and will apply to both storage types if the new specific settings are not provided.
+
 ### Automatic Cleanup
 
-When `max_recording_age` is configured, the server will:
-1. Start a background cleanup task that runs every `cleanup_interval_hours`
-2. Delete frames older than the specified age based on their timestamp
-3. Delete completed recording sessions that ended before the cutoff time
-4. Preserve active/ongoing recordings (sessions without end_time)
-5. Process each camera independently based on its configuration
-6. Log cleanup activities for monitoring
+The server runs independent cleanup processes for both storage formats:
 
-The cleanup process:
-- Runs in a transaction to ensure database consistency
-- Deletes old frames by timestamp (not by session)
-- Only deletes completed sessions (where end_time < cutoff)
-- Keeps active recordings intact, even if they started long ago
-- Cleans up orphaned sessions with no remaining frames
-- Handles per-camera overrides
-- Reports number of deleted sessions and frames
+#### Frame Storage Cleanup
+When `frame_storage_retention` is configured:
+1. Background cleanup task runs every `cleanup_interval_hours`
+2. Deletes frames older than the retention period based on timestamp
+3. Deletes completed recording sessions that ended before the cutoff time
+4. Preserves active/ongoing recordings (sessions without end_time)
+5. Processes each camera independently based on its configuration
 
-This design ensures that continuous recordings are preserved while old data is cleaned up efficiently.
+#### Video Storage Cleanup
+When `video_storage_retention` is configured:
+1. Scans MP4 files in the recordings directory
+2. Deletes video segments older than the retention period based on filename timestamp
+3. Uses hierarchical directory structure for organization (YYYY/MM/DD)
+4. Processes each camera's video files independently
+
+#### Cleanup Process Details
+- Runs in transactions to ensure database consistency (frame storage)
+- Deletes old data by timestamp, not by recording session
+- Preserves active recordings even if they started long ago
+- Handles per-camera retention overrides
+- Logs cleanup activities for monitoring
+- Reports number of deleted sessions, frames, and video files
+
+This dual-format design allows you to maintain short-term high-granularity access (frames) while preserving long-term efficient storage (video segments).
+
+### File Structure
+
+The recording system creates the following directory structure:
+
+```
+recordings/
+├── cam1.db                           # Frame-by-frame SQLite database
+├── cam1/                             # MP4 video segments directory
+│   ├── 2024/
+│   │   └── 08/
+│   │       └── 19/
+│   │           ├── cam1_20240819_140000.mp4    # 5-minute segments
+│   │           ├── cam1_20240819_140500.mp4
+│   │           └── cam1_20240819_141000.mp4
+├── cam2.db                           # Frame database for camera 2
+├── cam2/                             # MP4 segments for camera 2
+│   └── 2024/
+│       └── 08/
+│           └── 19/
+│               └── cam2_20240819_140000.mp4
+```
+
+#### File Naming Convention
+- **SQLite databases**: `{camera_id}.db`
+- **MP4 segments**: `{camera_id}_{YYYYMMDD}_{HHMMSS}.mp4`
+- **Directory structure**: `recordings/{camera_id}/{YYYY}/{MM}/{DD}/`
+
+This hierarchical structure makes it easy to navigate recordings by date and enables efficient cleanup of old video segments.
+
+### How the Dual Storage System Works
+
+The recording system uses a unified architecture where both storage formats receive frames from the same source:
+
+```
+RTSP Camera → FFmpeg (MJPEG) → Broadcast Channel → {
+  ├── WebSocket clients (live streaming)
+  ├── Frame recorder → SQLite database (frame-by-frame storage)
+  └── Video segmenter → Buffer → FFmpeg (MP4) → MP4 files
+}
+```
+
+#### Frame Storage (SQLite)
+- Stores individual JPEG frames with precise timestamps
+- Enables frame-by-frame playback and seeking
+- Ideal for short-term storage with high granularity
+- Used for precise timeline scrubbing and frame analysis
+
+#### Video Storage (MP4)
+- Collects frames in a buffer for the configured segment duration
+- Creates MP4 files using FFmpeg with H.264 encoding
+- Provides efficient compression for long-term storage
+- Suitable for continuous playback and archival purposes
+
+Both systems operate independently and can be enabled/disabled separately. You can configure different retention policies - for example, keep frames for 1 day for precise analysis and video segments for 30 days for long-term review.
 
 ## Control API
 

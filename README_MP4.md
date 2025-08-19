@@ -1,4 +1,28 @@
-How the System Works:
+How the MP4 Recording System Works:
+
+  Configuration:
+  
+  The MP4 recording system is part of the dual-format recording architecture and can be configured independently:
+  
+  ```json
+  {
+    "recording": {
+      "frame_storage_enabled": true,      // SQLite frame storage
+      "video_storage_enabled": true,      // MP4 video segment creation
+      "database_path": "recordings",
+      "video_segment_minutes": 5,         // Duration of each MP4 segment
+      "video_storage_retention": "30d"    // Auto-cleanup after 30 days
+    }
+  }
+  ```
+  
+  Or in TOML format:
+  ```toml
+  [recording]
+  video_storage_enabled = true
+  video_segment_minutes = 5
+  video_storage_retention = "30d"
+  ```
 
   1. Frame Generation & Streaming
 
@@ -25,7 +49,7 @@ How the System Works:
     a. Spawns a new FFmpeg process specifically for MP4 creation
     b. Pipes MJPEG frames to FFmpeg stdin
     c. FFmpeg command: ffmpeg -f mjpeg -i - -c:v libx264 -preset ultrafast -y output.mp4
-    d. Writes the MP4 file to the recordings directory
+    d. Writes the MP4 file to the hierarchical recordings directory (recordings/{camera_id}/{YYYY}/{MM}/{DD}/)
 
   4. Why You Don't See Additional FFmpeg Processes
 
@@ -35,13 +59,35 @@ How the System Works:
 
   5. File Structure
 
+  The system now uses a hierarchical directory structure for better organization:
+
   recordings/
-  ├── cam1.db                    # Frame-by-frame SQLite database
-  ├── cam1_1724058000.mp4       # Video segments
-  ├── cam1_1724058300.mp4
-  ├── cam2.db
-  ├── cam2_1724058000.mp4
+  ├── cam1.db                                    # Frame-by-frame SQLite database
+  ├── cam1/                                      # MP4 video segments directory
+  │   ├── 2024/
+  │   │   └── 08/
+  │   │       └── 19/
+  │   │           ├── cam1_20240819_140000.mp4   # 5-minute segments with ISO 8601 format
+  │   │           ├── cam1_20240819_140500.mp4
+  │   │           └── cam1_20240819_141000.mp4
+  ├── cam2.db                                    # Frame database for camera 2
+  ├── cam2/                                      # MP4 segments for camera 2
+  │   └── 2024/
+  │       └── 08/
+  │           └── 19/
+  │               └── cam2_20240819_140000.mp4
   └── ...
+
+  File Naming Convention:
+  - SQLite databases: {camera_id}.db
+  - MP4 segments: {camera_id}_{YYYYMMDD}_{HHMMSS}.mp4 (ISO 8601 format)
+  - Directory structure: recordings/{camera_id}/{YYYY}/{MM}/{DD}/
+
+  Benefits of hierarchical structure:
+  - Easy navigation by date
+  - Efficient cleanup of old recordings
+  - Reduced directory listing overhead
+  - Better file system performance with many files
 
   Summary Architecture:
 
@@ -52,3 +98,21 @@ How the System Works:
   }
 
   The system is quite efficient - it uses one persistent FFmpeg per camera for real-time streaming, and temporary FFmpeg processes only when creating MP4 segments from the buffered frames.
+
+  6. Automatic Cleanup
+
+  The hierarchical directory structure enables efficient cleanup of old MP4 recordings:
+  
+  - Cleanup process scans the directory structure: recordings/{camera_id}/{YYYY}/{MM}/{DD}/
+  - Deletes MP4 files older than the configured retention period based on filename timestamp
+  - Removes empty directories after file deletion
+  - Each camera's files are processed independently
+  - Cleanup runs every `cleanup_interval_hours` (default: 1 hour)
+  
+  Example cleanup process:
+  1. Check video_storage_retention (e.g., "30d")
+  2. Calculate cutoff date (30 days ago)
+  3. Scan directory structure for each camera
+  4. Delete files older than cutoff: cam1_20240719_*.mp4 (if today is 2024-08-19)
+  5. Remove empty date directories: recordings/cam1/2024/07/19/ (if empty)
+  6. Log cleanup results: "Deleted 144 video segments for cam1"
