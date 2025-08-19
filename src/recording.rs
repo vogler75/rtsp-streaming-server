@@ -631,10 +631,10 @@ impl RecordingManager {
         // Create video segment based on storage type
         if config.video_storage_type == crate::config::Mp4StorageType::Database {
             // Store MP4 data in database as BLOB
-            Self::create_database_video_segment(config, database, camera_id, start_time, end_time, frames).await
+            Self::create_database_video_segment(config.clone(), database, camera_id, start_time, end_time, frames).await
         } else {
             // Store MP4 file on filesystem
-            Self::create_filesystem_video_segment(config, database, camera_id, start_time, end_time, frames).await
+            Self::create_filesystem_video_segment(config.clone(), database, camera_id, start_time, end_time, frames).await
         }
     }
 
@@ -666,7 +666,7 @@ impl RecordingManager {
         let iso_timestamp = start_time.format("%Y-%m-%dT%H-%M-%SZ");
         let file_path = format!("{}/{}.mp4", camera_dir, iso_timestamp);
 
-        let mp4_data = Self::create_mp4_from_frames(frames).await?;
+        let mp4_data = Self::create_mp4_from_frames(frames, config.mp4_framerate).await?;
         
         // Write MP4 data to file
         tokio::fs::write(&file_path, &mp4_data).await?;
@@ -686,14 +686,14 @@ impl RecordingManager {
     }
 
     async fn create_database_video_segment(
-        _config: Arc<RecordingConfig>,
+        config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
         camera_id: String,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
     ) -> crate::errors::Result<()> {
-        let mp4_data = Self::create_mp4_from_frames(frames).await?;
+        let mp4_data = Self::create_mp4_from_frames(frames, config.mp4_framerate).await?;
         
         let segment = VideoSegment {
             id: 0, // DB will assign
@@ -709,13 +709,15 @@ impl RecordingManager {
         Ok(())
     }
     
-    async fn create_mp4_from_frames(frames: Vec<Bytes>) -> crate::errors::Result<Vec<u8>> {
+    async fn create_mp4_from_frames(frames: Vec<Bytes>, framerate: f32) -> crate::errors::Result<Vec<u8>> {
         let mut cmd = Command::new("ffmpeg");
         cmd.args([
             "-f", "mjpeg",
+            "-r", &framerate.to_string(), // Input framerate
             "-i", "-",
             "-c:v", "libx264",
             "-preset", "ultrafast",
+            "-r", &framerate.to_string(), // Output framerate
             "-f", "mp4", // Output format
             "-movflags", "frag_keyframe+empty_moov", // Enable streaming-friendly MP4
             "-", // Output to stdout

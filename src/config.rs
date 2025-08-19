@@ -182,6 +182,8 @@ pub struct RecordingConfig {
     pub video_storage_retention: String, // Max age for video recordings (e.g., "30d")
     #[serde(default = "default_video_segment_minutes")]
     pub video_segment_minutes: u64, // Duration of each video segment in minutes
+    #[serde(default = "default_mp4_framerate")]
+    pub mp4_framerate: f32, // Framerate for MP4 recordings (e.g., 5.0, 15.0, 30.0)
     
     // Cleanup settings
     #[serde(default = "default_cleanup_interval_hours")]
@@ -195,6 +197,7 @@ pub struct RecordingConfig {
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
 fn default_video_storage_retention() -> String { "30d".to_string() }
 fn default_video_segment_minutes() -> u64 { 5 }
+fn default_mp4_framerate() -> f32 { 5.0 }
 fn default_cleanup_interval_hours() -> u64 { 1 }
 
 impl MqttConfig {
@@ -250,6 +253,7 @@ impl Default for Config {
                 video_storage_type: Mp4StorageType::Disabled,
                 video_storage_retention: default_video_storage_retention(),
                 video_segment_minutes: default_video_segment_minutes(),
+                mp4_framerate: default_mp4_framerate(),
                 cleanup_interval_hours: default_cleanup_interval_hours(),
                 video_storage_enabled: None, // For migration only
             }),

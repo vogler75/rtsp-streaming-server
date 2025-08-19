@@ -19,7 +19,8 @@
     "max_frame_size": 10485760,
     "video_segment_minutes": 5,
     "video_storage_retention": "30d",
-    "video_storage_type": "database"
+    "video_storage_type": "database",
+    "mp4_framerate": 5.0
   },
   "server": {
     "admin_token": "test",
