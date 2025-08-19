@@ -664,7 +664,8 @@
                 const toDate = new Date(to + 'T23:59:59');     // End of day in local time
 
                 // Convert to UTC for backend API call
-                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings?from=${fromDate.toISOString()}&to=${toDate.toISOString()}`;
+                const sortOrder = document.getElementById('sortOrder').value;
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings?from=${fromDate.toISOString()}&to=${toDate.toISOString()}&sort_order=${sortOrder}`;
                 
                 try {
                     const headers = {};
@@ -747,7 +748,8 @@
                         durationText = `<br>Duration: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                     }
                     
-                    item.innerHTML = `<strong>Session ${rec.id}</strong><br>Start: ${startTime}<br>End: ${endTime}${durationText}`;
+                    const reasonText = rec.reason && rec.reason !== 'null' ? `<br>📝 <em>${rec.reason}</em>` : '';
+                    item.innerHTML = `<strong>Session ${rec.id}</strong>${reasonText}<br>Start: ${startTime}<br>End: ${endTime}${durationText}`;
                     item.addEventListener('click', () => {
                         this.selectedRecording = rec;
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
@@ -774,7 +776,8 @@
                     const endTime = new Date(seg.end_time).toLocaleTimeString();
                     const sizeMB = (seg.size_bytes / (1024 * 1024)).toFixed(2);
 
-                    item.innerHTML = `<strong>${startTime} - ${endTime}</strong><br>${sizeMB} MB`;
+                    const reasonText = seg.recording_reason && seg.recording_reason !== 'Unknown' ? `<br>📝 <em>${seg.recording_reason}</em>` : '';
+                    item.innerHTML = `<strong>${startTime} - ${endTime}</strong><br>${sizeMB} MB${reasonText}`;
                     item.addEventListener('click', () => {
                         this.playVideoSegment(seg.url);
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));

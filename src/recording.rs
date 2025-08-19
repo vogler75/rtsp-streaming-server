@@ -679,6 +679,7 @@ impl RecordingManager {
             file_path: Some(file_path),
             size_bytes: mp4_data.len() as i64,
             mp4_data: None, // No blob data for filesystem storage
+            recording_reason: None, // Will be filled by the database query when retrieved
         };
 
         database.add_video_segment(&segment).await?;
@@ -703,6 +704,7 @@ impl RecordingManager {
             file_path: None, // No file path for database storage
             size_bytes: mp4_data.len() as i64,
             mp4_data: Some(mp4_data), // Store as BLOB
+            recording_reason: None, // Will be filled by the database query when retrieved
         };
 
         database.add_video_segment(&segment).await?;

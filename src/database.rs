@@ -29,6 +29,8 @@ pub struct VideoSegment {
     pub size_bytes: i64,
     #[sqlx(default)]  // This field might not exist in older database versions
     pub mp4_data: Option<Vec<u8>>,  // Optional blob data for database storage
+    #[sqlx(default)]  // This field might not exist when not joining with recording_sessions
+    pub recording_reason: Option<String>,  // Recording reason from recording_sessions
 }
 
 
@@ -720,10 +722,15 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Vec<VideoSegment>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data
-            FROM video_segments
-            WHERE camera_id = ? AND start_time < ? AND end_time > ?
-            ORDER BY start_time ASC
+            SELECT vs.id, vs.camera_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.reason as recording_reason
+            FROM video_segments vs
+            LEFT JOIN recording_sessions rs ON (
+                vs.camera_id = rs.camera_id 
+                AND vs.start_time >= rs.start_time 
+                AND (rs.end_time IS NULL OR vs.start_time <= rs.end_time)
+            )
+            WHERE vs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
+            ORDER BY vs.start_time ASC
             "#,
         )
         .bind(camera_id)
@@ -742,6 +749,7 @@ impl DatabaseProvider for SqliteDatabase {
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
+                recording_reason: row.get("recording_reason"),
             });
         }
 
@@ -850,6 +858,7 @@ impl DatabaseProvider for SqliteDatabase {
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
+                recording_reason: None, // This method doesn't join with recording_sessions
             }))
         } else {
             Ok(None)

@@ -1058,6 +1058,12 @@ struct StartRecordingRequest {
 struct GetRecordingsQuery {
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
+    #[serde(default = "default_sort_order_recordings")]
+    sort_order: String,
+}
+
+fn default_sort_order_recordings() -> String {
+    "newest".to_string()
 }
 
 #[derive(Deserialize)]
@@ -1444,7 +1450,13 @@ async fn api_list_recordings(
     }
 
     match recording_manager.list_recordings(Some(&camera_id), query.from, query.to).await {
-        Ok(recordings) => {
+        Ok(mut recordings) => {
+            // Sort recordings based on sort_order parameter
+            match query.sort_order.as_str() {
+                "oldest" => recordings.sort_by(|a, b| a.start_time.cmp(&b.start_time)),
+                _ => recordings.sort_by(|a, b| b.start_time.cmp(&a.start_time)), // "newest" (default)
+            }
+            
             let recordings_data: Vec<serde_json::Value> = recordings
                 .into_iter()
                 .map(|r| serde_json::json!({

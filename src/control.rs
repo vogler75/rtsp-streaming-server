@@ -816,6 +816,7 @@ impl ControlHandler {
                             "end_time": s.end_time,
                             "url": format!("/api/recordings/{}/{}", camera_id, relative_path),
                             "size_bytes": s.size_bytes,
+                            "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
                         })
                     })
                     .collect();
