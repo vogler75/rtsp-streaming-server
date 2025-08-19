@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{SqlitePool, Row};
+use sqlx::{SqlitePool, Row, FromRow};
 use crate::errors::Result;
 
 #[derive(Debug, Clone)]
@@ -18,6 +18,17 @@ pub struct RecordedFrame {
     pub timestamp: DateTime<Utc>,
     pub frame_data: Vec<u8>,  // Store actual frame data
 }
+
+#[derive(Debug, Clone, FromRow)]
+pub struct VideoSegment {
+    pub id: i64,
+    pub camera_id: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub file_path: String,
+    pub size_bytes: i64,
+}
+
 
 // Streaming interface for database-agnostic frame iteration
 #[async_trait]
@@ -100,7 +111,7 @@ pub trait DatabaseProvider: Send + Sync {
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>>;
     
-    async fn delete_old_recordings(
+    async fn delete_old_frames_and_sessions(
         &self,
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
@@ -121,6 +132,22 @@ pub trait DatabaseProvider: Send + Sync {
     ) -> Result<Box<dyn FrameStream>>;
     
     async fn get_database_size(&self) -> Result<i64>;
+
+    async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64>;
+
+    async fn list_video_segments(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<VideoSegment>>;
+
+    async fn delete_old_video_segments(
+        &self,
+        older_than: DateTime<Utc>,
+    ) -> Result<usize>;
+
+    async fn cleanup_database(&self, config: &crate::config::RecordingConfig) -> Result<()>;
 }
 
 pub struct SqliteDatabase {
@@ -303,6 +330,25 @@ impl DatabaseProvider for SqliteDatabase {
             .execute(&self.pool)
             .await?;
 
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS video_segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                camera_id TEXT NOT NULL,
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP NOT NULL,
+                file_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_camera_time ON video_segments(camera_id, start_time, end_time)")
+            .execute(&self.pool)
+            .await?;
+
         Ok(())
     }
 
@@ -471,7 +517,7 @@ impl DatabaseProvider for SqliteDatabase {
         Ok(frames)
     }
 
-    async fn delete_old_recordings(
+    async fn delete_old_frames_and_sessions(
         &self,
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
@@ -629,5 +675,124 @@ impl DatabaseProvider for SqliteDatabase {
         .await?;
         
         Ok(row.get("size_bytes"))
+    }
+
+    async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO video_segments (camera_id, start_time, end_time, file_path, size_bytes)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&segment.camera_id)
+        .bind(segment.start_time)
+        .bind(segment.end_time)
+        .bind(&segment.file_path)
+        .bind(segment.size_bytes)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn list_video_segments(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<VideoSegment>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, camera_id, start_time, end_time, file_path, size_bytes
+            FROM video_segments
+            WHERE camera_id = ? AND start_time < ? AND end_time > ?
+            ORDER BY start_time ASC
+            "#,
+        )
+        .bind(camera_id)
+        .bind(to)
+        .bind(from)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut segments = Vec::new();
+        for row in rows {
+            segments.push(VideoSegment {
+                id: row.get("id"),
+                camera_id: row.get("camera_id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                file_path: row.get("file_path"),
+                size_bytes: row.get("size_bytes"),
+            });
+        }
+
+        Ok(segments)
+    }
+
+    async fn delete_old_video_segments(
+        &self,
+        older_than: DateTime<Utc>,
+    ) -> Result<usize> {
+        // First, select the file paths of the segments to be deleted
+        let segments_to_delete = sqlx::query_as::<_, VideoSegment>(
+            "SELECT id, camera_id, start_time, end_time, file_path, size_bytes FROM video_segments WHERE end_time < ?",
+        )
+        .bind(older_than)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Delete the files from the filesystem
+        for segment in &segments_to_delete {
+            if let Err(e) = tokio::fs::remove_file(&segment.file_path).await {
+                tracing::error!("Failed to delete video segment file {}: {}", segment.file_path, e);
+            }
+        }
+
+        // Then, delete the records from the database
+        let result = sqlx::query("DELETE FROM video_segments WHERE end_time < ?")
+            .bind(older_than)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() as usize)
+    }
+
+    async fn cleanup_database(&self, config: &crate::config::RecordingConfig) -> Result<()> {
+        // Cleanup frames
+        if config.frame_storage_enabled {
+            if let Ok(duration) = humantime::parse_duration(&config.frame_storage_retention) {
+                if duration.as_secs() > 0 {
+                    let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
+                    match self.delete_old_frames_and_sessions(None, older_than).await {
+                        Ok(deleted_count) => {
+                            if deleted_count > 0 {
+                                tracing::info!("Deleted {} old frame recording sessions.", deleted_count);
+                            }
+                        }
+                        Err(e) => tracing::error!("Error deleting old frames: {}", e),
+                    }
+                }
+            }
+        }
+
+        // Cleanup video segments
+        if config.video_storage_enabled {
+            if let Ok(duration) = humantime::parse_duration(&config.video_storage_retention) {
+                if duration.as_secs() > 0 {
+                    let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
+                    match self.delete_old_video_segments(older_than).await {
+                        Ok(deleted_count) => {
+                            if deleted_count > 0 {
+                                tracing::info!("Deleted {} old video segments.", deleted_count);
+                            }
+                        }
+                        Err(e) => tracing::error!("Error deleting old video segments: {}", e),
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }

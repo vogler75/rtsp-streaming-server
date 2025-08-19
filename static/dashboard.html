@@ -635,6 +635,43 @@
                     </div>
                 </div>
 
+                <!-- Per-Camera MP4 Recording Settings -->
+                <div class="form-section">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📹 Camera MP4 Recording</h3>
+                    <div class="collapsible-content collapsed">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Frame Storage</label>
+                                <select id="frame_storage_enabled" name="frame_storage_enabled">
+                                    <option value="">Use Global Setting</option>
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                                <span class="help-text">Override global frame-by-frame recording setting</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Video Storage</label>
+                                <select id="video_storage_enabled" name="video_storage_enabled">
+                                    <option value="">Use Global Setting</option>
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                                <span class="help-text">Override global MP4 video recording setting</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Retention Period</label>
+                                <input type="text" id="video_storage_retention" name="video_storage_retention" placeholder="30d">
+                                <span class="help-text">Override global MP4 retention (e.g., 30d, 7d, 24h)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Segment Duration (minutes)</label>
+                                <input type="number" id="video_segment_minutes" name="video_segment_minutes" placeholder="5" min="1" max="60">
+                                <span class="help-text">Override global segment length (1-60 minutes)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="form-section">
                     <h3 class="collapsible collapsed" onclick="toggleSection(this)">MQTT Settings</h3>
                     <div class="collapsible-content collapsed">
@@ -910,12 +947,20 @@
                     <div class="collapsible-content">
                         <div class="form-grid">
                             <div class="form-group">
-                                <label>Enable Recording</label>
-                                <select id="config_recording_enabled">
+                                <label>Enable Frame Storage</label>
+                                <select id="config_recording_frame_storage_enabled">
                                     <option value="false">Disabled</option>
                                     <option value="true">Enabled</option>
                                 </select>
-                                <span class="help-text">Enable video recording functionality</span>
+                                <span class="help-text">Enable frame-by-frame recording to database</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Enable MP4 Video Storage</label>
+                                <select id="config_recording_video_storage_enabled">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Enable MP4 video file recording</span>
                             </div>
                             <div class="form-group">
                                 <label>Database Path</label>
@@ -928,9 +973,19 @@
                                 <span class="help-text">Maximum size for a single frame (10MB default)</span>
                             </div>
                             <div class="form-group">
-                                <label>Max Recording Age</label>
-                                <input type="text" id="config_recording_max_recording_age" placeholder="7d">
-                                <span class="help-text">Auto-delete recordings older than this (e.g., 7d, 24h, 30m)</span>
+                                <label>Frame Storage Retention</label>
+                                <input type="text" id="config_recording_frame_storage_retention" placeholder="7d">
+                                <span class="help-text">Auto-delete frame recordings older than this (e.g., 7d, 24h, 30m)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Video Retention</label>
+                                <input type="text" id="config_recording_video_storage_retention" placeholder="30d">
+                                <span class="help-text">Auto-delete MP4 videos older than this (e.g., 30d, 7d, 24h)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Segment Duration (minutes)</label>
+                                <input type="number" id="config_recording_video_segment_minutes" placeholder="5" min="1" max="60">
+                                <span class="help-text">Duration of each MP4 video segment (1-60 minutes)</span>
                             </div>
                             <div class="form-group">
                                 <label>Cleanup Interval (hours)</label>
@@ -1077,19 +1132,18 @@
         // Check token expiration first
         checkTokenExpiration();
         
-        // Check if admin token is valid on load
-        if (adminToken) {
-            checkAdminAccess();
-        }
+        // Check if admin token is valid on load, or if no token is needed
+        checkAdminAccess();
 
         async function checkAdminAccess() {
             try {
                 // Test admin access by trying to get a camera config (using cam1 as test)
-                const response = await fetch(`${basePath}/api/admin/cameras/cam1`, {
-                    headers: {
-                        'Authorization': `Bearer ${adminToken}`
-                    }
-                });
+                const headers = {};
+                if (adminToken) {
+                    headers['Authorization'] = `Bearer ${adminToken}`;
+                }
+                
+                const response = await fetch(`${basePath}/api/admin/cameras/cam1`, { headers });
                 
                 if (response.ok) {
                     enableAdminMode();
@@ -1214,11 +1268,12 @@
                 return;
             }
             
-            fetch(`${basePath}/api/admin/cameras/${cameraId}`, {
-                headers: {
-                    'Authorization': `Bearer ${adminToken}`
-                }
-            })
+            const headers = {};
+            if (adminToken) {
+                headers['Authorization'] = `Bearer ${adminToken}`;
+            }
+            
+            fetch(`${basePath}/api/admin/cameras/${cameraId}`, { headers })
                 .then(r => r.json())
                 .then(data => {
                     if (data.status === 'success') {
@@ -1249,6 +1304,12 @@
             document.getElementById('reconnect_interval').value = config.reconnect_interval || 5;
             document.getElementById('token').value = config.token || '';
             document.getElementById('max_recording_age').value = config.max_recording_age || '';
+            
+            // Per-camera MP4 recording settings
+            document.getElementById('frame_storage_enabled').value = (config.frame_storage_enabled !== undefined && config.frame_storage_enabled !== null) ? config.frame_storage_enabled.toString() : '';
+            document.getElementById('video_storage_enabled').value = (config.video_storage_enabled !== undefined && config.video_storage_enabled !== null) ? config.video_storage_enabled.toString() : '';
+            document.getElementById('video_storage_retention').value = config.video_storage_retention || '';
+            document.getElementById('video_segment_minutes').value = config.video_segment_minutes || '';
             
             // MQTT settings
             if (config.mqtt) {
@@ -1287,11 +1348,11 @@
             }
             
             try {
-                const response = await fetch(`${basePath}/api/admin/config`, {
-                    headers: {
-                        'Authorization': `Bearer ${adminToken}`
-                    }
-                });
+                const headers = {};
+                if (adminToken) {
+                    headers['Authorization'] = `Bearer ${adminToken}`;
+                }
+                const response = await fetch(`${basePath}/api/admin/config`, { headers });
                 
                 if (response.ok) {
                     const data = await response.json();
@@ -1338,10 +1399,13 @@
             document.getElementById('config_mqtt_max_packet_size').value = config.mqtt?.max_packet_size || '';
             
             // Recording settings
-            document.getElementById('config_recording_enabled').value = (config.recording?.enabled || false).toString();
+            document.getElementById('config_recording_frame_storage_enabled').value = (config.recording?.frame_storage_enabled || false).toString();
+            document.getElementById('config_recording_video_storage_enabled').value = (config.recording?.video_storage_enabled || false).toString();
             document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
             document.getElementById('config_recording_max_frame_size').value = config.recording?.max_frame_size || '';
-            document.getElementById('config_recording_max_recording_age').value = config.recording?.max_recording_age || '';
+            document.getElementById('config_recording_frame_storage_retention').value = config.recording?.frame_storage_retention || '';
+            document.getElementById('config_recording_video_storage_retention').value = config.recording?.video_storage_retention || '';
+            document.getElementById('config_recording_video_segment_minutes').value = config.recording?.video_segment_minutes || '';
             document.getElementById('config_recording_cleanup_interval_hours').value = config.recording?.cleanup_interval_hours || '';
             
             // Transcoding settings
@@ -1379,10 +1443,13 @@
                     max_packet_size: parseInt(document.getElementById('config_mqtt_max_packet_size').value) || 268435456
                 },
                 recording: {
-                    enabled: document.getElementById('config_recording_enabled').value === 'true',
+                    frame_storage_enabled: document.getElementById('config_recording_frame_storage_enabled').value === 'true',
+                    video_storage_enabled: document.getElementById('config_recording_video_storage_enabled').value === 'true',
                     database_path: document.getElementById('config_recording_database_path').value || "recordings",
                     max_frame_size: parseInt(document.getElementById('config_recording_max_frame_size').value) || 10485760,
-                    max_recording_age: document.getElementById('config_recording_max_recording_age').value || "7d",
+                    frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
+                    video_storage_retention: document.getElementById('config_recording_video_storage_retention').value || "30d",
+                    video_segment_minutes: parseInt(document.getElementById('config_recording_video_segment_minutes').value) || 5,
                     cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1
                 },
                 transcoding: {
@@ -1592,6 +1659,25 @@
                 token: formData.get('token') || null,
                 max_recording_age: formData.get('max_recording_age') || null
             };
+            
+            // Add per-camera MP4 recording settings if configured
+            const frameStorageEnabled = formData.get('frame_storage_enabled');
+            const videoStorageEnabled = formData.get('video_storage_enabled');
+            const videoStorageRetention = formData.get('video_storage_retention');
+            const videoSegmentMinutes = formData.get('video_segment_minutes');
+            
+            if (frameStorageEnabled !== '' && frameStorageEnabled !== null) {
+                config.frame_storage_enabled = frameStorageEnabled === 'true';
+            }
+            if (videoStorageEnabled !== '' && videoStorageEnabled !== null) {
+                config.video_storage_enabled = videoStorageEnabled === 'true';
+            }
+            if (videoStorageRetention) {
+                config.video_storage_retention = videoStorageRetention;
+            }
+            if (videoSegmentMinutes) {
+                config.video_segment_minutes = parseInt(videoSegmentMinutes);
+            }
             
             // Add MQTT config if configured
             const mqttInterval = formData.get('mqtt_publish_interval');

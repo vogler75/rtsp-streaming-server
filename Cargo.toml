@@ -32,6 +32,7 @@ toml = "0.8"
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
+humantime = "2.1"
 
 # Logging
 tracing = "0.1"

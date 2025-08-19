@@ -5,21 +5,11 @@ use chrono::{DateTime, Utc, Timelike};
 use tracing::{info, error, warn, trace};
 use bytes::Bytes;
 
-use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery};
-use crate::errors::Result;
+use crate::config::RecordingConfig;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery, VideoSegment};
 
-#[derive(Debug, Clone)]
-pub struct RecordingConfig {
-    pub max_frame_size: usize,  // Maximum size for a single frame in bytes
-}
-
-impl Default for RecordingConfig {
-    fn default() -> Self {
-        Self {
-            max_frame_size: 10 * 1024 * 1024, // 10MB default max frame size
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ActiveRecording {
@@ -31,14 +21,14 @@ pub struct ActiveRecording {
 
 #[derive(Clone)]
 pub struct RecordingManager {
-    config: RecordingConfig,
+    config: Arc<RecordingConfig>,
     databases: Arc<RwLock<HashMap<String, Arc<dyn DatabaseProvider>>>>, // camera_id -> database
     active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>, // camera_id -> recording
     frame_subscribers: Arc<RwLock<HashMap<String, broadcast::Receiver<Bytes>>>>, // camera_id -> receiver
 }
 
 impl RecordingManager {
-    pub async fn new(config: RecordingConfig) -> Result<Self> {
+    pub async fn new(config: Arc<RecordingConfig>) -> crate::errors::Result<Self> {
         Ok(Self {
             config,
             databases: Arc::new(RwLock::new(HashMap::new())),
@@ -52,7 +42,7 @@ impl RecordingManager {
         &self,
         camera_id: &str,
         database: Arc<dyn DatabaseProvider>,
-    ) -> Result<()> {
+    ) -> crate::errors::Result<()> {
         // Initialize the database
         database.initialize().await?;
         
@@ -76,7 +66,7 @@ impl RecordingManager {
         reason: Option<&str>,
         requested_duration: Option<i64>,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
-    ) -> Result<i64> {
+    ) -> crate::errors::Result<i64> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
             .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
@@ -116,6 +106,126 @@ impl RecordingManager {
         Ok(session_id)
     }
 
+    async fn frame_recording_loop(
+        config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>,
+        camera_id: String,
+        mut session_id: i64,
+        mut frame_receiver: broadcast::Receiver<Bytes>,
+    ) {
+        let mut frame_number = 0i64;
+        let mut last_hour = Utc::now().hour(); // Track the hour of the last frame
+
+        loop {
+            match frame_receiver.recv().await {
+                Ok(frame_data) => {
+                    frame_number += 1;
+                    let timestamp = Utc::now();
+                    let current_hour = timestamp.hour();
+
+                    // Check if recording is still active
+                    let active_recordings_guard = active_recordings.read().await;
+                    let is_active = active_recordings_guard.contains_key(&camera_id);
+                    drop(active_recordings_guard);
+
+                    if !is_active {
+                        trace!("Recording stopped for camera '{}', ending task", camera_id);
+                        break;
+                    }
+
+                    // Check for hourly session splitting (when hour changes)
+                    if last_hour != current_hour {
+                        info!("Hour changed from {} to {} for camera '{}', splitting recording session {}", 
+                                last_hour, current_hour, camera_id, session_id);
+                        
+                        // Get the recording reason from the database to use for the new session
+                        if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
+                            if let Some(current_session) = sessions.first() {
+                                let reason = current_session.reason.clone();
+                                
+                                // Stop the current session
+                                if let Err(e) = database.stop_recording_session(session_id).await {
+                                    error!("Failed to stop recording session for hourly split: {}", e);
+                                } else {
+                                    info!("Stopped recording session {} for hourly split", session_id);
+                                    
+                                    // Create a new session with the same reason
+                                    match database.create_recording_session(&camera_id, reason.as_deref()).await {
+                                        Ok(new_session_id) => {
+                                            info!("Created new recording session {} for hourly continuation", new_session_id);
+                                            
+                                            // Update the active recording with new session info
+                                            let mut active_recordings_guard = active_recordings.write().await;
+                                            if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
+                                                recording.session_id = new_session_id;
+                                                recording.start_time = timestamp;
+                                                recording.frame_count = 0;
+                                            }
+                                            drop(active_recordings_guard);
+                                            
+                                            // Update the session_id for subsequent frames
+                                            session_id = new_session_id;
+                                            frame_number = 1; // Reset frame number for new session
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to create new recording session for hourly split: {}", e);
+                                            // Continue with the old session rather than stopping
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Update the last hour tracker
+                        last_hour = current_hour;
+                    }
+
+                    // Check frame size
+                    if frame_data.len() > config.max_frame_size {
+                        error!("Frame size {} exceeds maximum {} for camera '{}'", 
+                                frame_data.len(), config.max_frame_size, camera_id);
+                        continue;
+                    }
+
+                    // Store frame directly in database
+                    if let Err(e) = database.add_recorded_frame(
+                        session_id,
+                        timestamp,
+                        frame_number,
+                        &frame_data,
+                    ).await {
+                        error!("Failed to store frame in database: {}", e);
+                        continue;
+                    }
+
+                    // Update frame count
+                    let mut active_recordings_guard = active_recordings.write().await;
+                    if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
+                        recording.frame_count += 1;
+
+                        // Check if duration-based recording should stop
+                        if let Some(duration) = recording.requested_duration {
+                            let elapsed = timestamp.signed_duration_since(recording.start_time);
+                            if elapsed.num_seconds() >= duration {
+                                info!("Recording duration reached for camera '{}', stopping", camera_id);
+                                break;
+                            }
+                        }
+                    }
+                    drop(active_recordings_guard);
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!("Recording lagged for camera '{}', skipped {} frames", camera_id, skipped);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Frame channel closed for camera '{}', stopping recording", camera_id);
+                    break;
+                }
+            }
+        }
+    }
+
     async fn start_recording_task(
         &self,
         camera_id: String,
@@ -133,117 +243,35 @@ impl RecordingManager {
         let active_recordings = self.active_recordings.clone();
 
         tokio::spawn(async move {
-            let mut frame_receiver = frame_sender.subscribe();
-            let mut frame_number = 0i64;
-            let mut session_id = session_id; // Make mutable for hourly session splitting
-            let mut last_hour = Utc::now().hour(); // Track the hour of the last frame
+            let mut tasks = Vec::new();
 
-            loop {
-                match frame_receiver.recv().await {
-                    Ok(frame_data) => {
-                        frame_number += 1;
-                        let timestamp = Utc::now();
-                        let current_hour = timestamp.hour();
+            if config.frame_storage_enabled {
+                let frame_receiver = frame_sender.subscribe();
+                let task = tokio::spawn(Self::frame_recording_loop(
+                    config.clone(),
+                    database.clone(),
+                    active_recordings.clone(),
+                    camera_id.clone(),
+                    session_id,
+                    frame_receiver,
+                ));
+                tasks.push(task);
+            }
 
-                        // Check if recording is still active
-                        let active_recordings_guard = active_recordings.read().await;
-                        let is_active = active_recordings_guard.contains_key(&camera_id);
-                        drop(active_recordings_guard);
+            if config.video_storage_enabled {
+                let segmenter_task = tokio::spawn(Self::video_segmenter_loop(
+                    config.clone(),
+                    database.clone(),
+                    active_recordings.clone(),
+                    camera_id.clone(),
+                    frame_sender.subscribe(),
+                ));
+                tasks.push(segmenter_task);
+            }
 
-                        if !is_active {
-                            trace!("Recording stopped for camera '{}', ending task", camera_id);
-                            break;
-                        }
-
-                        // Check for hourly session splitting (when hour changes)
-                        if last_hour != current_hour {
-                            info!("Hour changed from {} to {} for camera '{}', splitting recording session {}", 
-                                  last_hour, current_hour, camera_id, session_id);
-                            
-                            // Get the recording reason from the database to use for the new session
-                            if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
-                                if let Some(current_session) = sessions.first() {
-                                    let reason = current_session.reason.clone();
-                                    
-                                    // Stop the current session
-                                    if let Err(e) = database.stop_recording_session(session_id).await {
-                                        error!("Failed to stop recording session for hourly split: {}", e);
-                                    } else {
-                                        info!("Stopped recording session {} for hourly split", session_id);
-                                        
-                                        // Create a new session with the same reason
-                                        match database.create_recording_session(&camera_id, reason.as_deref()).await {
-                                            Ok(new_session_id) => {
-                                                info!("Created new recording session {} for hourly continuation", new_session_id);
-                                                
-                                                // Update the active recording with new session info
-                                                let mut active_recordings_guard = active_recordings.write().await;
-                                                if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
-                                                    recording.session_id = new_session_id;
-                                                    recording.start_time = timestamp;
-                                                    recording.frame_count = 0;
-                                                }
-                                                drop(active_recordings_guard);
-                                                
-                                                // Update the session_id for subsequent frames
-                                                session_id = new_session_id;
-                                                frame_number = 1; // Reset frame number for new session
-                                            }
-                                            Err(e) => {
-                                                error!("Failed to create new recording session for hourly split: {}", e);
-                                                // Continue with the old session rather than stopping
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Update the last hour tracker
-                            last_hour = current_hour;
-                        }
-
-                        // Check frame size
-                        if frame_data.len() > config.max_frame_size {
-                            error!("Frame size {} exceeds maximum {} for camera '{}'", 
-                                   frame_data.len(), config.max_frame_size, camera_id);
-                            continue;
-                        }
-
-                        // Store frame directly in database
-                        if let Err(e) = database.add_recorded_frame(
-                            session_id,
-                            timestamp,
-                            frame_number,
-                            &frame_data,
-                        ).await {
-                            error!("Failed to store frame in database: {}", e);
-                            continue;
-                        }
-
-                        // Update frame count
-                        let mut active_recordings_guard = active_recordings.write().await;
-                        if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
-                            recording.frame_count += 1;
-
-                            // Check if duration-based recording should stop
-                            if let Some(duration) = recording.requested_duration {
-                                let elapsed = timestamp.signed_duration_since(recording.start_time);
-                                if elapsed.num_seconds() >= duration {
-                                    info!("Recording duration reached for camera '{}', stopping", camera_id);
-                                    break;
-                                }
-                            }
-                        }
-                        drop(active_recordings_guard);
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("Recording lagged for camera '{}', skipped {} frames", camera_id, skipped);
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        info!("Frame channel closed for camera '{}', stopping recording", camera_id);
-                        break;
-                    }
-                }
+            // Wait for all recording tasks to complete
+            for task in tasks {
+                let _ = task.await;
             }
 
             // Clean up active recording
@@ -260,7 +288,7 @@ impl RecordingManager {
         });
     }
 
-    pub async fn stop_recording(&self, camera_id: &str) -> Result<bool> {
+    pub async fn stop_recording(&self, camera_id: &str) -> crate::errors::Result<bool> {
         let mut active_recordings = self.active_recordings.write().await;
         
         if let Some(recording) = active_recordings.remove(camera_id) {
@@ -280,7 +308,7 @@ impl RecordingManager {
         }
     }
 
-    async fn stop_camera_recordings(&self, camera_id: &str) -> Result<()> {
+    async fn stop_camera_recordings(&self, camera_id: &str) -> crate::errors::Result<()> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
             .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
@@ -310,7 +338,7 @@ impl RecordingManager {
         camera_id: Option<&str>,
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
-    ) -> Result<Vec<RecordingSession>> {
+    ) -> crate::errors::Result<Vec<RecordingSession>> {
         let query = RecordingQuery {
             camera_id: camera_id.map(|s| s.to_string()),
             from,
@@ -347,7 +375,7 @@ impl RecordingManager {
         camera_id: &str,
         from: DateTime<Utc>,
         to: Option<DateTime<Utc>>,
-    ) -> Result<Box<dyn crate::database::FrameStream>> {
+    ) -> crate::errors::Result<Box<dyn crate::database::FrameStream>> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
             .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
@@ -372,7 +400,7 @@ impl RecordingManager {
         session_id: i64,
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
-    ) -> Result<Vec<RecordedFrame>> {
+    ) -> crate::errors::Result<Vec<RecordedFrame>> {
         // Since we don't know which camera this session belongs to, search all databases
         let databases = self.databases.read().await;
         
@@ -394,53 +422,21 @@ impl RecordingManager {
         Ok(Vec::new())
     }
     
-    pub async fn cleanup_old_recordings(
-        &self,
-        camera_id: Option<&str>,
-        older_than: DateTime<Utc>,
-    ) -> Result<usize> {
-        let mut total_deleted = 0;
-        
-        if let Some(cam_id) = camera_id {
-            // Clean up specific camera's database
-            if let Some(database) = self.get_camera_database(cam_id).await {
-                let deleted_sessions = database.delete_old_recordings(Some(cam_id), older_than).await?;
-                total_deleted += deleted_sessions;
-                if deleted_sessions > 0 {
-                    info!(
-                        "Cleaned up {} completed recording sessions and old frames for camera '{}' older than {}",
-                        deleted_sessions, cam_id, older_than
-                    );
-                }
-            }
-        } else {
-            // Clean up all camera databases
-            let databases = self.databases.read().await;
-            
-            for (cam_id, database) in databases.iter() {
-                match database.delete_old_recordings(Some(cam_id), older_than).await {
-                    Ok(deleted_sessions) => {
-                        total_deleted += deleted_sessions;
-                        if deleted_sessions > 0 {
-                            info!(
-                                "Cleaned up {} completed recording sessions and old frames for camera '{}' older than {}",
-                                deleted_sessions, cam_id, older_than
-                            );
-                        }
-                    }
-                    Err(e) => error!("Failed to cleanup recordings for camera '{}': {}", cam_id, e),
-                }
+    pub async fn cleanup_task(&self) -> crate::errors::Result<()> {
+        let databases = self.databases.read().await;
+        for (camera_id, database) in databases.iter() {
+            if let Err(e) = database.cleanup_database(&self.config).await {
+                error!("Failed to cleanup database for camera '{}': {}", camera_id, e);
             }
         }
-        
-        Ok(total_deleted)
+        Ok(())
     }
     
     pub async fn get_frame_at_timestamp(
         &self,
         camera_id: &str,
         timestamp: DateTime<Utc>,
-    ) -> Result<Option<RecordedFrame>> {
+    ) -> crate::errors::Result<Option<RecordedFrame>> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
             .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
@@ -452,7 +448,7 @@ impl RecordingManager {
     pub async fn restart_active_recordings_at_startup(
         &self,
         camera_frame_senders: &HashMap<String, Arc<broadcast::Sender<Bytes>>>,
-    ) -> Result<()> {
+    ) -> crate::errors::Result<()> {
         info!("Checking for active recordings to restart at startup...");
         
         let mut restarted_count = 0;
@@ -524,7 +520,7 @@ impl RecordingManager {
     }
     
     /// Get the database size for a specific camera
-    pub async fn get_database_size(&self, camera_id: &str) -> Result<i64> {
+    pub async fn get_database_size(&self, camera_id: &str) -> crate::errors::Result<i64> {
         let databases = self.databases.read().await;
         
         if let Some(database) = databases.get(camera_id) {
@@ -534,5 +530,146 @@ impl RecordingManager {
                 "No database found for camera '{}'", camera_id
             )))
         }
+    }
+
+    pub async fn list_video_segments(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> crate::errors::Result<Vec<VideoSegment>> {
+        if let Some(database) = self.get_camera_database(camera_id).await {
+            database.list_video_segments(camera_id, from, to).await
+        } else {
+            Err(crate::errors::StreamError::database(format!(
+                "No database found for camera '{}'", camera_id
+            )).into())
+        }
+    }
+
+    pub fn get_recordings_path(&self) -> &str {
+        &self.config.database_path
+    }
+
+    async fn video_segmenter_loop(
+        config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>,
+        camera_id: String,
+        mut frame_receiver: broadcast::Receiver<Bytes>,
+    ) {
+        let segment_duration = chrono::Duration::minutes(config.video_segment_minutes as i64);
+        let mut segment_start_time = Utc::now();
+        let mut frame_buffer = Vec::new();
+
+        loop {
+            match frame_receiver.recv().await {
+                Ok(frame_data) => {
+                    // Check if recording is still active
+                    if !active_recordings.read().await.contains_key(&camera_id) {
+                        trace!("Recording stopped for camera '{}', ending segmenter task", camera_id);
+                        break;
+                    }
+
+                    frame_buffer.push(frame_data);
+
+                    if Utc::now().signed_duration_since(segment_start_time) >= segment_duration {
+                        let frames_to_process = std::mem::take(&mut frame_buffer);
+                        let end_time = Utc::now();
+
+                        // Spawn a task to process the segment
+                        let task_config = config.clone();
+                        let task_database = database.clone();
+                        let task_camera_id = camera_id.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = Self::create_video_segment(
+                                task_config,
+                                task_database,
+                                task_camera_id,
+                                segment_start_time,
+                                end_time,
+                                frames_to_process,
+                            ).await {
+                                error!("Failed to create video segment: {}", e);
+                            }
+                        });
+
+                        segment_start_time = end_time;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!("Video segmenter lagged for camera '{}', skipped {} frames", camera_id, skipped);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Frame channel closed for camera '{}', stopping video segmenter", camera_id);
+                    break;
+                }
+            }
+        }
+    }
+
+    async fn create_video_segment(
+        config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        camera_id: String,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        frames: Vec<Bytes>,
+    ) -> crate::errors::Result<()> {
+        if frames.is_empty() {
+            return Ok(());
+        }
+
+        let recordings_dir = &config.database_path;
+        let temp_file_path = format!("{}/{}_{}.mp4", recordings_dir, camera_id, start_time.timestamp());
+
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args([
+            "-f", "mjpeg",
+            "-i", "-",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-y", // Overwrite output file if it exists
+            &temp_file_path,
+        ]);
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+
+        let mut child = cmd.spawn()?;
+        let mut stdin = child.stdin.take().expect("Failed to open ffmpeg stdin");
+
+        let write_task = tokio::spawn(async move {
+            for frame in frames {
+                if let Err(e) = stdin.write_all(&frame).await {
+                    error!("Failed to write frame to ffmpeg stdin: {}", e);
+                    break;
+                }
+            }
+            drop(stdin);
+        });
+
+        let status = child.wait().await?;
+        write_task.await.map_err(|e| crate::errors::StreamError::server(format!("Task join error: {}", e)))?;
+
+        if !status.success() {
+            return Err(crate::errors::StreamError::ffmpeg("ffmpeg command failed"));
+        }
+
+        let metadata = tokio::fs::metadata(&temp_file_path).await?;
+        let size_bytes = metadata.len() as i64;
+
+        let segment = VideoSegment {
+            id: 0, // DB will assign
+            camera_id,
+            start_time,
+            end_time,
+            file_path: temp_file_path,
+            size_bytes,
+        };
+
+        database.add_video_segment(&segment).await?;
+
+        Ok(())
     }
 }

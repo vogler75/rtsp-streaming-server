@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 use bytes::Bytes;
 use axum::extract::ws::{WebSocket, Message};
 use futures_util::{stream::StreamExt, SinkExt};
+use std::path::Path;
 
 use crate::recording::RecordingManager;
 use crate::database::RecordedFrame;
@@ -162,6 +163,13 @@ pub enum ControlCommand {
     GoToTimestamp {
         #[serde(deserialize_with = "deserialize_timestamp")]
         timestamp: DateTime<Utc>,
+    },
+    #[serde(rename = "list_segments")]
+    ListSegments {
+        #[serde(deserialize_with = "deserialize_timestamp")]
+        from: DateTime<Utc>,
+        #[serde(deserialize_with = "deserialize_optional_timestamp", default)]
+        to: Option<DateTime<Utc>>,
     },
 }
 
@@ -385,6 +393,9 @@ impl ControlHandler {
             }
             ControlCommand::GoToTimestamp { timestamp } => {
                 Self::handle_goto_timestamp(camera_id, timestamp, recording_manager, sender).await
+            }
+            ControlCommand::ListSegments { from, to } => {
+                Self::handle_list_segments(camera_id, from, to, recording_manager).await
             }
         }
     }
@@ -757,6 +768,48 @@ impl ControlHandler {
             Err(e) => {
                 error!("Failed to get frame at timestamp: {}", e);
                 CommandResponse::error(500, "Failed to retrieve frame")
+            }
+        }
+    }
+
+    async fn handle_list_segments(
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: Option<DateTime<Utc>>,
+        recording_manager: &RecordingManager,
+    ) -> CommandResponse {
+        let to = to.unwrap_or_else(Utc::now);
+        match recording_manager.list_video_segments(camera_id, from, to).await {
+            Ok(segments) => {
+                let segments_data: Vec<serde_json::Value> = segments
+                    .into_iter()
+                    .map(|s| {
+                        // Make the file path relative to the recordings directory
+                        let relative_path = Path::new(&s.file_path)
+                            .strip_prefix(&recording_manager.get_recordings_path())
+                            .unwrap_or_else(|_| Path::new(&s.file_path))
+                            .to_str()
+                            .unwrap_or_default();
+
+                        serde_json::json!({
+                            "id": s.id,
+                            "start_time": s.start_time,
+                            "end_time": s.end_time,
+                            "url": format!("/recordings/{}", relative_path),
+                            "size_bytes": s.size_bytes,
+                        })
+                    })
+                    .collect();
+
+                let data = serde_json::json!({
+                    "segments": segments_data,
+                    "count": segments_data.len(),
+                });
+                CommandResponse::success_with_data("Video segments listed", data)
+            }
+            Err(e) => {
+                error!("Failed to list video segments: {}", e);
+                CommandResponse::error(500, "Failed to list video segments")
             }
         }
     }

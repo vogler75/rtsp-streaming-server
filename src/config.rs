@@ -27,6 +27,13 @@ pub struct CameraConfig {
     pub ffmpeg: Option<FfmpegConfig>,
     pub mqtt: Option<CameraMqttConfig>,
     pub max_recording_age: Option<String>, // Override max age for this camera (e.g., "10m", "5h", "7d")
+    
+    // Per-camera MP4 recording settings
+    pub frame_storage_enabled: Option<bool>, // Override global frame storage setting
+    pub video_storage_enabled: Option<bool>, // Override global video storage setting  
+    pub video_storage_retention: Option<String>, // Override global video retention (e.g., "30d")
+    pub video_segment_minutes: Option<u64>, // Override global segment duration
+    
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
 }
@@ -127,12 +134,29 @@ pub struct CameraMqttConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
-    pub enabled: bool,
+    #[serde(default)]
+    pub frame_storage_enabled: bool,
     pub database_path: String,
-    pub max_frame_size: Option<usize>, // Maximum frame size in bytes for database storage
-    pub max_recording_age: Option<String>, // Max age for recordings (e.g., "10m", "5h", "7d")
-    pub cleanup_interval_hours: Option<u64>, // How often to run cleanup (default: 1 hour)
+    #[serde(default = "default_max_frame_size")]
+    pub max_frame_size: usize, // Maximum frame size in bytes for database storage
+    #[serde(default)]
+    pub frame_storage_retention: String, // Max age for frame recordings (e.g., "10m", "5h", "7d")
+    
+    #[serde(default)]
+    pub video_storage_enabled: bool,
+    #[serde(default = "default_video_storage_retention")]
+    pub video_storage_retention: String, // Max age for video recordings (e.g., "30d")
+    #[serde(default = "default_video_segment_minutes")]
+    pub video_segment_minutes: u64, // Duration of each video segment in minutes
+
+    #[serde(default = "default_cleanup_interval_hours")]
+    pub cleanup_interval_hours: u64, // How often to run cleanup (default: 1 hour)
 }
+
+fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
+fn default_video_storage_retention() -> String { "30d".to_string() }
+fn default_video_segment_minutes() -> u64 { 5 }
+fn default_cleanup_interval_hours() -> u64 { 1 }
 
 impl MqttConfig {
     pub fn substitute_variables(&mut self) {
@@ -180,11 +204,14 @@ impl Default for Config {
             },
             mqtt: None,
             recording: Some(RecordingConfig {
-                enabled: false,
-                database_path: "recordings.db".to_string(),
-                max_frame_size: Some(10 * 1024 * 1024), // 10MB
-                max_recording_age: None,
-                cleanup_interval_hours: Some(1),
+                frame_storage_enabled: false,
+                database_path: "recordings".to_string(),
+                max_frame_size: default_max_frame_size(),
+                frame_storage_retention: "24h".to_string(),
+                video_storage_enabled: false,
+                video_storage_retention: default_video_storage_retention(),
+                video_segment_minutes: default_video_segment_minutes(),
+                cleanup_interval_hours: default_cleanup_interval_hours(),
             }),
         }
     }

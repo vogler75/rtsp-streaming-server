@@ -329,6 +329,7 @@
                     
                     <div id="videoContainer">
                         <canvas id="videoCanvas"></canvas>
+                        <video id="videoPlayer" style="display: none; width: 100%; height: 100%;" controls></video>
                         <div id="statusMessage">Ready for commands (responses logged to console)</div>
                         
                         <div class="video-overlay-controls">
@@ -387,6 +388,13 @@
                         </div>
                         <div class="info-text" style="margin-top: 5px; font-size: 11px;">
                             ⏰ Times displayed in your local timezone
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>Playback Mode:</label>
+                        <div style="display: flex; gap: 15px;">
+                            <label><input type="radio" name="playbackMode" value="frames" checked> Frame-by-Frame</label>
+                            <label><input type="radio" name="playbackMode" value="segments"> Video Segments</label>
                         </div>
                     </div>
                     <div class="recordings-list" id="recordingsList">
@@ -454,6 +462,10 @@
                 fromDate.setDate(toDate.getDate() - 7);
                 document.getElementById('toDate').value = this.formatDateLocal(toDate);
                 document.getElementById('fromDate').value = this.formatDateLocal(fromDate);
+
+                document.querySelectorAll('input[name="playbackMode"]').forEach(radio => {
+                    radio.addEventListener('change', () => this.fetchRecordings());
+                });
             }
             
             formatDateLocal(date) {
@@ -535,6 +547,8 @@
                     } else if (response.text.includes('stopped')) {
                         this.streamState = 'stopped';
                         this.updatePlayerUI();
+                    } else if (response.text.includes('Video segments listed')) {
+                        this.displayVideoSegments(response.data.segments || []);
                     }
                 }
             }
@@ -613,6 +627,15 @@
             }
 
             async fetchRecordings() {
+                const mode = document.querySelector('input[name="playbackMode"]:checked').value;
+                if (mode === 'segments') {
+                    return this.fetchVideoSegments();
+                }
+
+                // Show canvas, hide video player for frame-by-frame
+                document.getElementById('videoPlayer').style.display = 'none';
+                document.getElementById('videoCanvas').style.display = 'block';
+
                 const from = document.getElementById('fromDate').value;
                 const to = document.getElementById('toDate').value;
                 if (!from || !to) {
@@ -644,6 +667,24 @@
                 } catch (error) {
                     this.logJson({ error: 'Network error fetching recordings', details: error.message });
                 }
+            }
+
+            fetchVideoSegments() {
+                const from = document.getElementById('fromDate').value;
+                const to = document.getElementById('toDate').value;
+                if (!from || !to) {
+                    alert('Please select a date range.');
+                    return;
+                }
+
+                const fromDate = new Date(from + 'T00:00:00');
+                const toDate = new Date(to + 'T23:59:59');
+
+                this.sendCommand({
+                    cmd: 'list_segments',
+                    from: fromDate.toISOString(),
+                    to: toDate.toISOString(),
+                });
             }
 
             displayRecordings(recordings) {
@@ -699,7 +740,48 @@
                 });
             }
 
+            displayVideoSegments(segments) {
+                const container = document.getElementById('recordingsList');
+                container.innerHTML = '';
+                if (segments.length === 0) {
+                    container.innerHTML = '<div class="info-text">No video segments found.</div>';
+                    return;
+                }
+
+                segments.forEach(seg => {
+                    const item = document.createElement('div');
+                    item.className = 'recording-item';
+                    
+                    const startTime = new Date(seg.start_time).toLocaleTimeString();
+                    const endTime = new Date(seg.end_time).toLocaleTimeString();
+                    const sizeMB = (seg.size_bytes / (1024 * 1024)).toFixed(2);
+
+                    item.innerHTML = `<strong>${startTime} - ${endTime}</strong><br>${sizeMB} MB`;
+                    item.addEventListener('click', () => {
+                        this.playVideoSegment(seg.url);
+                        document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
+                        item.classList.add('selected');
+                    });
+                    container.appendChild(item);
+                });
+            }
+
+            playVideoSegment(url) {
+                const videoPlayer = document.getElementById('videoPlayer');
+                const canvas = document.getElementById('videoCanvas');
+
+                canvas.style.display = 'none';
+                videoPlayer.style.display = 'block';
+
+                videoPlayer.src = url;
+                videoPlayer.play();
+            }
+
             startReplay(recording) {
+                // Show canvas, hide video player
+                document.getElementById('videoPlayer').style.display = 'none';
+                document.getElementById('videoCanvas').style.display = 'block';
+
                 // Stop any current stream first
                 if (this.streamState === 'live' || this.streamState === 'replaying') {
                     this.sendCommand({ cmd: 'stop' });
