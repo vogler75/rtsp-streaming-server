@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::{RwLock, broadcast};
-use chrono::{DateTime, Utc, Timelike};
+use chrono::{DateTime, Utc, Timelike, Datelike};
 use tracing::{info, error, warn, trace};
 use bytes::Bytes;
 
@@ -621,7 +621,24 @@ impl RecordingManager {
         }
 
         let recordings_dir = &config.database_path;
-        let temp_file_path = format!("{}/{}_{}.mp4", recordings_dir, camera_id, start_time.timestamp());
+        
+        // Create hierarchical directory structure: recordings/cam1/2025/08/19/
+        let year = start_time.year();
+        let month = start_time.month();
+        let day = start_time.day();
+        
+        let camera_dir = format!("{}/{}/{:04}/{:02}/{:02}", 
+            recordings_dir, camera_id, year, month, day);
+        
+        // Create directory structure if it doesn't exist
+        if let Err(e) = tokio::fs::create_dir_all(&camera_dir).await {
+            error!("Failed to create directory structure '{}': {}", camera_dir, e);
+            return Err(crate::errors::StreamError::Io { source: e });
+        }
+        
+        // Use ISO 8601 format for filename (filesystem-safe): 2025-08-19T10-54-00Z.mp4
+        let iso_timestamp = start_time.format("%Y-%m-%dT%H-%M-%SZ");
+        let temp_file_path = format!("{}/{}.mp4", camera_dir, iso_timestamp);
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args([
