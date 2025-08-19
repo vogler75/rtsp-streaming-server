@@ -14,7 +14,7 @@
     "video_bitrate": null,
     "quality": null,
     "output_framerate": null,
-    "scale": null,
+    "scale": "1280:-1",
     "movflags": null,
     "rtbufsize": null,
     "fflags": null,
@@ -31,5 +31,9 @@
     "publish_interval": 5,
     "topic_name": null
   },
-  "max_recording_age": "8d"
+  "max_recording_age": "8d",
+  "frame_storage_enabled": null,
+  "video_storage_type": null,
+  "video_storage_retention": null,
+  "video_segment_minutes": null
 }

@@ -352,7 +352,7 @@ impl DatabaseProvider for SqliteDatabase {
                 size_bytes INTEGER NOT NULL,
                 mp4_data BLOB,
                 session_id INTEGER NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES recording_sessions(id)
+                FOREIGN KEY (session_id) REFERENCES recording_sessions(id) ON DELETE CASCADE
             )
             "#,
         )
@@ -360,6 +360,11 @@ impl DatabaseProvider for SqliteDatabase {
         .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_camera_time ON video_segments(camera_id, start_time, end_time)")
+            .execute(&self.pool)
+            .await?;
+        
+        // Add index on session_id for the JOIN operation
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_session ON video_segments(session_id)")
             .execute(&self.pool)
             .await?;
 
@@ -444,6 +449,8 @@ impl DatabaseProvider for SqliteDatabase {
     }
 
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>> {
+        let start_time = std::time::Instant::now();
+        
         let mut conditions = Vec::new();
         let mut bind_values: Vec<String> = Vec::new();
         
@@ -470,12 +477,26 @@ impl DatabaseProvider for SqliteDatabase {
         
         let sql = format!("SELECT * FROM recording_sessions{} ORDER BY start_time DESC", where_clause);
         
+        tracing::debug!(
+            "Executing SQL query for list_recordings:\n{}\nParameters: {:?}",
+            sql, bind_values
+        );
+        
         let mut query_builder = sqlx::query(&sql);
         for value in &bind_values {
             query_builder = query_builder.bind(value);
         }
         
         let rows = query_builder.fetch_all(&self.pool).await?;
+        
+        let elapsed = start_time.elapsed();
+        let row_count = rows.len();
+        
+        tracing::debug!(
+            "Query completed in {:.3}ms, returned {} rows",
+            elapsed.as_secs_f64() * 1000.0,
+            row_count
+        );
 
         let mut sessions = Vec::new();
         for row in rows {
@@ -498,6 +519,8 @@ impl DatabaseProvider for SqliteDatabase {
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>> {
+        let start_time = std::time::Instant::now();
+        
         let mut sql = "SELECT * FROM recorded_frames WHERE session_id = ?".to_string();
         
         if from.is_some() {
@@ -508,6 +531,11 @@ impl DatabaseProvider for SqliteDatabase {
         }
         
         sql.push_str(" ORDER BY timestamp ASC");
+        
+        tracing::debug!(
+            "Executing SQL query for get_recorded_frames:\n{}\nParameters: session_id={}, from={:?}, to={:?}",
+            sql, session_id, from, to
+        );
 
         let mut query = sqlx::query(&sql).bind(session_id);
         
@@ -519,6 +547,15 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         let rows = query.fetch_all(&self.pool).await?;
+        
+        let elapsed = start_time.elapsed();
+        let row_count = rows.len();
+        
+        tracing::debug!(
+            "Query completed in {:.3}ms, returned {} rows",
+            elapsed.as_secs_f64() * 1000.0,
+            row_count
+        );
 
         let mut frames = Vec::new();
         for row in rows {
@@ -539,7 +576,40 @@ impl DatabaseProvider for SqliteDatabase {
         // Start a transaction
         let mut tx = self.pool.begin().await?;
         
-        // Step 1: Delete old frames based on their timestamp
+        // Step 1: Delete old video segments that reference sessions we want to delete
+        // This prevents foreign key constraint violations
+        let delete_segments_query = if let Some(cam_id) = camera_id {
+            sqlx::query(
+                r#"
+                DELETE FROM video_segments 
+                WHERE session_id IN (
+                    SELECT id FROM recording_sessions 
+                    WHERE camera_id = ? 
+                    AND end_time IS NOT NULL 
+                    AND end_time < ?
+                )
+                "#
+            )
+            .bind(cam_id)
+            .bind(older_than)
+        } else {
+            sqlx::query(
+                r#"
+                DELETE FROM video_segments 
+                WHERE session_id IN (
+                    SELECT id FROM recording_sessions 
+                    WHERE end_time IS NOT NULL 
+                    AND end_time < ?
+                )
+                "#
+            )
+            .bind(older_than)
+        };
+        
+        let segments_result = delete_segments_query.execute(&mut *tx).await?;
+        let deleted_segments = segments_result.rows_affected();
+        
+        // Step 2: Delete old frames based on their timestamp
         let delete_frames_query = if let Some(cam_id) = camera_id {
             // Delete frames for a specific camera
             sqlx::query(
@@ -562,7 +632,7 @@ impl DatabaseProvider for SqliteDatabase {
         let frames_result = delete_frames_query.execute(&mut *tx).await?;
         let deleted_frames = frames_result.rows_affected();
         
-        // Step 2: Delete completed sessions based on end_time
+        // Step 3: Delete completed sessions based on end_time
         // Only delete sessions that have ended (end_time is not NULL) and ended before the cutoff
         let delete_sessions_query = if let Some(cam_id) = camera_id {
             sqlx::query(
@@ -589,7 +659,7 @@ impl DatabaseProvider for SqliteDatabase {
         let sessions_result = delete_sessions_query.execute(&mut *tx).await?;
         let deleted_sessions = sessions_result.rows_affected();
         
-        // Step 3: Clean up orphaned sessions (sessions with no frames left)
+        // Step 4: Clean up orphaned sessions (sessions with no frames left)
         // This handles cases where all frames of a session were deleted but session is still active
         let cleanup_orphaned_query = if let Some(cam_id) = camera_id {
             sqlx::query(
@@ -621,10 +691,10 @@ impl DatabaseProvider for SqliteDatabase {
         // Commit the transaction
         tx.commit().await?;
         
-        if deleted_frames > 0 || deleted_sessions > 0 || deleted_orphaned > 0 {
+        if deleted_segments > 0 || deleted_frames > 0 || deleted_sessions > 0 || deleted_orphaned > 0 {
             tracing::info!(
-                "Cleanup complete: {} frames deleted, {} completed sessions deleted, {} orphaned sessions deleted",
-                deleted_frames, deleted_sessions, deleted_orphaned
+                "Cleanup complete: {} video segments deleted, {} frames deleted, {} completed sessions deleted, {} orphaned sessions deleted",
+                deleted_segments, deleted_frames, deleted_sessions, deleted_orphaned
             );
         }
         
@@ -717,20 +787,36 @@ impl DatabaseProvider for SqliteDatabase {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<VideoSegment>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT vs.id, vs.camera_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, vs.session_id, rs.reason as recording_reason
+        let start_time = std::time::Instant::now();
+        
+        let query_str = r#"
+            SELECT vs.id, vs.camera_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, NULL as mp4_data, vs.session_id, rs.reason as recording_reason
             FROM video_segments vs
             LEFT JOIN recording_sessions rs ON vs.session_id = rs.id
             WHERE vs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
             ORDER BY vs.start_time ASC
-            "#,
-        )
+            "#;
+        
+        tracing::debug!(
+            "Executing SQL query for list_video_segments:\n{}\nParameters: camera_id='{}', from='{}', to='{}'",
+            query_str, camera_id, from, to
+        );
+        
+        let rows = sqlx::query(query_str)
         .bind(camera_id)
         .bind(to)
         .bind(from)
         .fetch_all(&self.pool)
         .await?;
+        
+        let elapsed = start_time.elapsed();
+        let row_count = rows.len();
+        
+        tracing::debug!(
+            "Query completed in {:.3}ms, returned {} rows",
+            elapsed.as_secs_f64() * 1000.0,
+            row_count
+        );
 
         let mut segments = Vec::new();
         for row in rows {
@@ -824,9 +910,9 @@ impl DatabaseProvider for SqliteDatabase {
         camera_id: &str,
         filename: &str,
     ) -> Result<Option<VideoSegment>> {
-        // Try to find by exact filename match first (for filesystem storage)
-        let row = sqlx::query(
-            r#"
+        let start_time = std::time::Instant::now();
+        
+        let query_str = r#"
             SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data, session_id
             FROM video_segments
             WHERE camera_id = ? AND (
@@ -835,13 +921,28 @@ impl DatabaseProvider for SqliteDatabase {
             )
             ORDER BY start_time DESC
             LIMIT 1
-            "#,
-        )
+            "#;
+        
+        tracing::debug!(
+            "Executing SQL query for get_video_segment_by_filename:\n{}\nParameters: camera_id='{}', filename='{}'",
+            query_str, camera_id, filename
+        );
+        
+        // Try to find by exact filename match first (for filesystem storage)
+        let row = sqlx::query(query_str)
         .bind(camera_id)
         .bind(filename)
         .bind(filename)
         .fetch_optional(&self.pool)
         .await?;
+        
+        let elapsed = start_time.elapsed();
+        
+        tracing::debug!(
+            "Query completed in {:.3}ms, found: {}",
+            elapsed.as_secs_f64() * 1000.0,
+            row.is_some()
+        );
         
         if let Some(row) = row {
             Ok(Some(VideoSegment {
