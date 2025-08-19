@@ -134,6 +134,24 @@ pub struct RecordingConfig {
     pub cleanup_interval_hours: Option<u64>, // How often to run cleanup (default: 1 hour)
 }
 
+impl MqttConfig {
+    pub fn substitute_variables(&mut self) {
+        // Get the hostname
+        let hostname = gethostname::gethostname()
+            .to_string_lossy()
+            .to_string();
+        
+        // Substitute ${hostname} in base_topic
+        self.base_topic = self.base_topic.replace("${hostname}", &hostname);
+        
+        // Substitute ${hostname} in client_id
+        self.client_id = self.client_id.replace("${hostname}", &hostname);
+        
+        info!("MQTT config substituted: base_topic = {}, client_id = {}", 
+              self.base_topic, self.client_id);
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         let cameras = HashMap::new(); // No default cameras - must be configured
@@ -180,6 +198,11 @@ impl Config {
         } else {
             toml::from_str(&content)?
         };
+        
+        // Substitute environment variables in MQTT config
+        if let Some(ref mut mqtt) = config.mqtt {
+            mqtt.substitute_variables();
+        }
         
         // Load cameras from the configured cameras directory (default: "cameras")
         let cameras_dir = config.server.cameras_directory.as_deref().unwrap_or("cameras");

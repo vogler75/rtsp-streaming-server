@@ -1,8 +1,8 @@
 {
   "mqtt": {
-    "base_topic": "Videoserver/2",
+    "base_topic": "Videoserver/${hostname}",
     "broker_url": "mqtt://192.168.1.4:1883",
-    "client_id": "videoserver-02",
+    "client_id": "videoserver-${hostname}",
     "enabled": true,
     "keep_alive_secs": 60,
     "max_packet_size": 268435456,

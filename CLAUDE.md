@@ -18,10 +18,10 @@ cargo build --release
 ./target/release/rtsp-streaming-server
 
 # Run with custom config
-cargo run -- --config config.toml
+cargo run -- --config config.json
 
 # Quick test with timeout (for testing)
-timeout 5 cargo run -- -c config-test.toml
+timeout 5 cargo run -- -c config-test.json
 ```
 
 ### Code Quality
@@ -43,7 +43,7 @@ cargo clippy
 
 ### Core Components
 - **Main Server (`main.rs`)**: Axum web server with WebSocket support, camera management, and graceful shutdown
-- **Configuration (`config.rs`)**: Hot-reloadable config system with main `config.toml` + individual camera JSON files in `cameras/`
+- **Configuration (`config.rs`)**: Hot-reloadable config system with main `config.json` + individual camera JSON files in `cameras/`
 - **Video Streaming (`video_stream.rs`, `rtsp_client.rs`)**: RTSP connections using `retina` crate + FFmpeg transcoding via subprocess
 - **WebSocket Handler (`websocket.rs`)**: Real-time binary frame streaming to browser clients with token authentication
 - **Recording System (`recording.rs`, `database.rs`)**: Per-camera SQLite databases for frame storage with session management
@@ -60,7 +60,7 @@ RTSP Camera → FFmpeg Process → Frame Transcoding → Broadcast Channel → W
 ```
 
 ### Configuration Architecture
-- **Main config**: `config.toml` for server settings, global FFmpeg params, MQTT, recording settings
+- **Main config**: `config.json` for server settings, global FFmpeg params, MQTT, recording settings
 - **Camera configs**: `cameras/*.json` files with per-camera settings, hot-reloaded via file watcher
 - **Dynamic loading**: Changes to camera files automatically restart affected streams
 
@@ -144,7 +144,7 @@ RTSP Camera → FFmpeg Process → Frame Transcoding → Broadcast Channel → W
 - **FFmpeg path**: Ensure FFmpeg is in system PATH
 - **RTSP connections**: Check camera credentials and network connectivity
 - **WebSocket connections**: Verify token authentication for camera access
-- **Port conflicts**: Default server runs on port 8080, configurable in `config.toml`
+- **Port conflicts**: Default server runs on port 8080, configurable in `config.json`
 
 ### File Watching
 - Server watches `cameras/` directory for changes

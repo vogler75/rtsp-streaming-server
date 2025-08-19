@@ -65,3 +65,6 @@ notify = "6.1"
 
 # YAML support for config files (optional, keeping TOML as well)
 serde_yaml = "0.9"
+
+# System information
+gethostname = "0.4"
