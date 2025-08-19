@@ -27,8 +27,8 @@ pub struct VideoSegment {
     pub end_time: DateTime<Utc>,
     pub file_path: Option<String>,  // Optional for database storage
     pub size_bytes: i64,
-    #[sqlx(default)]  // This field might not exist in older database versions
     pub mp4_data: Option<Vec<u8>>,  // Optional blob data for database storage
+    pub session_id: i64,  // Reference to recording_sessions table
     #[sqlx(default)]  // This field might not exist when not joining with recording_sessions
     pub recording_reason: Option<String>,  // Recording reason from recording_sessions
 }
@@ -350,18 +350,14 @@ impl DatabaseProvider for SqliteDatabase {
                 end_time TIMESTAMP NOT NULL,
                 file_path TEXT,
                 size_bytes INTEGER NOT NULL,
-                mp4_data BLOB
+                mp4_data BLOB,
+                session_id INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES recording_sessions(id)
             )
             "#,
         )
         .execute(&self.pool)
         .await?;
-
-        // Add migration for existing databases - add mp4_data column if it doesn't exist
-        sqlx::query("ALTER TABLE video_segments ADD COLUMN mp4_data BLOB")
-            .execute(&self.pool)
-            .await
-            .ok(); // Ignore errors if column already exists
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_camera_time ON video_segments(camera_id, start_time, end_time)")
             .execute(&self.pool)
@@ -698,8 +694,8 @@ impl DatabaseProvider for SqliteDatabase {
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO video_segments (camera_id, start_time, end_time, file_path, size_bytes, mp4_data)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO video_segments (camera_id, start_time, end_time, file_path, size_bytes, mp4_data, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&segment.camera_id)
@@ -708,6 +704,7 @@ impl DatabaseProvider for SqliteDatabase {
         .bind(&segment.file_path)
         .bind(segment.size_bytes)
         .bind(&segment.mp4_data)
+        .bind(segment.session_id)
         .execute(&self.pool)
         .await?;
 
@@ -722,13 +719,9 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Vec<VideoSegment>> {
         let rows = sqlx::query(
             r#"
-            SELECT vs.id, vs.camera_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.reason as recording_reason
+            SELECT vs.id, vs.camera_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, vs.session_id, rs.reason as recording_reason
             FROM video_segments vs
-            LEFT JOIN recording_sessions rs ON (
-                vs.camera_id = rs.camera_id 
-                AND vs.start_time >= rs.start_time 
-                AND (rs.end_time IS NULL OR vs.start_time <= rs.end_time)
-            )
+            LEFT JOIN recording_sessions rs ON vs.session_id = rs.id
             WHERE vs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
             ORDER BY vs.start_time ASC
             "#,
@@ -749,6 +742,7 @@ impl DatabaseProvider for SqliteDatabase {
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
+                session_id: row.get("session_id"),
                 recording_reason: row.get("recording_reason"),
             });
         }
@@ -833,7 +827,7 @@ impl DatabaseProvider for SqliteDatabase {
         // Try to find by exact filename match first (for filesystem storage)
         let row = sqlx::query(
             r#"
-            SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data
+            SELECT id, camera_id, start_time, end_time, file_path, size_bytes, mp4_data, session_id
             FROM video_segments
             WHERE camera_id = ? AND (
                 file_path LIKE '%' || ? || '%' OR
@@ -858,6 +852,7 @@ impl DatabaseProvider for SqliteDatabase {
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
+                session_id: row.get("session_id"),
                 recording_reason: None, // This method doesn't join with recording_sessions
             }))
         } else {

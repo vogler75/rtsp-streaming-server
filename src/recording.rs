@@ -585,6 +585,14 @@ impl RecordingManager {
                         let frames_to_process = std::mem::take(&mut frame_buffer);
                         let end_time = Utc::now();
 
+                        // Get session_id from active recording
+                        let session_id = if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
+                            active_recording.session_id
+                        } else {
+                            error!("No active recording found for camera '{}'", camera_id);
+                            continue;
+                        };
+
                         // Spawn a task to process the segment
                         let task_config = config.clone();
                         let task_database = database.clone();
@@ -594,6 +602,7 @@ impl RecordingManager {
                                 task_config,
                                 task_database,
                                 task_camera_id,
+                                session_id,
                                 segment_start_time,
                                 end_time,
                                 frames_to_process,
@@ -620,6 +629,7 @@ impl RecordingManager {
         config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
         camera_id: String,
+        session_id: i64,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
@@ -631,10 +641,10 @@ impl RecordingManager {
         // Create video segment based on storage type
         if config.video_storage_type == crate::config::Mp4StorageType::Database {
             // Store MP4 data in database as BLOB
-            Self::create_database_video_segment(config.clone(), database, camera_id, start_time, end_time, frames).await
+            Self::create_database_video_segment(config.clone(), database, camera_id, session_id, start_time, end_time, frames).await
         } else {
             // Store MP4 file on filesystem
-            Self::create_filesystem_video_segment(config.clone(), database, camera_id, start_time, end_time, frames).await
+            Self::create_filesystem_video_segment(config.clone(), database, camera_id, session_id, start_time, end_time, frames).await
         }
     }
 
@@ -642,6 +652,7 @@ impl RecordingManager {
         config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
         camera_id: String,
+        session_id: i64,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
@@ -679,6 +690,7 @@ impl RecordingManager {
             file_path: Some(file_path),
             size_bytes: mp4_data.len() as i64,
             mp4_data: None, // No blob data for filesystem storage
+            session_id,
             recording_reason: None, // Will be filled by the database query when retrieved
         };
 
@@ -690,6 +702,7 @@ impl RecordingManager {
         config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
         camera_id: String,
+        session_id: i64,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
@@ -704,6 +717,7 @@ impl RecordingManager {
             file_path: None, // No file path for database storage
             size_bytes: mp4_data.len() as i64,
             mp4_data: Some(mp4_data), // Store as BLOB
+            session_id,
             recording_reason: None, // Will be filled by the database query when retrieved
         };
 
