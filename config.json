@@ -6,10 +6,12 @@
     "enabled": true,
     "keep_alive_secs": 60,
     "max_packet_size": 268435456,
+    "password": null,
     "publish_interval_secs": 5,
     "publish_picture_arrival": false,
     "qos": 0,
-    "retain": false
+    "retain": false,
+    "username": null
   },
   "recording": {
     "cleanup_interval_hours": 1,
@@ -17,13 +19,14 @@
     "frame_storage_enabled": true,
     "frame_storage_retention": "1h",
     "max_frame_size": 10485760,
+    "mp4_framerate": 5,
     "video_segment_minutes": 5,
     "video_storage_retention": "30d",
-    "video_storage_type": "database",
-    "mp4_framerate": 5.0
+    "video_storage_type": "database"
   },
   "server": {
     "admin_token": "test",
+    "cameras_directory": "cameras",
     "cors_allow_origin": "*",
     "host": "0.0.0.0",
     "port": 8080,

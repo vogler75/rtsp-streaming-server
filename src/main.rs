@@ -1954,12 +1954,30 @@ async fn api_update_config(
                .into_response();
     }
     
-    // Validate the new config by trying to deserialize it
-    match serde_json::from_value::<config::Config>(body.0.clone()) {
+    // Parse the current config as a JSON Value for merging
+    let mut current_config_value = match serde_json::to_value(&current_config) {
+        Ok(val) => val,
+        Err(e) => {
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                   Json(ApiResponse::<()>::error(&format!("Failed to serialize current config: {}", e), 500)))
+                  .into_response();
+        }
+    };
+    
+    // Remove the 'cameras' field from current config since it's managed separately
+    if let Some(obj) = current_config_value.as_object_mut() {
+        obj.remove("cameras");
+    }
+    
+    // Merge the new config with current config, preserving existing settings
+    merge_json_values(&mut current_config_value, &body.0);
+    
+    // Validate the merged config by trying to deserialize it
+    match serde_json::from_value::<config::Config>(current_config_value.clone()) {
         Ok(_) => {
             // Config is valid, write it to file
             let content = if config_path.ends_with(".json") {
-                match serde_json::to_string_pretty(&body.0) {
+                match serde_json::to_string_pretty(&current_config_value) {
                     Ok(json) => json,
                     Err(e) => {
                         return (axum::http::StatusCode::BAD_REQUEST,
@@ -1968,7 +1986,7 @@ async fn api_update_config(
                     }
                 }
             } else {
-                match toml::to_string_pretty(&body.0) {
+                match toml::to_string_pretty(&current_config_value) {
                     Ok(toml) => toml,
                     Err(e) => {
                         return (axum::http::StatusCode::BAD_REQUEST,
@@ -1997,6 +2015,25 @@ async fn api_update_config(
             (axum::http::StatusCode::BAD_REQUEST,
              Json(ApiResponse::<()>::error(&format!("Invalid configuration: {}", e), 400)))
             .into_response()
+        }
+    }
+}
+
+/// Recursively merge JSON values, updating target with values from source
+fn merge_json_values(target: &mut serde_json::Value, source: &serde_json::Value) {
+    match (target.as_object_mut(), source.as_object()) {
+        (Some(target_map), Some(source_map)) => {
+            for (key, value) in source_map {
+                if target_map.contains_key(key) {
+                    merge_json_values(target_map.get_mut(key).unwrap(), value);
+                } else {
+                    target_map.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        _ => {
+            // For non-object values, replace the target with source
+            *target = source.clone();
         }
     }
 }

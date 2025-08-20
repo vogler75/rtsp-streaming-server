@@ -839,6 +839,11 @@
                                 <input type="password" id="config_server_admin_token" placeholder="Enter secure token">
                                 <span class="help-text">Token required for admin dashboard access</span>
                             </div>
+                            <div class="form-group">
+                                <label>Cameras Directory</label>
+                                <input type="text" id="config_server_cameras_directory" placeholder="cameras">
+                                <span class="help-text">Directory path for camera configuration files (default: "cameras")</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1387,6 +1392,7 @@
             document.getElementById('config_server_port').value = config.server?.port || '';
             document.getElementById('config_server_cors_allow_origin').value = config.server?.cors_allow_origin || '';
             document.getElementById('config_server_admin_token').value = config.server?.admin_token || '';
+            document.getElementById('config_server_cameras_directory').value = config.server?.cameras_directory || '';
             
             // TLS settings
             document.getElementById('config_server_tls_enabled').value = (config.server?.tls?.enabled || false).toString();
@@ -1432,6 +1438,7 @@
                     port: parseInt(document.getElementById('config_server_port').value) || 8080,
                     cors_allow_origin: document.getElementById('config_server_cors_allow_origin').value || "*",
                     admin_token: document.getElementById('config_server_admin_token').value || "",
+                    cameras_directory: document.getElementById('config_server_cameras_directory').value || null,
                     tls: {
                         enabled: document.getElementById('config_server_tls_enabled').value === 'true',
                         cert_path: document.getElementById('config_server_tls_cert_path').value || "certs/server.crt",
