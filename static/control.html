@@ -340,7 +340,7 @@
                                 <!-- From/Current/To times row -->
                                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                                     <span id="timelineStart" class="timestamp-display" style="font-size: 10px; color: rgba(255,255,255,0.7);">00:00:00</span>
-                                    <span id="timelineCurrent" class="timestamp-display" style="font-weight: bold; font-size: 11px; color: white;">Current: 00:00:00</span>
+                                    <span id="timelineCurrent" class="timestamp-display" style="font-weight: bold; font-size: 11px; color: white;">Time: 00:00:00</span>
                                     <span id="timelineEnd" class="timestamp-display" style="font-size: 10px; color: rgba(255,255,255,0.7);">00:00:00</span>
                                 </div>
                             </div>
@@ -429,6 +429,8 @@
                 this.currentTimestamp = null;
                 this.timelineStart = null;
                 this.timelineEnd = null;
+                this.lastSeekPosition = null;  // Track last seek position for resuming playback
+                this.wasLiveBeforeSeek = false; // Track if we were in live mode before seeking
                 
                 this.setupEventListeners();
                 this.updateRecordingControlsVisibility();
@@ -613,7 +615,7 @@
                     second: '2-digit',
                     timeZoneName: 'short'
                 });
-                document.getElementById('timelineCurrent').textContent = `Current: ${currentTimeString}`;
+                document.getElementById('timelineCurrent').textContent = `Time: ${currentTimeString}`;
 
                 // Update slider position for both replay and live modes
                 if (this.timelineStart && this.timelineEnd) {
@@ -808,6 +810,10 @@
                     this.sendCommand({ cmd: 'stop' });
                 }
                 
+                // Clear any previous seek state since we're starting a new recording
+                this.lastSeekPosition = null;
+                this.wasLiveBeforeSeek = false;
+                
                 this.timelineStart = new Date(recording.start_time);
                 this.timelineEnd = recording.end_time ? new Date(recording.end_time) : new Date();
                 document.getElementById('timelineStart').textContent = this.timelineStart.toLocaleTimeString();
@@ -834,6 +840,10 @@
                 this.streamState = 'live';
                 this.updatePlayerUI();
                 
+                // Clear any previous seek state since we're starting fresh live stream
+                this.lastSeekPosition = null;
+                this.wasLiveBeforeSeek = false;
+                
                 // Set up timeline for live mode (last hour)
                 const now = new Date();
                 this.timelineEnd = now;
@@ -852,8 +862,41 @@
             togglePlayPause() {
                 const button = document.getElementById('playPauseButton');
                 if (this.streamState === 'stopped') {
-                    // Start playing from current position if we have a selected recording
-                    if (this.selectedRecording) {
+                    // Check if we have a seek position to resume from (either from live mode or replay mode)
+                    if (this.lastSeekPosition) {
+                        // Resume from the last seek position
+                        if (this.wasLiveBeforeSeek) {
+                            // We were in live mode but seeked to a historical position - start replay from that point
+                            this.sendCommand({
+                                cmd: 'start',
+                                from: this.lastSeekPosition.toISOString()
+                                // No 'to' parameter since we want to continue indefinitely from this point
+                            });
+                            this.streamState = 'replaying';
+                        } else if (this.selectedRecording) {
+                            // We were replaying a recording and seeked - continue from seek position
+                            const command = {
+                                cmd: 'start',
+                                from: this.lastSeekPosition.toISOString()
+                            };
+                            if (this.selectedRecording.end_time) {
+                                command.to = this.selectedRecording.end_time;
+                            }
+                            this.sendCommand(command);
+                            this.streamState = 'replaying';
+                        } else {
+                            // Fallback: start from the seek position without end constraint
+                            this.sendCommand({
+                                cmd: 'start',
+                                from: this.lastSeekPosition.toISOString()
+                            });
+                            this.streamState = 'replaying';
+                        }
+                        // Clear the seek position flag since we've resumed
+                        this.lastSeekPosition = null;
+                        this.wasLiveBeforeSeek = false;
+                    } else if (this.selectedRecording) {
+                        // Standard replay behavior for selected recordings
                         if (this.currentTimestamp) {
                             // Continue from current position
                             const command = {
@@ -949,22 +992,30 @@
                 const targetMs = startMs + ((endMs - startMs) * (value / 100));
                 const targetTimestamp = new Date(targetMs);
 
+                // Track the seek position and previous state
+                this.lastSeekPosition = targetTimestamp;
+                
                 // Stop playback when user moves the slider
                 if (this.streamState === 'live' || this.streamState === 'replaying') {
+                    // Remember if we were in live mode before seeking
+                    this.wasLiveBeforeSeek = (this.streamState === 'live');
+                    
                     this.sendCommand({ cmd: 'stop' });
                     this.streamState = 'stopped';
                     this.updatePlayerUI(); // This will update the play/pause button to show play symbol
                 }
 
-                // In live mode, if seeking to a time in the past, we need actual recorded data
-                if (this.streamState === 'live' && targetTimestamp < new Date()) {
-                    this.logJson({ message: `Seeking to ${targetTimestamp.toLocaleTimeString()} in live mode` });
+                // Log if we were seeking back in time from live mode
+                if (this.wasLiveBeforeSeek && targetTimestamp < new Date()) {
+                    this.logJson({ message: `Seeking to ${targetTimestamp.toLocaleTimeString()} from live mode` });
                 }
 
                 this.sendCommand({
                     cmd: 'goto',
                     timestamp: targetTimestamp.toISOString()
                 });
+                
+                // The actual timestamp will be displayed when the frame arrives via displayFrameWithTimestamp()
             }
 
             changeSpeed(delta) {
