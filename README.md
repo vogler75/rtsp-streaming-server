@@ -74,6 +74,28 @@ For **Siemens WinCC Unified (CWC)** integration, use the appropriate streaming e
 The **`/stream`** endpoint provides a clean video streaming interface optimized for embedding in CWC, while **`/control`** provides full recording and playback functionality.
 
 ## Configuration
+### PTZ (Pan/Tilt/Zoom)
+
+Enable PTZ per camera if supported (currently ONVIF):
+
+```json
+{
+  "path": "/cam1",
+  "url": "rtsp://...",
+  "transport": "tcp",
+  "reconnect_interval": 10,
+  "ptz": {
+    "enabled": true,
+    "protocol": "onvif",
+    "onvif_url": "http://<ip>:<port>/onvif/device_service",
+    "username": "admin",
+    "password": "pass",
+    "profile_token": "profile1"
+  }
+}
+```
+
+If `profile_token` is omitted, `profile1` is used. The service URL may vary by device.
 
 The server uses two configuration methods:
 1. **`config.json`**: Main server configuration (server settings, MQTT, transcoding defaults, recording)

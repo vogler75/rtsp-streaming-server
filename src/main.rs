@@ -28,6 +28,8 @@ mod watcher;
 mod camera_manager;
 mod mp4;
 mod handlers;
+mod ptz;
+mod api_ptz;
 
 use config::Config;
 use errors::{Result, StreamError};
@@ -124,7 +126,8 @@ async fn main() -> Result<()> {
     
     // Configure logging based on verbose flag
     let log_level = if args.verbose {
-        "rtsp_streaming_server=trace,debug,info"
+        // Enable verbose logs for our crate and ONVIF PTZ target
+        "rtsp_streaming_server=trace,ptz_onvif=trace"
     } else {
         "rtsp_streaming_server=info"
     };
@@ -512,6 +515,35 @@ async fn main() -> Result<()> {
                 )
             ));
         }
+
+        // PTZ control endpoints (handlers will validate if enabled in camera config)
+        let ptz_info = stream_info.clone();
+        let ptz_move_path = format!("{}/control/ptz/move", path);
+        app = app.route(&ptz_move_path, axum::routing::post(move |headers, json| {
+            let cfg = ptz_info.camera_config.clone();
+            async move { api_ptz::api_ptz_move(headers, json, cfg).await }
+        }));
+
+        let ptz_info2 = stream_info.clone();
+        let ptz_stop_path = format!("{}/control/ptz/stop", path);
+        app = app.route(&ptz_stop_path, axum::routing::post(move |headers| {
+            let cfg = ptz_info2.camera_config.clone();
+            async move { api_ptz::api_ptz_stop(headers, cfg).await }
+        }));
+
+        let ptz_info3 = stream_info.clone();
+        let ptz_goto_preset_path = format!("{}/control/ptz/goto_preset", path);
+        app = app.route(&ptz_goto_preset_path, axum::routing::post(move |headers, json| {
+            let cfg = ptz_info3.camera_config.clone();
+            async move { api_ptz::api_ptz_goto_preset(headers, json, cfg).await }
+        }));
+
+        let ptz_info4 = stream_info.clone();
+        let ptz_set_preset_path = format!("{}/control/ptz/set_preset", path);
+        app = app.route(&ptz_set_preset_path, axum::routing::post(move |headers, json| {
+            let cfg = ptz_info4.camera_config.clone();
+            async move { api_ptz::api_ptz_set_preset(headers, json, cfg).await }
+        }));
     }
     
     // Add API endpoints with captured state

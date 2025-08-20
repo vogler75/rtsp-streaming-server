@@ -68,7 +68,28 @@ pub struct CameraConfig {
     
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
+
+    // PTZ control configuration (optional)
+    #[serde(default)]
+    pub ptz: Option<PtzConfig>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtzConfig {
+    pub enabled: bool,
+    /// PTZ protocol: currently only "onvif" is supported
+    #[serde(default = "default_ptz_protocol")] 
+    pub protocol: String,
+    /// ONVIF service URL, e.g. http://<ip>:<port>/onvif/device_service
+    pub onvif_url: Option<String>,
+    /// Credentials for ONVIF HTTP digest/basic auth
+    pub username: Option<String>,
+    pub password: Option<String>,
+    /// Optional PTZ profile token (if not provided, will try to resolve first profile)
+    pub profile_token: Option<String>,
+}
+
+fn default_ptz_protocol() -> String { "onvif".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FfmpegConfig {

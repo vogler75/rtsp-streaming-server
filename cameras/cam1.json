@@ -33,7 +33,15 @@
   },
   "max_recording_age": "8d",
   "frame_storage_enabled": null,
-  "video_storage_type": null,
+  "video_storage_type": "filesystem",
   "video_storage_retention": null,
-  "video_segment_minutes": null
+  "video_segment_minutes": null,
+  "ptz": {
+    "enabled": true,
+    "protocol": "onvif",
+    "onvif_url": "http://192.168.1.171:2020/onvif/device_service",
+    "username": "admin007",
+    "password": "admin007",
+    "profile_token": "profile1"
+  }
 }

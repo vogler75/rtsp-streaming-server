@@ -31,5 +31,17 @@
     "publish_interval": 0,
     "topic_name": "surveillance/cameras/cam2/image"
   },
-  "max_recording_age": "7d"
+  "max_recording_age": "7d",
+  "frame_storage_enabled": null,
+  "video_storage_type": null,
+  "video_storage_retention": null,
+  "video_segment_minutes": null,
+  "ptz": {
+    "enabled": false,
+    "protocol": "onvif",
+    "onvif_url": null,
+    "username": null,
+    "password": null,
+    "profile_token": null
+  }
 }

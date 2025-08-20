@@ -4,42 +4,48 @@ This document provides a hierarchical overview of the available REST API endpoin
 
 ## API Endpoint Hierarchy
 
-*   **`/`**
-    *   `GET /dashboard`: Displays the main dashboard.
-*   **`/api`**
-    *   `GET /status`: Retrieves the current status of the server.
-    *   `GET /cameras`: Retrieves a list of all available cameras.
-    *   **`/recordings`**
-        *   `GET /:camera_id/:filename`: Streams a specific MP4 recording.
-    *   **`/cameras`**
-        *   **`/:camera_id`**
-            *   **`/recordings`**
-                *   `POST /start`: Starts recording for the specified camera.
-                *   `POST /stop`: Stops recording for the specified camera.
-                *   `GET /`: Lists all recordings for the specified camera.
-                *   `GET /active`: Checks if a recording is currently active for the specified camera.
-                *   **`/:filename`**
-                    *   `GET /frames`: Retrieves the frames of a specific recording.
-                    *   `GET /size`: Retrieves the size of a specific recording.
-    *   **`/admin`**
-        *   **`/cameras`**
-            *   `POST /`: Creates a new camera configuration.
-            *   **`/:id`**
-                *   `GET /`: Retrieves the configuration for a specific camera.
-                *   `PUT /`: Updates the configuration for a specific camera.
-                *   `DELETE /`: Deletes a specific camera.
-        *   **`/config`**
-            *   `GET /`: Retrieves the server's main configuration.
-            *   `PUT /`: Updates the server's main configuration.
-*   **`/stream`**
-    *   `GET /:camera_id`: Serves the video stream page for a specific camera.
-*   **`/control`**
-    *   `GET /:camera_id`: Serves the control page for a specific camera.
-*   **`/live`**
-    *   `GET /:camera_id`: Serves the live HLS stream for a specific camera.
-*   **`/test`**
-    *   `GET /`: Serves a test page.
-    *   `GET /:camera_id`: Serves a test page for a specific camera.
+```text
+/
+  GET  /dashboard                         # Dashboard page
+
+/api
+  GET  /status                            # Server status
+  GET  /cameras                           # List cameras
+  /recordings
+    GET  /:camera_id/:filename            # Stream MP4 recording
+  /admin
+    /cameras
+      POST /                              # Create camera
+      GET  /:id                           # Get camera config
+      PUT  /:id                           # Update camera config
+      DELETE /:id                         # Delete camera
+    /config
+      GET  /                              # Get server config
+      PUT  /                              # Update server config
+
+# Per-camera routes (use the configured camera path, e.g., /cam1)
+<camera_path>
+  GET  /                                  # Camera test page
+  GET  /stream                            # Stream page (WebSocket used for frames)
+  GET  /control                           # Control page (WebSocket used for control)
+  GET  /live                              # Live stream over WebSocket
+  GET  /test                              # Alternate test page
+
+<camera_path>/control
+  # Recording API
+  POST /recording/start                   # Start recording
+  POST /recording/stop                    # Stop recording
+  GET  /recordings                        # List recordings
+  GET  /recording/active                  # Active recording status
+  GET  /recording/size                    # Recording DB size
+  GET  /recordings/:session_id/frames     # Frames metadata for a recording
+
+  # PTZ API (if enabled for the camera)
+  POST /ptz/move                          # Continuous pan/tilt/zoom
+  POST /ptz/stop                          # Stop movement
+  POST /ptz/goto_preset                   # Move to preset by token
+  POST /ptz/set_preset                    # Create/update a preset
+```
 
 
 ## Camera Management API (`/api/admin/cameras`)
@@ -176,3 +182,17 @@ Gets the total size of the recording database for the camera.
     }
   }
   ```
+
+### PTZ Endpoints (if enabled)
+
+All PTZ endpoints live under the camera control path: `/<camera_path>/control/ptz/*`.
+
+- `POST /<camera_path>/control/ptz/move`
+  - Body: `{ "pan": -1.0..1.0, "tilt": -1.0..1.0, "zoom": -1.0..1.0, "timeout_secs": 0.. }`
+- `POST /<camera_path>/control/ptz/stop`
+- `POST /<camera_path>/control/ptz/goto_preset`
+  - Body: `{ "token": "preset-token" }`
+- `POST /<camera_path>/control/ptz/set_preset`
+  - Body: `{ "name": "Home", "token": "home" }` (either field optional)
+
+Note: If a `token` is configured for the camera, include `Authorization: Bearer <token>` when calling these endpoints.

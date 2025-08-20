@@ -673,6 +673,48 @@
                     </div>
                 </div>
 
+                <!-- PTZ Settings -->
+                <div class="form-section">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🎛️ PTZ Settings</h3>
+                    <div class="collapsible-content collapsed">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>PTZ Enabled</label>
+                                <select id="ptz_enabled" name="ptz_enabled" onchange="togglePtzFields()">
+                                    <option value="false" selected>No</option>
+                                    <option value="true">Yes</option>
+                                </select>
+                                <span class="help-text">Enable Pan/Tilt/Zoom control for this camera</span>
+                            </div>
+                            <div class="form-group">
+                                <label>PTZ Protocol</label>
+                                <select id="ptz_protocol" name="ptz_protocol">
+                                    <option value="onvif" selected>ONVIF</option>
+                                </select>
+                                <span class="help-text">Currently only ONVIF is supported</span>
+                            </div>
+                            <div class="form-group">
+                                <label>ONVIF Service URL</label>
+                                <input type="text" id="ptz_onvif_url" name="ptz_onvif_url" placeholder="http://<ip>:<port>/onvif/device_service">
+                                <span class="help-text">Device ONVIF endpoint URL</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Username</label>
+                                <input type="text" id="ptz_username" name="ptz_username" placeholder="admin">
+                            </div>
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" id="ptz_password" name="ptz_password" placeholder="••••••••">
+                            </div>
+                            <div class="form-group">
+                                <label>Profile Token</label>
+                                <input type="text" id="ptz_profile_token" name="ptz_profile_token" placeholder="profile1">
+                                <span class="help-text">Optional; defaults to profile1 when empty</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="form-section">
                     <h3 class="collapsible collapsed" onclick="toggleSection(this)">MQTT Settings</h3>
                     <div class="collapsible-content collapsed">
@@ -1328,6 +1370,24 @@
                 document.getElementById('mqtt_publish_interval').value = config.mqtt.publish_interval || 0;
                 document.getElementById('mqtt_topic_name').value = config.mqtt.topic_name || '';
             }
+
+            // PTZ settings
+            if (config.ptz) {
+                document.getElementById('ptz_enabled').value = (config.ptz.enabled || false).toString();
+                document.getElementById('ptz_protocol').value = config.ptz.protocol || 'onvif';
+                document.getElementById('ptz_onvif_url').value = config.ptz.onvif_url || '';
+                document.getElementById('ptz_username').value = config.ptz.username || '';
+                document.getElementById('ptz_password').value = config.ptz.password || '';
+                document.getElementById('ptz_profile_token').value = config.ptz.profile_token || '';
+            } else {
+                document.getElementById('ptz_enabled').value = 'false';
+                document.getElementById('ptz_protocol').value = 'onvif';
+                document.getElementById('ptz_onvif_url').value = '';
+                document.getElementById('ptz_username').value = '';
+                document.getElementById('ptz_password').value = '';
+                document.getElementById('ptz_profile_token').value = '';
+            }
+            togglePtzFields();
             
             // FFmpeg settings
             if (config.ffmpeg) {
@@ -1728,6 +1788,23 @@
             if (Object.keys(ffmpegConfig).length > 0) {
                 config.ffmpeg = ffmpegConfig;
             }
+
+            // Add PTZ config
+            const ptzEnabled = formData.get('ptz_enabled') === 'true';
+            const ptzProtocol = formData.get('ptz_protocol') || 'onvif';
+            if (ptzEnabled) {
+                config.ptz = {
+                    enabled: true,
+                    protocol: ptzProtocol,
+                    onvif_url: formData.get('ptz_onvif_url') || null,
+                    username: formData.get('ptz_username') || null,
+                    password: formData.get('ptz_password') || null,
+                    profile_token: formData.get('ptz_profile_token') || null
+                };
+            } else {
+                // Explicitly disable if user selects No
+                config.ptz = { enabled: false, protocol: ptzProtocol };
+            }
             
             try {
                 const url = isEditing ? 
@@ -1759,6 +1836,15 @@
                 showAlert('Error saving camera', 'error');
             }
         });
+
+        function togglePtzFields() {
+            const enabled = document.getElementById('ptz_enabled').value === 'true';
+            const ids = ['ptz_protocol', 'ptz_onvif_url', 'ptz_username', 'ptz_password', 'ptz_profile_token'];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = !enabled;
+            });
+        }
 
         function hasCameraListChanged(newCameras) {
             if (currentCameras.length !== newCameras.length) {

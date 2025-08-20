@@ -69,3 +69,8 @@ serde_yaml = "0.9"
 
 # System information
 gethostname = "1.0"
+
+# PTZ / ONVIF
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+base64 = "0.21"
+sha1 = "0.10"
