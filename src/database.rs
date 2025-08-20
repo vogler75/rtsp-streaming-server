@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, Row, FromRow};
+use tracing::error;
 use crate::errors::Result;
 
 // Table name constants for easy configuration
@@ -275,8 +276,24 @@ impl FrameStream for SqliteFrameStream {
             }
         }
         
-        // Return the next frame from current batch
-        let frame = self.current_batch[self.batch_index].clone();
+        // Double-check that batch_index is within bounds after fetch
+        if self.batch_index >= self.current_batch.len() {
+            // This shouldn't happen, but protect against it
+            error!("Unexpected state: batch_index {} >= batch length {} after fetch", 
+                   self.batch_index, self.current_batch.len());
+            return Ok(None);
+        }
+        
+        // Return the next frame from current batch - use safe indexing
+        let frame = match self.current_batch.get(self.batch_index) {
+            Some(frame) => frame.clone(),
+            None => {
+                error!("Failed to get frame at index {} from batch of length {}", 
+                       self.batch_index, self.current_batch.len());
+                return Ok(None);
+            }
+        };
+        
         self.batch_index += 1;
         Ok(Some(frame))
     }
