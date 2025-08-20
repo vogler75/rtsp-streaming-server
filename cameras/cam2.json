@@ -31,5 +31,9 @@
     "publish_interval": 0,
     "topic_name": "surveillance/cameras/cam2/image"
   },
-  "max_recording_age": "7d"
+  "max_recording_age": "7d",
+  "frame_storage_enabled": null,
+  "video_storage_type": "filesystem",
+  "video_storage_retention": null,
+  "video_segment_minutes": null
 }

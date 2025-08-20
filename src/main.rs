@@ -31,11 +31,10 @@ mod recording;
 mod control;
 mod utils;
 mod api;
+mod mp4;
 
 use config::Config;
 use errors::{Result, StreamError};
-use api::streaming::mp4;
-use api::admin;
 
 // Custom formatter to remove "rtsp_streaming_server::" prefix and pad to 80 chars
 struct CustomFormatter;
@@ -653,10 +652,10 @@ async fn main() -> Result<()> {
 
     // Camera management API endpoints
     let admin_state = app_state.clone();
-    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<admin::CreateCameraRequest>| {
+    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<api::CreateCameraRequest>| {
         let state = admin_state.clone();
         async move {
-            admin::api_create_camera(headers, body, state).await
+            api::api_create_camera(headers, body, state).await
         }
     }));
 
@@ -664,7 +663,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::get(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
         let state = admin_state2.clone();
         async move {
-            admin::api_get_camera_config(headers, path, state).await
+            api::api_get_camera_config(headers, path, state).await
         }
     }));
 
@@ -672,7 +671,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::put(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>, body: axum::extract::Json<config::CameraConfig>| {
         let state = admin_state3.clone();
         async move {
-            admin::api_update_camera(headers, path, body, state).await
+            api::api_update_camera(headers, path, body, state).await
         }
     }));
 
@@ -680,7 +679,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::delete(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
         let state = admin_state4.clone();
         async move {
-            admin::api_delete_camera(headers, path, state).await
+            api::api_delete_camera(headers, path, state).await
         }
     }));
 
@@ -689,7 +688,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/config", axum::routing::get(move |headers: axum::http::HeaderMap| {
         let args = args_get.clone();
         async move {
-            admin::api_get_config(headers, args).await
+            api::api_get_config(headers, args).await
         }
     }));
 
@@ -697,7 +696,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/config", axum::routing::put(move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
         let args = args_put.clone();
         async move {
-            admin::api_update_config(headers, body, args).await
+            api::api_update_config(headers, body, args).await
         }
     }));
     
