@@ -1596,7 +1596,7 @@ async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
     
     // Set socket options for better performance
     socket.set_reuse_address(true)?;
-    socket.set_nodelay(true)?;
+    socket.set_tcp_nodelay(true)?;
     socket.set_keepalive(true)?;
     
     // Set socket to non-blocking mode for Tokio compatibility
