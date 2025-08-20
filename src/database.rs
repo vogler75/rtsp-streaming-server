@@ -336,6 +336,7 @@ impl DatabaseProvider for SqliteDatabase {
                 session_id INTEGER NOT NULL,
                 timestamp TIMESTAMP NOT NULL,
                 frame_data BLOB NOT NULL,
+                PRIMARY KEY (session_id, timestamp),
                 FOREIGN KEY (session_id) REFERENCES {}(id)
             )
             "#,
@@ -394,6 +395,23 @@ impl DatabaseProvider for SqliteDatabase {
             TABLE_RECORDING_MP4
         );
         sqlx::query(&idx_segment_session)
+            .execute(&self.pool)
+            .await?;
+
+        // Add indexes on recording_sessions for common query patterns
+        let idx_camera_start_time = format!(
+            "CREATE INDEX IF NOT EXISTS idx_camera_start_time ON {}(camera_id, start_time)",
+            TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&idx_camera_start_time)
+            .execute(&self.pool)
+            .await?;
+
+        let idx_camera_status = format!(
+            "CREATE INDEX IF NOT EXISTS idx_camera_status ON {}(camera_id, status)",
+            TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&idx_camera_status)
             .execute(&self.pool)
             .await?;
 
