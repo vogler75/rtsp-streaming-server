@@ -9,12 +9,12 @@ tokio = { version = "1", features = ["full"] }
 
 # Web server and WebSocket
 axum = { version = "0.7", features = ["ws"] }
-axum-server = { version = "0.6", features = ["tls-rustls"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["fs", "cors"] }
-rustls = "0.21"
-rustls-pemfile = "1.0"
-tokio-tungstenite = "0.21"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+rustls = "0.23"
+rustls-pemfile = "2.2"
+tokio-tungstenite = "0.27"
 futures-util = "0.3"
 url = "2.5"
 
@@ -22,7 +22,7 @@ url = "2.5"
 retina = "0.4"
 
 # Image processing
-image = { version = "0.24", features = ["jpeg"] }
+image = { version = "0.25", features = ["jpeg"] }
 bytes = "1"
 
 # Configuration
@@ -40,7 +40,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 
 # Async channels
 tokio-stream = "0.1"
@@ -55,17 +55,17 @@ uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive"] }
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 async-trait = "0.1"
 
 # Socket configuration
-socket2 = "0.5"
+socket2 = "0.6"
 
 # File watching
-notify = "6.1"
+notify = "8.2"
 
 # YAML support for config files (optional, keeping TOML as well)
 serde_yaml = "0.9"
 
 # System information
-gethostname = "0.4"
+gethostname = "1.0"
