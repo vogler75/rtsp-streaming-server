@@ -1596,7 +1596,7 @@ async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
     
     // Set socket options for better performance
     socket.set_reuse_address(true)?;
-    socket.set_tcp_nodelay(true)?;
+    socket.set_nodelay(true)?;
     socket.set_keepalive(true)?;
     
     // Set socket to non-blocking mode for Tokio compatibility
@@ -1630,32 +1630,31 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
     let mut cert_reader = BufReader::new(cert_file);
     let mut key_reader = BufReader::new(key_file);
 
-    // Parse certificate and key using rustls 0.23 API
-    let certs: Vec<rustls::pki_types::CertificateDer> = rustls_pemfile::certs(&mut cert_reader)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| StreamError::server(format!("Failed to parse certificate: {}", e)))?;
+    // Parse certificate and key
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .map_err(|e| StreamError::server(format!("Failed to parse certificate: {}", e)))?
+        .into_iter()
+        .map(rustls::Certificate)
+        .collect();
     
-    let mut keys: Vec<rustls::pki_types::PrivateKeyDer> = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
-        .map(|key| key.map(rustls::pki_types::PrivateKeyDer::Pkcs8))
-        .collect::<std::result::Result<Vec<_>, _>>()
+    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
         .map_err(|e| StreamError::server(format!("Failed to parse private key: {}", e)))?;
     
     if keys.is_empty() {
         // Try RSA private keys if PKCS8 fails
         let mut key_reader = BufReader::new(File::open(&tls_cfg.key_path)?);
         keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
-            .map(|key| key.map(rustls::pki_types::PrivateKeyDer::Pkcs1))
-            .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| StreamError::server(format!("Failed to parse RSA private key: {}", e)))?;
     }
     
     let private_key = keys.into_iter().next()
         .ok_or_else(|| StreamError::server("No private key found in key file"))?;
 
-    // Create TLS configuration using rustls 0.23 API
+    // Create TLS configuration
     let rustls_config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(certs, private_key)
+        .with_single_cert(certs, rustls::PrivateKey(private_key))
         .map_err(|e| StreamError::server(format!("Failed to create TLS config: {}", e)))?;
 
     info!("HTTPS server listening on https://{}", addr);
