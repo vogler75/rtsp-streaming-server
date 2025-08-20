@@ -793,6 +793,13 @@
                 const videoPlayer = document.getElementById('videoPlayer');
                 const canvas = document.getElementById('videoCanvas');
 
+                // Stop any active stream (live or replay) before playing MP4
+                if (this.streamState === 'live' || this.streamState === 'replaying') {
+                    this.sendCommand({ cmd: 'stop' });
+                    this.streamState = 'stopped';
+                    this.updatePlayerUI();
+                }
+
                 canvas.style.display = 'none';
                 videoPlayer.style.display = 'block';
 
@@ -805,10 +812,8 @@
                 document.getElementById('videoPlayer').style.display = 'none';
                 document.getElementById('videoCanvas').style.display = 'block';
 
-                // Stop any current stream first
-                if (this.streamState === 'live' || this.streamState === 'replaying') {
-                    this.sendCommand({ cmd: 'stop' });
-                }
+                // Always stop any current stream first to ensure clean state
+                this.sendCommand({ cmd: 'stop' });
                 
                 // Clear any previous seek state since we're starting a new recording
                 this.lastSeekPosition = null;
@@ -836,6 +841,16 @@
             }
 
             startLiveStream() {
+                // Switch back to canvas if we were playing video segments
+                const videoPlayer = document.getElementById('videoPlayer');
+                const canvas = document.getElementById('videoCanvas');
+                if (videoPlayer.style.display !== 'none') {
+                    videoPlayer.pause();
+                    videoPlayer.src = '';
+                    videoPlayer.style.display = 'none';
+                    canvas.style.display = 'block';
+                }
+
                 this.sendCommand({ cmd: 'live' });
                 this.streamState = 'live';
                 this.updatePlayerUI();
