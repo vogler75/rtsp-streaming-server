@@ -3,6 +3,11 @@ use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, Row, FromRow};
 use crate::errors::Result;
 
+// Table name constants for easy configuration
+const TABLE_RECORDING_SESSIONS: &str = "recording_sessions";
+const TABLE_RECORDING_MJPEG: &str = "recording_mjpeg";  // formerly recorded_frames
+const TABLE_RECORDING_MP4: &str = "recording_mp4";      // formerly video_segments
+
 #[derive(Debug, Clone)]
 pub struct RecordingSession {
     pub id: i64,
@@ -211,18 +216,20 @@ impl SqliteFrameStream {
             }
         };
         
-        let rows = sqlx::query(
+        let query = format!(
             r#"
             SELECT rf.timestamp, rf.frame_data
-            FROM recorded_frames rf
-            JOIN recording_sessions rs ON rf.session_id = rs.id
+            FROM {} rf
+            JOIN {} rs ON rf.session_id = rs.id
             WHERE rs.camera_id = ? 
               AND rf.timestamp >= ? 
               AND rf.timestamp <= ?
             ORDER BY rf.timestamp ASC
             LIMIT ?
-            "#
-        )
+            "#,
+            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+        );
+        let rows = sqlx::query(&query)
         .bind(&self.camera_id)
         .bind(current_ts)
         .bind(self.to)
@@ -306,9 +313,9 @@ impl SqliteDatabase {
 #[async_trait]
 impl DatabaseProvider for SqliteDatabase {
     async fn initialize(&self) -> Result<()> {
-        sqlx::query(
+        let create_sessions_query = format!(
             r#"
-            CREATE TABLE IF NOT EXISTS recording_sessions (
+            CREATE TABLE IF NOT EXISTS {} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 camera_id TEXT NOT NULL,
                 start_time TIMESTAMP NOT NULL,
@@ -317,34 +324,46 @@ impl DatabaseProvider for SqliteDatabase {
                 status TEXT NOT NULL DEFAULT 'active'
             )
             "#,
-        )
-        .execute(&self.pool)
-        .await?;
+            TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&create_sessions_query)
+            .execute(&self.pool)
+            .await?;
 
-        sqlx::query(
+        let create_mjpeg_query = format!(
             r#"
-            CREATE TABLE IF NOT EXISTS recorded_frames (
+            CREATE TABLE IF NOT EXISTS {} (
                 session_id INTEGER NOT NULL,
                 timestamp TIMESTAMP NOT NULL,
                 frame_data BLOB NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES recording_sessions(id)
+                FOREIGN KEY (session_id) REFERENCES {}(id)
             )
             "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_session_timestamp ON recorded_frames(session_id, timestamp)")
+            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&create_mjpeg_query)
             .execute(&self.pool)
             .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_timestamp ON recorded_frames(timestamp)")
+        let idx_session_timestamp = format!(
+            "CREATE INDEX IF NOT EXISTS idx_session_timestamp ON {}(session_id, timestamp)",
+            TABLE_RECORDING_MJPEG
+        );
+        sqlx::query(&idx_session_timestamp)
             .execute(&self.pool)
             .await?;
 
-        sqlx::query(
+        let idx_timestamp = format!(
+            "CREATE INDEX IF NOT EXISTS idx_timestamp ON {}(timestamp)",
+            TABLE_RECORDING_MJPEG
+        );
+        sqlx::query(&idx_timestamp)
+            .execute(&self.pool)
+            .await?;
+
+        let create_mp4_query = format!(
             r#"
-            CREATE TABLE IF NOT EXISTS video_segments (
+            CREATE TABLE IF NOT EXISTS {} (
                 session_id INTEGER NOT NULL,
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP NOT NULL,
@@ -352,19 +371,29 @@ impl DatabaseProvider for SqliteDatabase {
                 size_bytes INTEGER NOT NULL,
                 mp4_data BLOB,
                 PRIMARY KEY (session_id, start_time),
-                FOREIGN KEY (session_id) REFERENCES recording_sessions(id) ON DELETE CASCADE
+                FOREIGN KEY (session_id) REFERENCES {}(id) ON DELETE CASCADE
             )
             "#,
-        )
-        .execute(&self.pool)
-        .await?;
+            TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&create_mp4_query)
+            .execute(&self.pool)
+            .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_time ON video_segments(start_time, end_time)")
+        let idx_segment_time = format!(
+            "CREATE INDEX IF NOT EXISTS idx_segment_time ON {}(start_time, end_time)",
+            TABLE_RECORDING_MP4
+        );
+        sqlx::query(&idx_segment_time)
             .execute(&self.pool)
             .await?;
         
         // Add index on session_id for the JOIN operation
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_segment_session ON video_segments(session_id)")
+        let idx_segment_session = format!(
+            "CREATE INDEX IF NOT EXISTS idx_segment_session ON {}(session_id)",
+            TABLE_RECORDING_MP4
+        );
+        sqlx::query(&idx_segment_session)
             .execute(&self.pool)
             .await?;
 
@@ -376,12 +405,14 @@ impl DatabaseProvider for SqliteDatabase {
         camera_id: &str,
         reason: Option<&str>,
     ) -> Result<i64> {
-        let result = sqlx::query(
+        let query = format!(
             r#"
-            INSERT INTO recording_sessions (camera_id, start_time, reason)
+            INSERT INTO {} (camera_id, start_time, reason)
             VALUES (?, ?, ?)
             "#,
-        )
+            TABLE_RECORDING_SESSIONS
+        );
+        let result = sqlx::query(&query)
         .bind(camera_id)
         .bind(Utc::now())
         .bind(reason)
@@ -392,9 +423,11 @@ impl DatabaseProvider for SqliteDatabase {
     }
 
     async fn stop_recording_session(&self, session_id: i64) -> Result<()> {
-        sqlx::query(
-            "UPDATE recording_sessions SET end_time = ?, status = 'stopped' WHERE id = ?",
-        )
+        let query = format!(
+            "UPDATE {} SET end_time = ?, status = 'stopped' WHERE id = ?",
+            TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&query)
         .bind(Utc::now())
         .bind(session_id)
         .execute(&self.pool)
@@ -404,9 +437,11 @@ impl DatabaseProvider for SqliteDatabase {
     }
 
     async fn get_active_recordings(&self, camera_id: &str) -> Result<Vec<RecordingSession>> {
-        let rows = sqlx::query(
-            "SELECT * FROM recording_sessions WHERE camera_id = ? AND status = 'active'",
-        )
+        let query = format!(
+            "SELECT * FROM {} WHERE camera_id = ? AND status = 'active'",
+            TABLE_RECORDING_SESSIONS
+        );
+        let rows = sqlx::query(&query)
         .bind(camera_id)
         .fetch_all(&self.pool)
         .await?;
@@ -433,12 +468,14 @@ impl DatabaseProvider for SqliteDatabase {
         _frame_number: i64,
         frame_data: &[u8],
     ) -> Result<i64> {
-        let result = sqlx::query(
+        let query = format!(
             r#"
-            INSERT INTO recorded_frames (session_id, timestamp, frame_data)
+            INSERT INTO {} (session_id, timestamp, frame_data)
             VALUES (?, ?, ?)
             "#,
-        )
+            TABLE_RECORDING_MJPEG
+        );
+        let result = sqlx::query(&query)
         .bind(session_id)
         .bind(timestamp)
         .bind(frame_data)
@@ -475,7 +512,7 @@ impl DatabaseProvider for SqliteDatabase {
             format!(" WHERE {}", conditions.join(" AND "))
         };
         
-        let sql = format!("SELECT * FROM recording_sessions{} ORDER BY start_time DESC", where_clause);
+        let sql = format!("SELECT * FROM {}{} ORDER BY start_time DESC", TABLE_RECORDING_SESSIONS, where_clause);
         
         tracing::debug!(
             "Executing SQL query for list_recordings:\n{}\nParameters: {:?}",
@@ -521,7 +558,7 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Vec<RecordedFrame>> {
         let start_time = std::time::Instant::now();
         
-        let mut sql = "SELECT * FROM recorded_frames WHERE session_id = ?".to_string();
+        let mut sql = format!("SELECT * FROM {} WHERE session_id = ?", TABLE_RECORDING_MJPEG);
         
         if from.is_some() {
             sql.push_str(" AND timestamp >= ?");
@@ -578,114 +615,129 @@ impl DatabaseProvider for SqliteDatabase {
         
         // Step 1: Delete old video segments that reference sessions we want to delete
         // This prevents foreign key constraint violations
-        let delete_segments_query = if let Some(cam_id) = camera_id {
-            sqlx::query(
+        let delete_segments_result = if let Some(cam_id) = camera_id {
+            let query = format!(
                 r#"
-                DELETE FROM video_segments 
+                DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT id FROM recording_sessions 
+                    SELECT id FROM {} 
                     WHERE camera_id = ? 
                     AND end_time IS NOT NULL 
                     AND end_time < ?
                 )
-                "#
-            )
+                "#,
+                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&query)
             .bind(cam_id)
             .bind(older_than)
+            .execute(&mut *tx).await?
         } else {
-            sqlx::query(
+            let query = format!(
                 r#"
-                DELETE FROM video_segments 
+                DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT id FROM recording_sessions 
+                    SELECT id FROM {} 
                     WHERE end_time IS NOT NULL 
                     AND end_time < ?
                 )
-                "#
-            )
+                "#,
+                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&query)
             .bind(older_than)
+            .execute(&mut *tx).await?
         };
-        
-        let segments_result = delete_segments_query.execute(&mut *tx).await?;
-        let deleted_segments = segments_result.rows_affected();
+        let deleted_segments = delete_segments_result.rows_affected();
         
         // Step 2: Delete old frames based on their timestamp
-        let delete_frames_query = if let Some(cam_id) = camera_id {
+        let frames_result = if let Some(cam_id) = camera_id {
             // Delete frames for a specific camera
-            sqlx::query(
+            let query = format!(
                 r#"
-                DELETE FROM recorded_frames 
+                DELETE FROM {} 
                 WHERE timestamp < ? 
                 AND session_id IN (
-                    SELECT id FROM recording_sessions WHERE camera_id = ?
+                    SELECT id FROM {} WHERE camera_id = ?
                 )
-                "#
-            )
+                "#,
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&query)
             .bind(older_than)
             .bind(cam_id)
+            .execute(&mut *tx).await?
         } else {
             // Delete frames for all cameras
-            sqlx::query("DELETE FROM recorded_frames WHERE timestamp < ?")
+            let query = format!("DELETE FROM {} WHERE timestamp < ?", TABLE_RECORDING_MJPEG);
+            sqlx::query(&query)
                 .bind(older_than)
+                .execute(&mut *tx).await?
         };
-        
-        let frames_result = delete_frames_query.execute(&mut *tx).await?;
         let deleted_frames = frames_result.rows_affected();
         
         // Step 3: Delete completed sessions based on end_time
         // Only delete sessions that have ended (end_time is not NULL) and ended before the cutoff
-        let delete_sessions_query = if let Some(cam_id) = camera_id {
-            sqlx::query(
+        let sessions_result = if let Some(cam_id) = camera_id {
+            let query = format!(
                 r#"
-                DELETE FROM recording_sessions 
+                DELETE FROM {} 
                 WHERE end_time IS NOT NULL 
                 AND end_time < ? 
                 AND camera_id = ?
-                "#
-            )
+                "#,
+                TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&query)
             .bind(older_than)
             .bind(cam_id)
+            .execute(&mut *tx).await?
         } else {
-            sqlx::query(
+            let query = format!(
                 r#"
-                DELETE FROM recording_sessions 
+                DELETE FROM {} 
                 WHERE end_time IS NOT NULL 
                 AND end_time < ?
-                "#
-            )
+                "#,
+                TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&query)
             .bind(older_than)
+            .execute(&mut *tx).await?
         };
-        
-        let sessions_result = delete_sessions_query.execute(&mut *tx).await?;
         let deleted_sessions = sessions_result.rows_affected();
         
         // Step 4: Clean up orphaned sessions (sessions with no frames left)
         // This handles cases where all frames of a session were deleted but session is still active
-        let cleanup_orphaned_query = if let Some(cam_id) = camera_id {
-            sqlx::query(
+        let orphaned_result = if let Some(cam_id) = camera_id {
+            let query = format!(
                 r#"
-                DELETE FROM recording_sessions 
+                DELETE FROM {} 
                 WHERE camera_id = ?
                 AND id NOT IN (
-                    SELECT DISTINCT session_id FROM recorded_frames
+                    SELECT DISTINCT session_id FROM {}
                 )
                 AND end_time IS NOT NULL
-                "#
-            )
+                "#,
+                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG
+            );
+            sqlx::query(&query)
             .bind(cam_id)
+            .execute(&mut *tx).await?
         } else {
-            sqlx::query(
+            let query = format!(
                 r#"
-                DELETE FROM recording_sessions 
+                DELETE FROM {} 
                 WHERE id NOT IN (
-                    SELECT DISTINCT session_id FROM recorded_frames
+                    SELECT DISTINCT session_id FROM {}
                 )
                 AND end_time IS NOT NULL
-                "#
-            )
+                "#,
+                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG
+            );
+            sqlx::query(&query)
+            .execute(&mut *tx).await?
         };
-        
-        let orphaned_result = cleanup_orphaned_query.execute(&mut *tx).await?;
         let deleted_orphaned = orphaned_result.rows_affected();
         
         // Commit the transaction
@@ -710,18 +762,20 @@ impl DatabaseProvider for SqliteDatabase {
         // Find the nearest frame before or at the given timestamp, within 1 second
         let one_second_before = timestamp - chrono::Duration::seconds(1);
         
-        let row = sqlx::query(
+        let query = format!(
             r#"
             SELECT rf.timestamp, rf.frame_data
-            FROM recorded_frames rf
-            JOIN recording_sessions rs ON rf.session_id = rs.id
+            FROM {} rf
+            JOIN {} rs ON rf.session_id = rs.id
             WHERE rs.camera_id = ? 
               AND rf.timestamp <= ? 
               AND rf.timestamp >= ?
             ORDER BY rf.timestamp DESC
             LIMIT 1
-            "#
-        )
+            "#,
+            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+        );
+        let row = sqlx::query(&query)
         .bind(camera_id)
         .bind(timestamp)
         .bind(one_second_before)
@@ -762,12 +816,14 @@ impl DatabaseProvider for SqliteDatabase {
     }
 
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
-        let result = sqlx::query(
+        let query = format!(
             r#"
-            INSERT INTO video_segments (session_id, start_time, end_time, file_path, size_bytes, mp4_data)
+            INSERT INTO {} (session_id, start_time, end_time, file_path, size_bytes, mp4_data)
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
-        )
+            TABLE_RECORDING_MP4
+        );
+        let result = sqlx::query(&query)
         .bind(segment.session_id)
         .bind(segment.start_time)
         .bind(segment.end_time)
@@ -788,21 +844,21 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Vec<VideoSegment>> {
         let start_time = std::time::Instant::now();
         
-        let query_str = r#"
+        let query_str = format!(r#"
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
-            FROM video_segments vs
-            LEFT JOIN recording_sessions rs ON vs.session_id = rs.id
+            FROM {} vs
+            LEFT JOIN {} rs ON vs.session_id = rs.id
             WHERE rs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
             ORDER BY vs.start_time ASC
-            "#;
+            "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
         tracing::debug!(
             "Executing SQL query for list_video_segments:\n{}\nParameters: camera_id='{}', from='{}', to='{}'",
             query_str, camera_id, from, to
         );
         
-        let rows = sqlx::query(query_str)
+        let rows = sqlx::query(&query_str)
         .bind(camera_id)
         .bind(to)
         .bind(from)
@@ -840,9 +896,11 @@ impl DatabaseProvider for SqliteDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         // First, select the file paths of the segments to be deleted
-        let segments_to_delete = sqlx::query_as::<_, VideoSegment>(
-            "SELECT session_id, start_time, end_time, file_path, size_bytes, mp4_data FROM video_segments WHERE end_time < ?",
-        )
+        let query = format!(
+            "SELECT session_id, start_time, end_time, file_path, size_bytes, mp4_data FROM {} WHERE end_time < ?",
+            TABLE_RECORDING_MP4
+        );
+        let segments_to_delete = sqlx::query_as::<_, VideoSegment>(&query)
         .bind(older_than)
         .fetch_all(&self.pool)
         .await?;
@@ -858,7 +916,8 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         // Then, delete the records from the database
-        let result = sqlx::query("DELETE FROM video_segments WHERE end_time < ?")
+        let delete_query = format!("DELETE FROM {} WHERE end_time < ?", TABLE_RECORDING_MP4);
+        let result = sqlx::query(&delete_query)
             .bind(older_than)
             .execute(&self.pool)
             .await?;
@@ -911,17 +970,17 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Option<VideoSegment>> {
         let start_time = std::time::Instant::now();
         
-        let query_str = r#"
+        let query_str = format!(r#"
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.camera_id
-            FROM video_segments vs
-            JOIN recording_sessions rs ON vs.session_id = rs.id
+            FROM {} vs
+            JOIN {} rs ON vs.session_id = rs.id
             WHERE rs.camera_id = ? AND (
                 vs.file_path LIKE '%' || ? || '%' OR
                 ? LIKE '%' || strftime('%Y-%m-%dT%H-%M-%SZ', vs.start_time) || '%'
             )
             ORDER BY vs.start_time DESC
             LIMIT 1
-            "#;
+            "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
         tracing::debug!(
             "Executing SQL query for get_video_segment_by_filename:\n{}\nParameters: camera_id='{}', filename='{}'",
@@ -929,7 +988,7 @@ impl DatabaseProvider for SqliteDatabase {
         );
         
         // Try to find by exact filename match first (for filesystem storage)
-        let row = sqlx::query(query_str)
+        let row = sqlx::query(&query_str)
         .bind(camera_id)
         .bind(filename)
         .bind(filename)
