@@ -35,6 +35,7 @@ mod api;
 use config::Config;
 use errors::{Result, StreamError};
 use api::streaming::mp4;
+use api::admin;
 
 // Custom formatter to remove "rtsp_streaming_server::" prefix and pad to 80 chars
 struct CustomFormatter;
@@ -86,7 +87,7 @@ use control::handle_control_websocket;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+pub struct Args {
     /// Path to the configuration file
     #[arg(short, long, default_value = "config.json")]
     config: String,
@@ -114,16 +115,12 @@ pub struct AppState {
     pub recording_manager: Option<Arc<RecordingManager>>,
     transcoding_config: Arc<config::TranscodingConfig>,
     pub recording_config: Option<Arc<config::RecordingConfig>>,
-    admin_token: Option<String>,
-    cameras_directory: String,
+    pub admin_token: Option<String>,
+    pub cameras_directory: String,
     start_time: std::time::Instant,
 }
 
-#[derive(serde::Deserialize)]
-struct CreateCameraRequest {
-    camera_id: String,
-    config: config::CameraConfig,
-}
+// CreateCameraRequest moved to api::admin
 
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
@@ -656,10 +653,10 @@ async fn main() -> Result<()> {
 
     // Camera management API endpoints
     let admin_state = app_state.clone();
-    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<CreateCameraRequest>| {
+    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<admin::CreateCameraRequest>| {
         let state = admin_state.clone();
         async move {
-            api_create_camera(headers, body, state).await
+            admin::api_create_camera(headers, body, state).await
         }
     }));
 
@@ -667,7 +664,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::get(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
         let state = admin_state2.clone();
         async move {
-            api_get_camera_config(headers, path, state).await
+            admin::api_get_camera_config(headers, path, state).await
         }
     }));
 
@@ -675,7 +672,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::put(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>, body: axum::extract::Json<config::CameraConfig>| {
         let state = admin_state3.clone();
         async move {
-            api_update_camera(headers, path, body, state).await
+            admin::api_update_camera(headers, path, body, state).await
         }
     }));
 
@@ -683,7 +680,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::delete(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
         let state = admin_state4.clone();
         async move {
-            api_delete_camera(headers, path, state).await
+            admin::api_delete_camera(headers, path, state).await
         }
     }));
 
@@ -692,7 +689,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/config", axum::routing::get(move |headers: axum::http::HeaderMap| {
         let args = args_get.clone();
         async move {
-            api_get_config(headers, args).await
+            admin::api_get_config(headers, args).await
         }
     }));
 
@@ -700,7 +697,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/config", axum::routing::put(move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
         let args = args_put.clone();
         async move {
-            api_update_config(headers, body, args).await
+            admin::api_update_config(headers, body, args).await
         }
     }));
     
@@ -1079,7 +1076,7 @@ struct GetFramesQuery {
 }
 
 #[derive(Serialize)]
-struct ApiResponse<T> {
+pub struct ApiResponse<T> {
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<T>,
@@ -1090,7 +1087,7 @@ struct ApiResponse<T> {
 }
 
 impl<T> ApiResponse<T> {
-    fn success(data: T) -> Self {
+    pub fn success(data: T) -> Self {
         Self {
             status: "success".to_string(),
             data: Some(data),
@@ -1099,7 +1096,7 @@ impl<T> ApiResponse<T> {
         }
     }
 
-    fn error(message: &str, code: u16) -> ApiResponse<()> {
+    pub fn error(message: &str, code: u16) -> ApiResponse<()> {
         ApiResponse {
             status: "error".to_string(),
             data: None,
@@ -1436,347 +1433,12 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
     Ok(())
 }
 
-// Camera management API handlers
-
-async fn api_get_camera_config(
-    _headers: axum::http::HeaderMap,
-    path: axum::extract::Path<String>,
-    state: AppState,
-) -> axum::response::Response {
-    let camera_id = path.0;
-    
-    // Get camera config from already-loaded configurations
-    let camera_configs = state.camera_configs.read().await;
-    if let Some(camera_config) = camera_configs.get(&camera_id) {
-        Json(ApiResponse::success(camera_config.clone())).into_response()
-    } else {
-        (axum::http::StatusCode::NOT_FOUND,
-         Json(ApiResponse::<()>::error("Camera configuration not found", 404)))
-        .into_response()
-    }
-}
-
-fn check_admin_token(headers: &axum::http::HeaderMap, admin_token: &Option<String>) -> bool {
-    // If no admin token is configured, allow access
-    let Some(ref expected_token) = admin_token else {
-        return true;
-    };
-    
-    // Check Authorization header
-    if let Some(auth_header) = headers.get("Authorization") {
-        if let Ok(auth_str) = auth_header.to_str() {
-            // Support both "Bearer <token>" and plain token
-            let token = if auth_str.starts_with("Bearer ") {
-                &auth_str[7..]
-            } else {
-                auth_str
-            };
-            return token == expected_token;
-        }
-    }
-    
-    false
-}
-
-async fn api_create_camera(
-    headers: axum::http::HeaderMap,
-    body: axum::extract::Json<CreateCameraRequest>,
-    state: AppState,
-) -> axum::response::Response {
-    // Check admin token
-    if !check_admin_token(&headers, &state.admin_token) {
-        return (axum::http::StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::<()>::error("Unauthorized", 401)))
-               .into_response();
-    }
-    let camera_id = body.camera_id.clone();
-    let camera_config = body.config.clone();
-    
-    // Check if camera already exists in memory
-    let camera_configs = state.camera_configs.read().await;
-    if camera_configs.contains_key(&camera_id) {
-        return (axum::http::StatusCode::CONFLICT,
-                Json(ApiResponse::<()>::error("Camera already exists", 409)))
-               .into_response();
-    }
-    drop(camera_configs); // Release the read lock
-    
-    // Validate camera config
-    if camera_config.path.is_empty() || camera_config.url.is_empty() {
-        return (axum::http::StatusCode::BAD_REQUEST,
-                Json(ApiResponse::<()>::error("Path and URL are required", 400)))
-               .into_response();
-    }
-    
-    // Save camera config
-    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config, Some(&state.cameras_directory)) {
-        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<()>::error(&format!("Failed to save camera config: {}", e), 500)))
-               .into_response();
-    }
-    
-    // TODO: Start the new camera stream
-    info!("Camera '{}' created successfully", camera_id);
-    
-    Json(ApiResponse::success(serde_json::json!({
-        "message": "Camera created successfully",
-        "camera_id": camera_id
-    }))).into_response()
-}
-
-async fn api_update_camera(
-    headers: axum::http::HeaderMap,
-    path: axum::extract::Path<String>,
-    body: axum::extract::Json<config::CameraConfig>,
-    state: AppState,
-) -> axum::response::Response {
-    // Check admin token
-    if !check_admin_token(&headers, &state.admin_token) {
-        return (axum::http::StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::<()>::error("Unauthorized", 401)))
-               .into_response();
-    }
-    let camera_id = path.0;
-    let camera_config = body.0;
-    
-    // Check if camera exists in memory
-    let camera_configs = state.camera_configs.read().await;
-    if !camera_configs.contains_key(&camera_id) {
-        return (axum::http::StatusCode::NOT_FOUND,
-                Json(ApiResponse::<()>::error("Camera not found", 404)))
-               .into_response();
-    }
-    drop(camera_configs); // Release the read lock
-    
-    // Validate camera config
-    if camera_config.path.is_empty() || camera_config.url.is_empty() {
-        return (axum::http::StatusCode::BAD_REQUEST,
-                Json(ApiResponse::<()>::error("Path and URL are required", 400)))
-               .into_response();
-    }
-    
-    // Save updated camera config
-    if let Err(e) = config::Config::save_camera_config(&camera_id, &camera_config, Some(&state.cameras_directory)) {
-        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<()>::error(&format!("Failed to save camera config: {}", e), 500)))
-               .into_response();
-    }
-    
-    // TODO: Stop and restart the camera stream with new configuration
-    info!("Camera '{}' updated successfully", camera_id);
-    
-    Json(ApiResponse::success(serde_json::json!({
-        "message": "Camera updated successfully",
-        "camera_id": camera_id
-    }))).into_response()
-}
-
-async fn api_delete_camera(
-    headers: axum::http::HeaderMap,
-    path: axum::extract::Path<String>,
-    state: AppState,
-) -> axum::response::Response {
-    // Check admin token
-    if !check_admin_token(&headers, &state.admin_token) {
-        return (axum::http::StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::<()>::error("Unauthorized", 401)))
-               .into_response();
-    }
-    let camera_id = path.0;
-    
-    // Check if camera exists in memory
-    let camera_configs = state.camera_configs.read().await;
-    if !camera_configs.contains_key(&camera_id) {
-        return (axum::http::StatusCode::NOT_FOUND,
-                Json(ApiResponse::<()>::error("Camera not found", 404)))
-               .into_response();
-    }
-    drop(camera_configs); // Release the read lock
-    
-    // Stop the camera stream first
-    if let Err(e) = state.remove_camera(&camera_id).await {
-        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<()>::error(&format!("Failed to stop camera stream: {}", e), 500)))
-               .into_response();
-    }
-    
-    // Delete camera config file
-    if let Err(e) = config::Config::delete_camera_config(&camera_id, Some(&state.cameras_directory)) {
-        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<()>::error(&format!("Failed to delete camera config: {}", e), 500)))
-               .into_response();
-    }
-    
-    info!("Camera '{}' deleted successfully", camera_id);
-    
-    Json(ApiResponse::success(serde_json::json!({
-        "message": "Camera deleted successfully",
-        "camera_id": camera_id
-    }))).into_response()
-}
-
-async fn api_get_config(
-    headers: axum::http::HeaderMap,
-    args: Args,
-) -> axum::response::Response {
-    // Check admin token from app state would be better, but for now check against loaded config
-    let config_path = &args.config;
-    
-    // Load current config to get admin token for validation
-    let current_config = match config::Config::load(config_path) {
-        Ok(config) => config,
-        Err(e) => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                   Json(ApiResponse::<()>::error(&format!("Failed to load config: {}", e), 500)))
-                  .into_response();
-        }
-    };
-    
-    // Check admin token
-    if !check_admin_token(&headers, &current_config.server.admin_token) {
-        return (axum::http::StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::<()>::error("Unauthorized", 401)))
-               .into_response();
-    }
-    
-    // Read config file directly as JSON
-    match std::fs::read_to_string(config_path) {
-        Ok(content) => {
-            if config_path.ends_with(".json") {
-                match serde_json::from_str::<serde_json::Value>(&content) {
-                    Ok(json_value) => Json(ApiResponse::success(json_value)).into_response(),
-                    Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                              Json(ApiResponse::<()>::error(&format!("Failed to parse config JSON: {}", e), 500)))
-                             .into_response()
-                }
-            } else {
-                // For TOML configs, convert to JSON
-                match toml::from_str::<serde_json::Value>(&content) {
-                    Ok(toml_value) => Json(ApiResponse::success(toml_value)).into_response(),
-                    Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                              Json(ApiResponse::<()>::error(&format!("Failed to parse config TOML: {}", e), 500)))
-                             .into_response()
-                }
-            }
-        }
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                  Json(ApiResponse::<()>::error(&format!("Failed to read config file: {}", e), 500)))
-                 .into_response()
-    }
-}
-
-async fn api_update_config(
-    headers: axum::http::HeaderMap,
-    body: axum::extract::Json<serde_json::Value>,
-    args: Args,
-) -> axum::response::Response {
-    let config_path = &args.config;
-    
-    // Load current config to get admin token for validation
-    let current_config = match config::Config::load(config_path) {
-        Ok(config) => config,
-        Err(e) => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                   Json(ApiResponse::<()>::error(&format!("Failed to load config: {}", e), 500)))
-                  .into_response();
-        }
-    };
-    
-    // Check admin token
-    if !check_admin_token(&headers, &current_config.server.admin_token) {
-        return (axum::http::StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::<()>::error("Unauthorized", 401)))
-               .into_response();
-    }
-    
-    // Parse the current config as a JSON Value for merging
-    let mut current_config_value = match serde_json::to_value(&current_config) {
-        Ok(val) => val,
-        Err(e) => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                   Json(ApiResponse::<()>::error(&format!("Failed to serialize current config: {}", e), 500)))
-                  .into_response();
-        }
-    };
-    
-    // Remove the 'cameras' field from current config since it's managed separately
-    if let Some(obj) = current_config_value.as_object_mut() {
-        obj.remove("cameras");
-    }
-    
-    // Merge the new config with current config, preserving existing settings
-    merge_json_values(&mut current_config_value, &body.0);
-    
-    // Validate the merged config by trying to deserialize it
-    match serde_json::from_value::<config::Config>(current_config_value.clone()) {
-        Ok(_) => {
-            // Config is valid, write it to file
-            let content = if config_path.ends_with(".json") {
-                match serde_json::to_string_pretty(&current_config_value) {
-                    Ok(json) => json,
-                    Err(e) => {
-                        return (axum::http::StatusCode::BAD_REQUEST,
-                               Json(ApiResponse::<()>::error(&format!("Failed to serialize JSON: {}", e), 400)))
-                              .into_response();
-                    }
-                }
-            } else {
-                match toml::to_string_pretty(&current_config_value) {
-                    Ok(toml) => toml,
-                    Err(e) => {
-                        return (axum::http::StatusCode::BAD_REQUEST,
-                               Json(ApiResponse::<()>::error(&format!("Failed to serialize TOML: {}", e), 400)))
-                              .into_response();
-                    }
-                }
-            };
-            
-            match std::fs::write(config_path, content) {
-                Ok(_) => {
-                    info!("Server configuration updated successfully");
-                    Json(ApiResponse::success(serde_json::json!({
-                        "message": "Configuration updated successfully",
-                        "note": "Server restart may be required for some changes to take effect"
-                    }))).into_response()
-                }
-                Err(e) => {
-                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                     Json(ApiResponse::<()>::error(&format!("Failed to write config file: {}", e), 500)))
-                    .into_response()
-                }
-            }
-        }
-        Err(e) => {
-            (axum::http::StatusCode::BAD_REQUEST,
-             Json(ApiResponse::<()>::error(&format!("Invalid configuration: {}", e), 400)))
-            .into_response()
-        }
-    }
-}
-
-/// Recursively merge JSON values, updating target with values from source
-fn merge_json_values(target: &mut serde_json::Value, source: &serde_json::Value) {
-    match (target.as_object_mut(), source.as_object()) {
-        (Some(target_map), Some(source_map)) => {
-            for (key, value) in source_map {
-                if target_map.contains_key(key) {
-                    merge_json_values(target_map.get_mut(key).unwrap(), value);
-                } else {
-                    target_map.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        _ => {
-            // For non-object values, replace the target with source
-            *target = source.clone();
-        }
-    }
-}
+// admin API handlers moved to api::admin
 
 // Camera management functions for dynamic reload
 
 impl AppState {
-    async fn add_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
+    pub async fn add_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
         // Check if camera is enabled first (before acquiring any locks)
         let is_enabled = camera_config.enabled.unwrap_or(true);
         
@@ -1877,7 +1539,7 @@ impl AppState {
         }
     }
     
-    async fn remove_camera(&self, camera_id: &str) -> Result<()> {
+    pub async fn remove_camera(&self, camera_id: &str) -> Result<()> {
         info!("Removing camera '{}'...", camera_id);
         
         // Remove from camera configurations
@@ -1922,7 +1584,7 @@ impl AppState {
         }
     }
     
-    async fn restart_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
+    pub async fn restart_camera(&self, camera_id: String, camera_config: config::CameraConfig) -> Result<()> {
         info!("Restarting camera '{}'...", camera_id);
         
         // Check if recording is active before removing the camera
