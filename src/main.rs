@@ -1676,41 +1676,17 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
 async fn api_get_camera_config(
     _headers: axum::http::HeaderMap,
     path: axum::extract::Path<String>,
-    _state: AppState,
+    state: AppState,
 ) -> axum::response::Response {
     let camera_id = path.0;
     
-    // Load camera config from file
-    let cameras_dir = "cameras";
-    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
-    
-    // Try JSON first, then TOML for backward compatibility
-    if let Ok(content) = fs::read_to_string(&json_path) {
-        match serde_json::from_str::<config::CameraConfig>(&content) {
-            Ok(camera_config) => {
-                Json(ApiResponse::success(camera_config)).into_response()
-            }
-            Err(e) => {
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                 Json(ApiResponse::<()>::error(&format!("Failed to parse camera config: {}", e), 500)))
-                .into_response()
-            }
-        }
-    } else if let Ok(content) = fs::read_to_string(&toml_path) {
-        match toml::from_str::<config::CameraConfig>(&content) {
-            Ok(camera_config) => {
-                Json(ApiResponse::success(camera_config)).into_response()
-            }
-            Err(e) => {
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                 Json(ApiResponse::<()>::error(&format!("Failed to parse camera config: {}", e), 500)))
-                .into_response()
-            }
-        }
+    // Get camera config from already-loaded configurations
+    let camera_configs = state.camera_configs.read().await;
+    if let Some(camera_config) = camera_configs.get(&camera_id) {
+        Json(ApiResponse::success(camera_config.clone())).into_response()
     } else {
         (axum::http::StatusCode::NOT_FOUND,
-         Json(ApiResponse::<()>::error("Camera not found", 404)))
+         Json(ApiResponse::<()>::error("Camera configuration not found", 404)))
         .into_response()
     }
 }
@@ -1751,16 +1727,14 @@ async fn api_create_camera(
     let camera_id = body.camera_id.clone();
     let camera_config = body.config.clone();
     
-    // Check if camera already exists
-    let cameras_dir = "cameras";
-    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
-    
-    if std::path::Path::new(&json_path).exists() || std::path::Path::new(&toml_path).exists() {
+    // Check if camera already exists in memory
+    let camera_configs = state.camera_configs.read().await;
+    if camera_configs.contains_key(&camera_id) {
         return (axum::http::StatusCode::CONFLICT,
                 Json(ApiResponse::<()>::error("Camera already exists", 409)))
                .into_response();
     }
+    drop(camera_configs); // Release the read lock
     
     // Validate camera config
     if camera_config.path.is_empty() || camera_config.url.is_empty() {
@@ -1800,16 +1774,14 @@ async fn api_update_camera(
     let camera_id = path.0;
     let camera_config = body.0;
     
-    // Check if camera exists
-    let cameras_dir = "cameras";
-    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
-    
-    if !std::path::Path::new(&json_path).exists() && !std::path::Path::new(&toml_path).exists() {
+    // Check if camera exists in memory
+    let camera_configs = state.camera_configs.read().await;
+    if !camera_configs.contains_key(&camera_id) {
         return (axum::http::StatusCode::NOT_FOUND,
                 Json(ApiResponse::<()>::error("Camera not found", 404)))
                .into_response();
     }
+    drop(camera_configs); // Release the read lock
     
     // Validate camera config
     if camera_config.path.is_empty() || camera_config.url.is_empty() {
@@ -1847,16 +1819,14 @@ async fn api_delete_camera(
     }
     let camera_id = path.0;
     
-    // Check if camera exists
-    let cameras_dir = "cameras";
-    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
-    
-    if !std::path::Path::new(&json_path).exists() && !std::path::Path::new(&toml_path).exists() {
+    // Check if camera exists in memory
+    let camera_configs = state.camera_configs.read().await;
+    if !camera_configs.contains_key(&camera_id) {
         return (axum::http::StatusCode::NOT_FOUND,
                 Json(ApiResponse::<()>::error("Camera not found", 404)))
                .into_response();
     }
+    drop(camera_configs); // Release the read lock
     
     // Stop the camera stream first
     if let Err(e) = state.remove_camera(&camera_id).await {
@@ -2277,15 +2247,15 @@ async fn start_camera_config_watcher(app_state: AppState) -> Result<()> {
     ).map_err(|e| crate::errors::StreamError::config(&format!("File watcher error: {}", e)))?;
     
     // Watch the cameras directory
-    let cameras_dir = Path::new("cameras");
-    if !cameras_dir.exists() {
-        info!("Creating cameras directory for watching...");
-        fs::create_dir_all(cameras_dir)?;
+    let cameras_dir_path = Path::new(&app_state.cameras_directory);
+    if !cameras_dir_path.exists() {
+        info!("Creating cameras directory '{}' for watching...", app_state.cameras_directory);
+        fs::create_dir_all(cameras_dir_path)?;
     }
     
-    watcher.watch(cameras_dir, RecursiveMode::NonRecursive)
+    watcher.watch(cameras_dir_path, RecursiveMode::NonRecursive)
         .map_err(|e| crate::errors::StreamError::config(&format!("Failed to watch cameras directory: {}", e)))?;
-    info!("Started watching cameras directory for configuration changes");
+    info!("Started watching cameras directory '{}' for configuration changes", app_state.cameras_directory);
     
     // Keep watcher alive and handle events with debouncing
     tokio::spawn(async move {
@@ -2326,7 +2296,7 @@ async fn handle_file_event(event: Event, app_state: &AppState) {
             for path in event.paths {
                 if let Some(camera_id) = get_camera_id_from_path(&path) {
                     info!("Detected new camera configuration: {}", camera_id);
-                    if let Ok(camera_config) = load_camera_config(&camera_id) {
+                    if let Ok(camera_config) = load_camera_config(&camera_id, &app_state.cameras_directory) {
                         if let Err(e) = app_state.add_camera(camera_id.clone(), camera_config).await {
                             error!("Failed to add camera '{}': {}", camera_id, e);
                         }
@@ -2338,7 +2308,7 @@ async fn handle_file_event(event: Event, app_state: &AppState) {
             for path in event.paths {
                 if let Some(camera_id) = get_camera_id_from_path(&path) {
                     info!("Detected camera configuration change: {}", camera_id);
-                    if let Ok(camera_config) = load_camera_config(&camera_id) {
+                    if let Ok(camera_config) = load_camera_config(&camera_id, &app_state.cameras_directory) {
                         if let Err(e) = app_state.restart_camera(camera_id.clone(), camera_config).await {
                             error!("Failed to restart camera '{}': {}", camera_id, e);
                         }
@@ -2373,8 +2343,7 @@ fn get_camera_id_from_path(path: &Path) -> Option<String> {
     None
 }
 
-fn load_camera_config(camera_id: &str) -> Result<config::CameraConfig> {
-    let cameras_dir = "cameras";
+fn load_camera_config(camera_id: &str, cameras_dir: &str) -> Result<config::CameraConfig> {
     let json_path = format!("{}/{}.json", cameras_dir, camera_id);
     let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
     
