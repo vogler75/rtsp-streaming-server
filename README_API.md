@@ -1,55 +1,46 @@
-# REST API Documentation
+# REST API Endpoints
 
-This document outlines the available REST API endpoints for the RTSP streaming server.
+This document provides a hierarchical overview of the available REST API endpoints.
 
-## General API
+## API Endpoint Hierarchy
 
-### `GET /api/status`
+*   **`/`**
+    *   `GET /dashboard`: Displays the main dashboard.
+*   **`/api`**
+    *   `GET /status`: Retrieves the current status of the server.
+    *   `GET /cameras`: Retrieves a list of all available cameras.
+    *   **`/recordings`**
+        *   `GET /:camera_id/:filename`: Streams a specific MP4 recording.
+    *   **`/cameras`**
+        *   **`/:camera_id`**
+            *   **`/recordings`**
+                *   `POST /start`: Starts recording for the specified camera.
+                *   `POST /stop`: Stops recording for the specified camera.
+                *   `GET /`: Lists all recordings for the specified camera.
+                *   `GET /active`: Checks if a recording is currently active for the specified camera.
+                *   **`/:filename`**
+                    *   `GET /frames`: Retrieves the frames of a specific recording.
+                    *   `GET /size`: Retrieves the size of a specific recording.
+    *   **`/admin`**
+        *   **`/cameras`**
+            *   `POST /`: Creates a new camera configuration.
+            *   **`/:id`**
+                *   `GET /`: Retrieves the configuration for a specific camera.
+                *   `PUT /`: Updates the configuration for a specific camera.
+                *   `DELETE /`: Deletes a specific camera.
+        *   **`/config`**
+            *   `GET /`: Retrieves the server's main configuration.
+            *   `PUT /`: Updates the server's main configuration.
+*   **`/stream`**
+    *   `GET /:camera_id`: Serves the video stream page for a specific camera.
+*   **`/control`**
+    *   `GET /:camera_id`: Serves the control page for a specific camera.
+*   **`/live`**
+    *   `GET /:camera_id`: Serves the live HLS stream for a specific camera.
+*   **`/test`**
+    *   `GET /`: Serves a test page.
+    *   `GET /:camera_id`: Serves a test page for a specific camera.
 
-Retrieves the general status of the server.
-
-- **Method**: `GET`
-- **Path**: `/api/status`
-- **Response Body**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "uptime_secs": 120,
-      "total_clients": 5,
-      "total_cameras": 2
-    }
-  }
-  ```
-
-### `GET /api/cameras`
-
-Lists all configured cameras and their current status.
-
-- **Method**: `GET`
-- **Path**: `/api/cameras`
-- **Response Body**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "cameras": [
-        {
-          "id": "cam1",
-          "path": "/cam1",
-          "connected": true,
-          "capture_fps": 15.0,
-          "clients_connected": 2,
-          "last_frame_time": "2025-08-17T10:00:00Z",
-          "ffmpeg_running": true,
-          "duplicate_frames": 0,
-          "token_required": true
-        }
-      ],
-      "count": 1
-    }
-  }
-  ```
 
 ## Camera Management API (`/api/admin/cameras`)
 
