@@ -28,29 +28,7 @@ pub async fn websocket_handler(
     // Authentication is handled in camera_handler before this function is called
     let current_connections = frame_sender.receiver_count();
     info!("WebSocket upgrade for client {} on camera {} (current connections: {})", addr, camera_id, current_connections);
-    
-    // Verbose-only debugging for connection limits
-    if current_connections >= 10 {
-        trace!("High number of connections ({}) for camera {}, new client: {}", current_connections, camera_id, addr);
-    }
-    
-    // Verbose-only system resource information when approaching limits
-    if current_connections >= 12 {
-        #[cfg(unix)]
-        {
-            use std::process::Command;
-            if let Ok(output) = Command::new("sh").arg("-c").arg("ulimit -n").output() {
-                if let Ok(limit_str) = String::from_utf8(output.stdout) {
-                    trace!("System file descriptor limit: {}", limit_str.trim());
-                }
-            }
-            if let Ok(output) = Command::new("lsof").arg("-p").arg(&std::process::id().to_string()).output() {
-                let fd_count = String::from_utf8_lossy(&output.stdout).lines().count();
-                trace!("Current process file descriptors in use: {}", fd_count);
-            }
-        }
-    }
-    
+       
     ws.on_upgrade(move |socket| handle_socket(socket, frame_sender, camera_id, mqtt_handle, addr))
 }
 

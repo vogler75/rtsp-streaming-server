@@ -5,8 +5,8 @@ use axum::extract::{State, Query};
 use tracing::trace;
 
 use crate::{config, AppState};
-use crate::websocket::websocket_handler;
-use crate::control::handle_control_websocket;
+use crate::websocket_handler::websocket_handler;
+use crate::websocket_control::handle_control_websocket;
 use crate::recording::RecordingManager;
 use crate::mqtt::MqttHandle;
 
