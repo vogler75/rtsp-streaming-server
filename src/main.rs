@@ -7,16 +7,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::fmt::format::{Writer, FormatEvent, FormatFields};
 use tracing_subscriber::registry::LookupSpan;
 use std::fs::File;
-use std::fs;
-use std::io::BufReader;
-use std::path::Path;
-use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use axum::response::IntoResponse;
-use axum::extract::{Path as AxumPath, Query};
-use axum::Json;
-use clap::Parser;
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
+use std::{io::BufReader};
+use axum::{response::IntoResponse, Json};
+use clap::{Parser};
 
 mod config;
 mod errors;
@@ -30,12 +23,15 @@ mod database;
 mod recording;
 mod control;
 mod utils;
-mod api;
+mod api_config;
+mod api_recording;
+mod watcher;
 mod mp4;
 mod handlers;
 
 use config::Config;
 use errors::{Result, StreamError};
+use api_recording::ApiResponse;
 
 // Custom formatter to remove "rtsp_streaming_server::" prefix and pad to 80 chars
 struct CustomFormatter;
@@ -444,7 +440,7 @@ async fn main() -> Result<()> {
             let start_recording_path = format!("{}/control/recording/start", path);
             let start_info = api_info.clone();
             app = app.route(&start_recording_path, axum::routing::post(
-                move |headers, json| api_start_recording(
+                move |headers, json| api_recording::api_start_recording(
                     headers,
                     json,
                     start_info.camera_id.clone(),
@@ -458,7 +454,7 @@ async fn main() -> Result<()> {
             let stop_recording_path = format!("{}/control/recording/stop", path);
             let stop_info = api_info.clone();
             app = app.route(&stop_recording_path, axum::routing::post(
-                move |headers| api_stop_recording(
+                move |headers| api_recording::api_stop_recording(
                     headers,
                     stop_info.camera_id.clone(),
                     stop_info.camera_config.clone(),
@@ -470,7 +466,7 @@ async fn main() -> Result<()> {
             let list_recordings_path = format!("{}/control/recordings", path);
             let list_info = api_info.clone();
             app = app.route(&list_recordings_path, axum::routing::get(
-                move |headers, query| api_list_recordings(
+                move |headers, query| api_recording::api_list_recordings(
                     headers,
                     query,
                     list_info.camera_id.clone(),
@@ -483,7 +479,7 @@ async fn main() -> Result<()> {
             let frames_path = format!("{}/control/recordings/:session_id/frames", path);
             let frames_info = api_info.clone();
             app = app.route(&frames_path, axum::routing::get(
-                move |headers, path, query| api_get_recorded_frames(
+                move |headers, path, query| api_recording::api_get_recorded_frames(
                     headers,
                     path,
                     query,
@@ -496,7 +492,7 @@ async fn main() -> Result<()> {
             let active_recording_path = format!("{}/control/recording/active", path);
             let active_info = api_info.clone();
             app = app.route(&active_recording_path, axum::routing::get(
-                move |headers| api_get_active_recording(
+                move |headers| api_recording::api_get_active_recording(
                     headers,
                     active_info.camera_id.clone(),
                     active_info.camera_config.clone(),
@@ -508,7 +504,7 @@ async fn main() -> Result<()> {
             let size_recording_path = format!("{}/control/recording/size", path);
             let size_info = api_info.clone();
             app = app.route(&size_recording_path, axum::routing::get(
-                move |headers| api_get_recording_size(
+                move |headers| api_recording::api_get_recording_size(
                     headers,
                     size_info.camera_id.clone(),
                     size_info.camera_config.clone(),
@@ -651,10 +647,10 @@ async fn main() -> Result<()> {
 
     // Camera management API endpoints
     let admin_state = app_state.clone();
-    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<api::CreateCameraRequest>| {
+    app = app.route("/api/admin/cameras", axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::extract::Json<api_config::CreateCameraRequest>| {
         let state = admin_state.clone();
         async move {
-            api::api_create_camera(headers, body, state).await
+            api_config::api_create_camera(headers, body, state).await
         }
     }));
 
@@ -662,7 +658,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::get(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
         let state = admin_state2.clone();
         async move {
-            api::api_get_camera_config(headers, path, state).await
+            api_config::api_get_camera_config(headers, path, state).await
         }
     }));
 
@@ -670,7 +666,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::put(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>, body: axum::extract::Json<config::CameraConfig>| {
         let state = admin_state3.clone();
         async move {
-            api::api_update_camera(headers, path, body, state).await
+            api_config::api_update_camera(headers, path, body, state).await
         }
     }));
 
@@ -678,7 +674,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/cameras/:id", axum::routing::delete(move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
         let state = admin_state4.clone();
         async move {
-            api::api_delete_camera(headers, path, state).await
+            api_config::api_delete_camera(headers, path, state).await
         }
     }));
 
@@ -687,7 +683,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/config", axum::routing::get(move |headers: axum::http::HeaderMap| {
         let args = args_get.clone();
         async move {
-            api::api_get_config(headers, args).await
+            api_config::api_get_config(headers, args).await
         }
     }));
 
@@ -695,7 +691,7 @@ async fn main() -> Result<()> {
     app = app.route("/api/admin/config", axum::routing::put(move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
         let args = args_put.clone();
         async move {
-            api::api_update_config(headers, body, args).await
+            api_config::api_update_config(headers, body, args).await
         }
     }));
     
@@ -704,14 +700,14 @@ async fn main() -> Result<()> {
     app = app.fallback(move |uri: axum::http::Uri, ws: Option<axum::extract::WebSocketUpgrade>, query: axum::extract::Query<std::collections::HashMap<String, String>>, addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: axum::http::HeaderMap| {
         let state = fallback_state.clone();
         async move {
-            dynamic_camera_fallback_handler(uri, ws, query, addr, headers, state).await
+            handlers::dynamic_camera_fallback_handler(uri, ws, query, addr, headers, state).await
         }
     });
 
     app = app.layer(cors_layer);
 
     // Start camera configuration file watcher
-    if let Err(e) = start_camera_config_watcher(app_state.clone()).await {
+    if let Err(e) = watcher::start_camera_config_watcher(app_state.clone()).await {
         error!("Failed to start camera configuration watcher: {}", e);
     }
 
@@ -740,300 +736,6 @@ async fn main() -> Result<()> {
 
 
 // API Request/Response structs
-#[derive(Deserialize)]
-struct StartRecordingRequest {
-    reason: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct GetRecordingsQuery {
-    from: Option<DateTime<Utc>>,
-    to: Option<DateTime<Utc>>,
-    #[serde(default = "default_sort_order_recordings")]
-    sort_order: String,
-}
-
-fn default_sort_order_recordings() -> String {
-    "newest".to_string()
-}
-
-#[derive(Deserialize)]
-struct GetFramesQuery {
-    from: Option<DateTime<Utc>>,
-    to: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize)]
-pub struct ApiResponse<T> {
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<T>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<u16>,
-}
-
-impl<T> ApiResponse<T> {
-    pub fn success(data: T) -> Self {
-        Self {
-            status: "success".to_string(),
-            data: Some(data),
-            error: None,
-            code: None,
-        }
-    }
-
-    pub fn error(message: &str, code: u16) -> ApiResponse<()> {
-        ApiResponse {
-            status: "error".to_string(),
-            data: None,
-            error: Some(message.to_string()),
-            code: Some(code),
-        }
-    }
-}
-
-// Authentication helper
-fn check_api_auth(headers: &axum::http::HeaderMap, camera_config: &config::CameraConfig) -> std::result::Result<(), axum::response::Response> {
-    if let Some(expected_token) = &camera_config.token {
-        if let Some(auth_header) = headers.get("authorization") {
-            if let Ok(auth_str) = auth_header.to_str() {
-                if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                    if token == expected_token {
-                        return Ok(());
-                    }
-                }
-            }
-        }
-        return Err((axum::http::StatusCode::UNAUTHORIZED, 
-                   Json(ApiResponse::<()>::error("Invalid or missing Authorization header", 401)))
-                   .into_response());
-    }
-    Ok(())
-}
-
-//
-
-// API Handlers
-async fn api_start_recording(
-    headers: axum::http::HeaderMap,
-    Json(request): Json<StartRecordingRequest>,
-    camera_id: String,
-    camera_config: config::CameraConfig,
-    recording_manager: Arc<RecordingManager>,
-    frame_sender: Arc<broadcast::Sender<bytes::Bytes>>,
-) -> axum::response::Response {
-    if let Err(response) = check_api_auth(&headers, &camera_config) {
-        return response;
-    }
-
-    // Check if already recording
-    if recording_manager.is_recording(&camera_id).await {
-        return (axum::http::StatusCode::CONFLICT, 
-                Json(ApiResponse::<()>::error("Recording already in progress for this camera", 409)))
-                .into_response();
-    }
-
-    match recording_manager.start_recording(
-        &camera_id,
-        "api_client",
-        request.reason.as_deref(),
-        None,
-        frame_sender,
-    ).await {
-        Ok(session_id) => {
-            let data = serde_json::json!({
-                "session_id": session_id,
-                "message": "Recording started",
-                "camera_id": camera_id
-            });
-            Json(ApiResponse::success(data)).into_response()
-        }
-        Err(_) => {
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-             Json(ApiResponse::<()>::error("Failed to start recording", 500)))
-             .into_response()
-        }
-    }
-}
-
-async fn api_stop_recording(
-    headers: axum::http::HeaderMap,
-    camera_id: String,
-    camera_config: config::CameraConfig,
-    recording_manager: Arc<RecordingManager>,
-) -> axum::response::Response {
-    if let Err(response) = check_api_auth(&headers, &camera_config) {
-        return response;
-    }
-
-    match recording_manager.stop_recording(&camera_id).await {
-        Ok(was_recording) => {
-            if was_recording {
-                let data = serde_json::json!({
-                    "message": "Recording stopped",
-                    "camera_id": camera_id
-                });
-                Json(ApiResponse::success(data)).into_response()
-            } else {
-                let data = serde_json::json!({
-                    "message": "No active recording found",
-                    "camera_id": camera_id
-                });
-                Json(ApiResponse::success(data)).into_response()
-            }
-        }
-        Err(_) => {
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-             Json(ApiResponse::<()>::error("Failed to stop recording", 500)))
-             .into_response()
-        }
-    }
-}
-
-async fn api_list_recordings(
-    headers: axum::http::HeaderMap,
-    Query(query): Query<GetRecordingsQuery>,
-    camera_id: String,
-    camera_config: config::CameraConfig,
-    recording_manager: Arc<RecordingManager>,
-) -> axum::response::Response {
-    if let Err(response) = check_api_auth(&headers, &camera_config) {
-        return response;
-    }
-
-    match recording_manager.list_recordings(Some(&camera_id), query.from, query.to).await {
-        Ok(mut recordings) => {
-            // Sort recordings based on sort_order parameter
-            match query.sort_order.as_str() {
-                "oldest" => recordings.sort_by(|a, b| a.start_time.cmp(&b.start_time)),
-                _ => recordings.sort_by(|a, b| b.start_time.cmp(&a.start_time)), // "newest" (default)
-            }
-            
-            let recordings_data: Vec<serde_json::Value> = recordings
-                .into_iter()
-                .map(|r| serde_json::json!({
-                    "id": r.id,
-                    "camera_id": r.camera_id,
-                    "start_time": r.start_time,
-                    "end_time": r.end_time,
-                    "reason": r.reason,
-                    "status": format!("{:?}", r.status).to_lowercase(),
-                    "duration_seconds": r.end_time
-                        .map(|end| end.signed_duration_since(r.start_time).num_seconds())
-                }))
-                .collect();
-
-            let data = serde_json::json!({
-                "recordings": recordings_data,
-                "count": recordings_data.len(),
-                "camera_id": camera_id
-            });
-            Json(ApiResponse::success(data)).into_response()
-        }
-        Err(_) => {
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-             Json(ApiResponse::<()>::error("Failed to list recordings", 500)))
-             .into_response()
-        }
-    }
-}
-
-async fn api_get_recorded_frames(
-    headers: axum::http::HeaderMap,
-    AxumPath(session_id): AxumPath<i64>,
-    Query(query): Query<GetFramesQuery>,
-    camera_config: config::CameraConfig,
-    recording_manager: Arc<RecordingManager>,
-) -> axum::response::Response {
-    if let Err(response) = check_api_auth(&headers, &camera_config) {
-        return response;
-    }
-
-    match recording_manager.get_recorded_frames(session_id, query.from, query.to).await {
-        Ok(frames) => {
-            let frames_data: Vec<serde_json::Value> = frames
-                .into_iter()
-                .map(|f| serde_json::json!({
-                    "timestamp": f.timestamp,
-                    "frame_size": f.frame_data.len()
-                    // Note: Not including actual frame_data in JSON response due to size
-                }))
-                .collect();
-
-            let data = serde_json::json!({
-                "session_id": session_id,
-                "frames": frames_data,
-                "count": frames_data.len(),
-                "note": "Frame data not included in response due to size - use binary WebSocket for frame streaming"
-            });
-            Json(ApiResponse::success(data)).into_response()
-        }
-        Err(_) => {
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-             Json(ApiResponse::<()>::error("Failed to get recorded frames", 500)))
-             .into_response()
-        }
-    }
-}
-
-async fn api_get_active_recording(
-    headers: axum::http::HeaderMap,
-    camera_id: String,
-    camera_config: config::CameraConfig,
-    recording_manager: Arc<RecordingManager>,
-) -> axum::response::Response {
-    if let Err(response) = check_api_auth(&headers, &camera_config) {
-        return response;
-    }
-
-    if let Some(active_recording) = recording_manager.get_active_recording(&camera_id).await {
-        let data = serde_json::json!({
-            "active": true,
-            "session_id": active_recording.session_id,
-            "start_time": active_recording.start_time,
-            "frame_count": active_recording.frame_count,
-            "camera_id": camera_id
-        });
-        Json(ApiResponse::success(data)).into_response()
-    } else {
-        let data = serde_json::json!({
-            "message": "No active recording found",
-            "camera_id": camera_id,
-            "active": false
-        });
-        Json(ApiResponse::success(data)).into_response()
-    }
-}
-
-async fn api_get_recording_size(
-    headers: axum::http::HeaderMap,
-    camera_id: String,
-    camera_config: config::CameraConfig,
-    recording_manager: Arc<RecordingManager>,
-) -> axum::response::Response {
-    if let Err(response) = check_api_auth(&headers, &camera_config) {
-        return response;
-    }
-
-    match recording_manager.get_database_size(&camera_id).await {
-        Ok(size_bytes) => {
-            let data = serde_json::json!({
-                "camera_id": camera_id,
-                "size_bytes": size_bytes,
-                "size_mb": (size_bytes as f64) / (1024.0 * 1024.0),
-                "size_gb": (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0)
-            });
-            Json(ApiResponse::success(data)).into_response()
-        }
-        Err(_) => {
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-             Json(ApiResponse::<()>::error("Failed to get database size", 500)))
-             .into_response()
-        }
-    }
-}
 
 async fn start_http_server(app: axum::Router, addr: &str) -> Result<()> {
     use socket2::{Domain, Protocol, Socket, Type};
@@ -1343,232 +1045,4 @@ impl AppState {
     }
 }
 
-async fn start_camera_config_watcher(app_state: AppState) -> Result<()> {
-    let (tx, mut rx) = tokio::sync::mpsc::channel(100);
-    
-    // Create file watcher
-    let mut watcher = RecommendedWatcher::new(
-        move |res| {
-            match res {
-                Ok(event) => {
-                    if let Err(e) = tx.blocking_send(event) {
-                        error!("Failed to send file watcher event: {}", e);
-                    }
-                }
-                Err(e) => error!("File watcher error: {}", e),
-            }
-        },
-        NotifyConfig::default(),
-    ).map_err(|e| crate::errors::StreamError::config(&format!("File watcher error: {}", e)))?;
-    
-    // Watch the cameras directory
-    let cameras_dir_path = Path::new(&app_state.cameras_directory);
-    if !cameras_dir_path.exists() {
-        info!("Creating cameras directory '{}' for watching...", app_state.cameras_directory);
-        fs::create_dir_all(cameras_dir_path)?;
-    }
-    
-    watcher.watch(cameras_dir_path, RecursiveMode::NonRecursive)
-        .map_err(|e| crate::errors::StreamError::config(&format!("Failed to watch cameras directory: {}", e)))?;
-    info!("Started watching cameras directory '{}' for configuration changes", app_state.cameras_directory);
-    
-    // Keep watcher alive and handle events with debouncing
-    tokio::spawn(async move {
-        let _watcher = watcher; // Keep watcher alive
-        let mut last_events: std::collections::HashMap<String, tokio::time::Instant> = std::collections::HashMap::new();
-        
-        while let Some(event) = rx.recv().await {
-            // Debounce events for each camera to prevent rapid duplicate calls
-            let mut should_process = false;
-            if let Some(camera_id) = event.paths.get(0).and_then(|p| get_camera_id_from_path(p)) {
-                let now = tokio::time::Instant::now();
-                let should_process_this = if let Some(last_time) = last_events.get(&camera_id) {
-                    now.duration_since(*last_time) >= tokio::time::Duration::from_millis(500) // 500ms debounce
-                } else {
-                    true
-                };
-                
-                if should_process_this {
-                    last_events.insert(camera_id, now);
-                    should_process = true;
-                }
-            } else {
-                should_process = true; // Process events we can't identify
-            }
-            
-            if should_process {
-                handle_file_event(event, &app_state).await;
-            }
-        }
-    });
-    
-    Ok(())
-}
 
-async fn handle_file_event(event: Event, app_state: &AppState) {
-    match event.kind {
-        EventKind::Create(_) => {
-            for path in event.paths {
-                if let Some(camera_id) = get_camera_id_from_path(&path) {
-                    info!("Detected new camera configuration: {}", camera_id);
-                    if let Ok(camera_config) = load_camera_config(&camera_id, &app_state.cameras_directory) {
-                        if let Err(e) = app_state.add_camera(camera_id.clone(), camera_config).await {
-                            error!("Failed to add camera '{}': {}", camera_id, e);
-                        }
-                    }
-                }
-            }
-        }
-        EventKind::Modify(_) => {
-            for path in event.paths {
-                if let Some(camera_id) = get_camera_id_from_path(&path) {
-                    info!("Detected camera configuration change: {}", camera_id);
-                    if let Ok(camera_config) = load_camera_config(&camera_id, &app_state.cameras_directory) {
-                        if let Err(e) = app_state.restart_camera(camera_id.clone(), camera_config).await {
-                            error!("Failed to restart camera '{}': {}", camera_id, e);
-                        }
-                    }
-                }
-            }
-        }
-        EventKind::Remove(_) => {
-            for path in event.paths {
-                if let Some(camera_id) = get_camera_id_from_path(&path) {
-                    info!("Detected camera configuration removal: {}", camera_id);
-                    if let Err(e) = app_state.remove_camera(&camera_id).await {
-                        error!("Failed to remove camera '{}': {}", camera_id, e);
-                    }
-                }
-            }
-        }
-        _ => {
-            // Ignore other event types
-        }
-    }
-}
-
-fn get_camera_id_from_path(path: &Path) -> Option<String> {
-    if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-        if file_name.ends_with(".json") || file_name.ends_with(".toml") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                return Some(stem.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn load_camera_config(camera_id: &str, cameras_dir: &str) -> Result<config::CameraConfig> {
-    let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
-    
-    // Try JSON first, then TOML for backward compatibility
-    if let Ok(content) = fs::read_to_string(&json_path) {
-        match serde_json::from_str::<config::CameraConfig>(&content) {
-            Ok(camera_config) => return Ok(camera_config),
-            Err(e) => {
-                error!("Failed to parse JSON camera config file {}: {}", json_path, e);
-            }
-        }
-    }
-    
-    if let Ok(content) = fs::read_to_string(&toml_path) {
-        match toml::from_str::<config::CameraConfig>(&content) {
-            Ok(camera_config) => return Ok(camera_config),
-            Err(e) => {
-                error!("Failed to parse TOML camera config file {}: {}", toml_path, e);
-            }
-        }
-    }
-    
-    Err(crate::errors::StreamError::config(&format!("Camera configuration file not found: {}", camera_id)))
-}
-
-async fn dynamic_camera_fallback_handler(
-    uri: axum::http::Uri,
-    ws: Option<axum::extract::WebSocketUpgrade>,
-    query: axum::extract::Query<std::collections::HashMap<String, String>>,
-    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
-    headers: axum::http::HeaderMap,
-    app_state: AppState,
-) -> axum::response::Response {
-    let path_str = uri.path();
-    
-    // Parse the URI to determine camera path and endpoint
-    if let Some(camera_info) = parse_camera_path(path_str, &app_state).await {
-        let (camera_id, _camera_path, endpoint) = camera_info;
-        
-        // Get camera stream info
-        let camera_streams = app_state.camera_streams.read().await;
-        if let Some(stream_info) = camera_streams.get(&camera_id) {
-            let stream_info = stream_info.clone();
-            drop(camera_streams);
-            
-            match endpoint.as_str() {
-                "stream" => {
-                    handlers::camera_stream_handler(
-                        ws, query, addr,
-                        stream_info.frame_sender,
-                        stream_info.camera_id,
-                        stream_info.mqtt_handle,
-                        stream_info.camera_config,
-                    ).await
-                }
-                "live" => {
-                    handlers::camera_live_handler(
-                        ws, query, addr,
-                        stream_info.frame_sender,
-                        stream_info.camera_id,
-                        stream_info.mqtt_handle,
-                        stream_info.camera_config,
-                    ).await
-                }
-                "control" => {
-                    handlers::camera_control_handler(
-                        headers, ws, query, addr,
-                        stream_info.frame_sender,
-                        stream_info.camera_id,
-                        stream_info.mqtt_handle,
-                        stream_info.camera_config,
-                        stream_info.recording_manager,
-                    ).await
-                }
-                "test" => {
-                    handlers::serve_test_page(query).await.into_response()
-                }
-                "" => {
-                    // Root camera path - serve test page
-                    handlers::serve_test_page(query).await.into_response()
-                }
-                _ => {
-                    // Unknown endpoint
-                    (axum::http::StatusCode::NOT_FOUND, "Endpoint not found").into_response()
-                }
-            }
-        } else {
-            (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
-        }
-    } else {
-        (axum::http::StatusCode::NOT_FOUND, "Page not found").into_response()
-    }
-}
-
-async fn parse_camera_path(path: &str, app_state: &AppState) -> Option<(String, String, String)> {
-    // Find matching camera by checking if any camera's path matches the beginning of the request path
-    let camera_streams = app_state.camera_streams.read().await;
-    
-    for (camera_id, stream_info) in camera_streams.iter() {
-        let camera_path = &stream_info.camera_config.path;
-        
-        if path == camera_path {
-            // Exact match - root camera endpoint
-            return Some((camera_id.clone(), camera_path.clone(), String::new()));
-        } else if path.starts_with(&format!("{}/", camera_path)) {
-            // Path starts with camera path + /
-            let remaining = &path[camera_path.len() + 1..];
-            return Some((camera_id.clone(), camera_path.clone(), remaining.to_string()));
-        }
-    }
-    
-    None
-}

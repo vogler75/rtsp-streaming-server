@@ -124,6 +124,75 @@ pub async fn dynamic_camera_live_handler(
     }
 }
 
+pub async fn dynamic_camera_fallback_handler(
+    uri: axum::http::Uri,
+    ws: Option<axum::extract::WebSocketUpgrade>,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    addr: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    app_state: AppState,
+) -> axum::response::Response {
+    let path_str = uri.path();
+    
+    // Parse the URI to determine camera path and endpoint
+    if let Some(camera_info) = parse_camera_path(path_str, &app_state).await {
+        let (camera_id, _camera_path, endpoint) = camera_info;
+        
+        // Get camera stream info
+        let camera_streams = app_state.camera_streams.read().await;
+        if let Some(stream_info) = camera_streams.get(&camera_id) {
+            let stream_info = stream_info.clone();
+            drop(camera_streams);
+            
+            match endpoint.as_str() {
+                "stream" => {
+                    camera_stream_handler(
+                        ws, query, addr,
+                        stream_info.frame_sender,
+                        stream_info.camera_id,
+                        stream_info.mqtt_handle,
+                        stream_info.camera_config,
+                    ).await
+                }
+                "live" => {
+                    camera_live_handler(
+                        ws, query, addr,
+                        stream_info.frame_sender,
+                        stream_info.camera_id,
+                        stream_info.mqtt_handle,
+                        stream_info.camera_config,
+                    ).await
+                }
+                "control" => {
+                    camera_control_handler(
+                        headers, ws, query, addr,
+                        stream_info.frame_sender,
+                        stream_info.camera_id,
+                        stream_info.mqtt_handle,
+                        stream_info.camera_config,
+                        stream_info.recording_manager,
+                    ).await
+                }
+                "test" => {
+                    serve_test_page(query).await.into_response()
+                }
+                "" => {
+                    // Root camera path - serve test page
+                    serve_test_page(query).await.into_response()
+                }
+                _ => {
+                    // Unknown endpoint
+                    (axum::http::StatusCode::NOT_FOUND, "Endpoint not found").into_response()
+                }
+            }
+        } else {
+            (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Page not found").into_response()
+    }
+}
+
 pub async fn camera_live_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,
     query: Query<std::collections::HashMap<String, String>>,
@@ -301,4 +370,24 @@ pub async fn camera_control_handler(
             serve_control_page().await.into_response()
         }
     }
+}
+
+async fn parse_camera_path(path: &str, app_state: &AppState) -> Option<(String, String, String)> {
+    // Find matching camera by checking if any camera's path matches the beginning of the request path
+    let camera_streams = app_state.camera_streams.read().await;
+    
+    for (camera_id, stream_info) in camera_streams.iter() {
+        let camera_path = &stream_info.camera_config.path;
+        
+        if path == camera_path {
+            // Exact match - root camera endpoint
+            return Some((camera_id.clone(), camera_path.clone(), String::new()));
+        } else if path.starts_with(&format!("{}/", camera_path)) {
+            // Path starts with camera path + /
+            let remaining = &path[camera_path.len() + 1..];
+            return Some((camera_id.clone(), camera_path.clone(), remaining.to_string()));
+        }
+    }
+    
+    None
 }

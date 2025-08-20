@@ -1,7 +1,7 @@
 use axum::{Json, response::IntoResponse, extract::{Path as AxumPath}};
 use tracing::info;
 
-use crate::{config, ApiResponse, AppState, Args};
+use crate::{config, api_recording::ApiResponse, AppState, Args};
 
 fn check_admin_token(headers: &axum::http::HeaderMap, admin_token: &Option<String>) -> bool {
     let Some(ref expected_token) = admin_token else { return true; };
