@@ -291,6 +291,24 @@
             font-size: 12px;
             white-space: nowrap;
         }
+
+        /* PTZ Controls (inline bar) */
+        .ptz-inline {
+            display: none;
+            margin-top: 8px;
+            background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 6px 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .ptz-inline button { flex: 0 0 auto; width: 28px; height: 28px; font-size: 14px; padding: 0; border-radius: 6px; }
+        .ptz-settings { display: flex; gap: 8px; align-items: center; margin-left: 6px; }
+        .ptz-settings label { font-size: 10px; color: rgba(255,255,255,0.85); display: flex; gap: 4px; align-items: center; }
+        .ptz-settings input[type="number"] { width: 40px; padding: 2px 4px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); color: #fff; }
+        .ptz-settings input[type="range"] { width: 90px; }
         
     </style>
 </head>
@@ -355,6 +373,18 @@
                                 </div>
                                 <button id="stopButton" title="Stop">⏹</button>
                             </div>
+                        </div>
+                    </div>
+                    <!-- PTZ inline bar (shown only if PTZ is enabled) -->
+                    <div id="ptzInline" class="ptz-inline">
+                        <span class="info-text" style="margin: 0;">PTZ</span>
+                        <button id="ptzLeft" title="Left">⬅️</button>
+                        <button id="ptzRight" title="Right">➡️</button>
+                        <button id="ptzUp" title="Up">⬆️</button>
+                        <button id="ptzDown" title="Down">⬇️</button>
+                        <div class="ptz-settings">
+                            <label>Speed <input type="range" id="ptzSpeed" min="0.1" max="1.0" step="0.1" value="0.7"></label>
+                            <label>Timeout <input type="number" id="ptzTimeout" min="1" max="5" step="1" value="1">s</label>
                         </div>
                     </div>
                 </div>
@@ -457,6 +487,15 @@
                 document.getElementById('connectWithToken').addEventListener('click', () => this.connectWebSocket(true));
                 document.getElementById('reconnect').addEventListener('click', () => this.connectWebSocket(true));
                 
+                // PTZ button handlers
+                document.addEventListener('click', (e) => {
+                    const id = e.target && e.target.id;
+                    if (id === 'ptzUp') this.ptzMove('up');
+                    if (id === 'ptzDown') this.ptzMove('down');
+                    if (id === 'ptzLeft') this.ptzMove('left');
+                    if (id === 'ptzRight') this.ptzMove('right');
+                });
+                
                 // Video playback controls
                 document.getElementById('rewindButton').addEventListener('click', () => this.seek(-10));
                 document.getElementById('forwardButton').addEventListener('click', () => this.seek(10));
@@ -465,6 +504,23 @@
                 
                 // Timeline slider
                 document.getElementById('timelineSlider').addEventListener('input', (e) => this.onSliderChange(e.target.value));
+
+                // PTZ press-and-hold controls
+                const bindPressHold = (elId, dir) => {
+                    const el = document.getElementById(elId);
+                    if (!el) return;
+                    const start = (ev) => { ev.preventDefault(); this.ptzMove(dir, true); };
+                    const end = (ev) => { ev.preventDefault(); this.ptzStop(); };
+                    el.addEventListener('mousedown', start);
+                    el.addEventListener('touchstart', start, { passive: false });
+                    ['mouseup','mouseleave','touchend','touchcancel'].forEach(type => el.addEventListener(type, end));
+                };
+                bindPressHold('ptzUp', 'up');
+                bindPressHold('ptzDown', 'down');
+                bindPressHold('ptzLeft', 'left');
+                bindPressHold('ptzRight', 'right');
+                // Re-probe PTZ when Connect is clicked
+                document.getElementById('connectWithToken').addEventListener('click', () => setTimeout(() => this.checkPtzAvailability(), 200));
                 
                 // Set default date range to last week
                 const toDate = new Date();
@@ -519,6 +575,8 @@
                     this.isConnected = true;
                     this.updateStatus('Connected', true);
                     this.logJson({ status: 'Connected to WebSocket' });
+                    // Probe PTZ availability on connect
+                    this.checkPtzAvailability();
                 };
                 
                 this.ws.onmessage = (event) => {
@@ -1144,6 +1202,75 @@
             logJson(obj) {
                 const timestamp = new Date().toLocaleTimeString();
                 console.log(`[${timestamp}] Camera Control:`, obj);
+            }
+
+            // ------ PTZ helpers ------
+            apiBasePath() {
+                // Example: /<camera_path>/control
+                return `${window.location.origin}${window.location.pathname.replace('control.html', '')}`;
+            }
+
+            buildAuthHeaders(json = true) {
+                const headers = {};
+                if (json) headers['Content-Type'] = 'application/json';
+                const token = document.getElementById('bearerToken').value.trim();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                return headers;
+            }
+
+            async checkPtzAvailability() {
+                const bar = document.getElementById('ptzInline');
+                try {
+                    const resp = await fetch(`${this.apiBasePath()}/ptz/stop`, {
+                        method: 'POST',
+                        headers: this.buildAuthHeaders(false)
+                    });
+                    bar.style.display = resp.ok ? 'flex' : 'none';
+                } catch (_e) {
+                    bar.style.display = 'none';
+                }
+            }
+
+            async ptzMove(direction, continuous = false) {
+                const velocities = {
+                    up:   { pan: 0.0,  tilt: 1.0 },
+                    down: { pan: 0.0,  tilt: -1.0 },
+                    left: { pan: -1.0, tilt: 0.0 },
+                    right:{ pan: 1.0,  tilt: 0.0 }
+                };
+                const v = velocities[direction];
+                if (!v) return;
+                const speed = parseFloat(document.getElementById('ptzSpeed')?.value || '0.7');
+                const pan = v.pan * speed;
+                const tilt = v.tilt * speed;
+                const timeout = parseInt(document.getElementById('ptzTimeout')?.value || '1', 10);
+                const payload = continuous ? { pan, tilt, zoom: 0.0 } : { pan, tilt, zoom: 0.0, timeout_secs: timeout };
+                try {
+                    const resp = await fetch(`${this.apiBasePath()}/ptz/move`, {
+                        method: 'POST',
+                        headers: this.buildAuthHeaders(true),
+                        body: JSON.stringify(payload)
+                    });
+                    const json = await resp.json().catch(() => null);
+                    this.logJson({ ptz_move: { direction, status: resp.status, response: json } });
+                    if (resp.status === 503) {
+                        document.getElementById('ptzInline').style.display = 'none';
+                    }
+                } catch (e) {
+                    this.logJson({ ptz_move_error: e?.message || String(e) });
+                }
+            }
+
+            async ptzStop() {
+                try {
+                    const resp = await fetch(`${this.apiBasePath()}/ptz/stop`, {
+                        method: 'POST',
+                        headers: this.buildAuthHeaders(false)
+                    });
+                    this.logJson({ ptz_stop_status: resp.status });
+                } catch (e) {
+                    this.logJson({ ptz_stop_error: e?.message || String(e) });
+                }
             }
         }
         
