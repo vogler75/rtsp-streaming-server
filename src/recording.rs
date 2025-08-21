@@ -384,6 +384,38 @@ impl RecordingManager {
         }
     }
 
+    pub async fn list_recordings_filtered(
+        &self,
+        camera_id: Option<&str>,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        reason: Option<&str>,
+    ) -> crate::errors::Result<Vec<RecordingSession>> {
+        if let Some(cam_id) = camera_id {
+            // Query specific camera's database
+            if let Some(database) = self.get_camera_database(cam_id).await {
+                database.list_recordings_filtered(cam_id, from, to, reason).await
+            } else {
+                Ok(Vec::new()) // No database for this camera
+            }
+        } else {
+            // Query all camera databases and combine results
+            let databases = self.databases.read().await;
+            let mut all_recordings = Vec::new();
+            
+            for (camera_id, database) in databases.iter() {
+                match database.list_recordings_filtered(camera_id, from, to, reason).await {
+                    Ok(recordings) => all_recordings.extend(recordings),
+                    Err(e) => error!("Failed to query recordings from database: {}", e),
+                }
+            }
+            
+            // Sort by start time
+            all_recordings.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+            Ok(all_recordings)
+        }
+    }
+
     pub async fn create_replay_stream(
         &self,
         camera_id: &str,

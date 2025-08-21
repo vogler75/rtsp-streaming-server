@@ -277,10 +277,28 @@ These endpoints control individual cameras using their configured path. Authenti
 **Endpoint:** `GET /{camera_path}/control/recordings`
 
 **Query Parameters:**
-- `from` (optional): ISO 8601 timestamp filter
-- `to` (optional): ISO 8601 timestamp filter
+- `from` (optional): ISO 8601 timestamp filter (recordings starting after this time)
+- `to` (optional): ISO 8601 timestamp filter (recordings starting before this time)  
+- `reason` (optional): Filter by recording reason using SQL wildcards (e.g., `Manual` or `%alarm%`)
+- `sort_order` (optional): Sort order: `newest` (default) or `oldest`
 
 **Response:** List of recording session objects
+
+**Examples:**
+```bash
+# Get all recordings
+GET /cam1/control/recordings
+
+# Get recordings from a specific time range
+GET /cam1/control/recordings?from=2025-08-21T00:00:00Z&to=2025-08-21T23:59:59Z
+
+# Get recordings with specific reasons
+GET /cam1/control/recordings?reason=Manual
+GET /cam1/control/recordings?reason=%alarm%
+
+# Combined filters with sorting
+GET /cam1/control/recordings?from=2025-08-21T00:00:00Z&reason=Manual&sort_order=oldest
+```
 
 #### Get Frame Metadata
 **Endpoint:** `GET /{camera_path}/control/recordings/{session_id}/frames`

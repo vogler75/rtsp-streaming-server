@@ -18,6 +18,7 @@ pub struct StartRecordingRequest {
 pub struct GetRecordingsQuery {
     pub from: Option<chrono::DateTime<chrono::Utc>>,
     pub to: Option<chrono::DateTime<chrono::Utc>>,
+    pub reason: Option<String>, // Filter by recording reason using SQL wildcards (e.g., 'Manual' or '%alarm%')
     #[serde(default = "default_sort_order_recordings")]
     pub sort_order: String,
 }
@@ -184,7 +185,7 @@ pub async fn api_list_recordings(
         return response;
     }
 
-    match recording_manager.list_recordings(Some(&camera_id), query.from, query.to).await {
+    match recording_manager.list_recordings_filtered(Some(&camera_id), query.from, query.to, query.reason.as_deref()).await {
         Ok(mut recordings) => {
             // Sort recordings based on sort_order parameter
             match query.sort_order.as_str() {

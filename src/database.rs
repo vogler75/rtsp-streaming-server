@@ -138,6 +138,7 @@ pub trait DatabaseProvider: Send + Sync {
     ) -> Result<i64>;
     
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>>;
+    async fn list_recordings_filtered(&self, camera_id: &str, from: Option<DateTime<Utc>>, to: Option<DateTime<Utc>>, reason: Option<&str>) -> Result<Vec<RecordingSession>>;
     
     async fn get_recorded_frames(
         &self,
@@ -667,6 +668,76 @@ impl DatabaseProvider for SqliteDatabase {
         }
         
         let rows = query_builder.fetch_all(&self.pool).await?;
+        
+        let elapsed = start_time.elapsed();
+        let row_count = rows.len();
+        
+        tracing::debug!(
+            "Query completed in {:.3}ms, returned {} rows",
+            elapsed.as_secs_f64() * 1000.0,
+            row_count
+        );
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(RecordingSession {
+                id: row.get("id"),
+                camera_id: row.get("camera_id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                reason: row.get("reason"),
+                status: RecordingStatus::from(row.get::<String, _>("status")),
+            });
+        }
+
+        Ok(sessions)
+    }
+
+    async fn list_recordings_filtered(&self, camera_id: &str, from: Option<DateTime<Utc>>, to: Option<DateTime<Utc>>, reason: Option<&str>) -> Result<Vec<RecordingSession>> {
+        let start_time = std::time::Instant::now();
+        
+        let mut conditions = Vec::new();
+        conditions.push("camera_id = ?".to_string());
+        
+        // Add time filters if provided
+        if from.is_some() {
+            conditions.push("start_time >= ?".to_string());
+        }
+        if to.is_some() {
+            conditions.push("start_time <= ?".to_string());
+        }
+        
+        // Add reason filter if provided (supports SQL wildcards)
+        if reason.is_some() {
+            conditions.push("reason LIKE ?".to_string());
+        }
+
+        let where_clause = format!("WHERE {}", conditions.join(" AND "));
+        
+        let sql = format!(
+            "SELECT id, camera_id, start_time, end_time, reason, status FROM {} {} ORDER BY start_time DESC",
+            TABLE_RECORDING_SESSIONS, where_clause
+        );
+        
+        tracing::debug!(
+            "Executing SQL query for list_recordings_filtered:\n{}\nParameters: camera_id='{}', from='{:?}', to='{:?}', reason='{:?}'",
+            sql, camera_id, from, to, reason
+        );
+
+        // Build the query with proper parameter binding
+        let mut query = sqlx::query(&sql).bind(camera_id);
+        
+        if let Some(from_time) = from {
+            query = query.bind(from_time);
+        }
+        if let Some(to_time) = to {
+            query = query.bind(to_time);
+        }
+        if let Some(reason_filter) = reason {
+            query = query.bind(reason_filter);
+        }
+        
+        let rows = query.fetch_all(&self.pool).await?;
         
         let elapsed = start_time.elapsed();
         let row_count = rows.len();
