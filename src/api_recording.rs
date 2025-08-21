@@ -106,6 +106,7 @@ pub async fn api_start_recording(
         request.reason.as_deref(),
         None,
         frame_sender,
+        &camera_config,
     ).await {
         Ok(session_id) => {
             let data = serde_json::json!({

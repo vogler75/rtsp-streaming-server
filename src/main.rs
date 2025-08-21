@@ -327,7 +327,7 @@ async fn main() -> Result<()> {
             }
             
             // Restart active recordings
-            if let Err(e) = recording_manager.restart_active_recordings_at_startup(&camera_frame_senders).await {
+            if let Err(e) = recording_manager.restart_active_recordings_at_startup(&camera_frame_senders, &all_camera_configs).await {
                 error!("Failed to restart active recordings at startup: {}", e);
             }
         }

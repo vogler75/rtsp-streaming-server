@@ -797,16 +797,22 @@ impl ControlHandler {
                 let segments_data: Vec<serde_json::Value> = segments
                     .into_iter()
                     .map(|s| {
-                        // Make the file path relative to the recordings directory
-                        let relative_path = match &s.file_path {
-                            Some(path) => Path::new(path)
-                                .strip_prefix(&recording_manager.get_recordings_path())
-                                .unwrap_or_else(|_| Path::new(path))
-                                .to_str()
-                                .unwrap_or_default(),
+                        // Extract just the filename for the URL
+                        let filename = match &s.file_path {
+                            Some(path) => {
+                                // Extract just the filename from the full path
+                                Path::new(path)
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| {
+                                        // Fallback to generating filename from timestamp
+                                        s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                                    })
+                            },
                             None => {
                                 // For database storage, generate a filename based on timestamp
-                                &s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                                s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
                             }
                         };
 
@@ -814,7 +820,7 @@ impl ControlHandler {
                             "id": format!("{}_{}", s.session_id, s.start_time.timestamp()),
                             "start_time": s.start_time,
                             "end_time": s.end_time,
-                            "url": format!("/api/recordings/{}/{}", camera_id, relative_path),
+                            "url": format!("/api/recordings/{}/{}", camera_id, filename),
                             "size_bytes": s.size_bytes,
                             "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
                         })

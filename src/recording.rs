@@ -74,6 +74,7 @@ impl RecordingManager {
         reason: Option<&str>,
         requested_duration: Option<i64>,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
+        camera_config: &crate::config::CameraConfig,
     ) -> crate::errors::Result<i64> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
@@ -108,7 +109,7 @@ impl RecordingManager {
         drop(frame_subscribers);
 
         // Start recording task
-        self.start_recording_task(camera_id.to_string(), session_id, frame_sender).await;
+        self.start_recording_task(camera_id.to_string(), session_id, frame_sender, camera_config.clone()).await;
 
         info!("Started recording for camera '{}' with session ID {}", camera_id, session_id);
         Ok(session_id)
@@ -239,6 +240,7 @@ impl RecordingManager {
         camera_id: String,
         session_id: i64,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
+        camera_config: crate::config::CameraConfig,
     ) {
         let database = match self.get_camera_database(&camera_id).await {
             Some(db) => db,
@@ -249,6 +251,9 @@ impl RecordingManager {
         };
         let config = self.config.clone();
         let active_recordings = self.active_recordings.clone();
+        
+        // Get the effective video storage type for this camera
+        let video_storage_type = self.get_storage_type_for_camera(&camera_config);
 
         tokio::spawn(async move {
             let mut tasks = Vec::new();
@@ -266,13 +271,14 @@ impl RecordingManager {
                 tasks.push(task);
             }
 
-            if config.video_storage_type != crate::config::Mp4StorageType::Disabled {
+            if video_storage_type != crate::config::Mp4StorageType::Disabled {
                 let segmenter_task = tokio::spawn(Self::video_segmenter_loop(
                     config.clone(),
                     database.clone(),
                     active_recordings.clone(),
                     camera_id.clone(),
                     frame_sender.subscribe(),
+                    video_storage_type,
                 ));
                 tasks.push(segmenter_task);
             }
@@ -456,6 +462,7 @@ impl RecordingManager {
     pub async fn restart_active_recordings_at_startup(
         &self,
         camera_frame_senders: &HashMap<String, Arc<broadcast::Sender<Bytes>>>,
+        camera_configs: &HashMap<String, crate::config::CameraConfig>,
     ) -> crate::errors::Result<()> {
         info!("Checking for active recordings to restart at startup...");
         
@@ -500,7 +507,12 @@ impl RecordingManager {
                         drop(frame_subscribers);
                         
                         // Start recording task
-                        self.start_recording_task(camera_id.clone(), session.id, frame_sender.clone()).await;
+                        if let Some(camera_config) = camera_configs.get(camera_id) {
+                            self.start_recording_task(camera_id.clone(), session.id, frame_sender.clone(), camera_config.clone()).await;
+                        } else {
+                            error!("Camera config not found for camera '{}', skipping recording restart", camera_id);
+                            continue;
+                        }
                         
                         restarted_count += 1;
                         info!(
@@ -565,6 +577,7 @@ impl RecordingManager {
         active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>,
         camera_id: String,
         mut frame_receiver: broadcast::Receiver<Bytes>,
+        video_storage_type: crate::config::Mp4StorageType,
     ) {
         let segment_duration = chrono::Duration::minutes(config.video_segment_minutes as i64);
         let mut segment_start_time = Utc::now();
@@ -597,6 +610,7 @@ impl RecordingManager {
                         let task_config = config.clone();
                         let task_database = database.clone();
                         let task_camera_id = camera_id.clone();
+                        let task_storage_type = video_storage_type.clone();
                         tokio::spawn(async move {
                             if let Err(e) = Self::create_video_segment(
                                 task_config,
@@ -606,6 +620,7 @@ impl RecordingManager {
                                 segment_start_time,
                                 end_time,
                                 frames_to_process,
+                                task_storage_type,
                             ).await {
                                 error!("Failed to create video segment: {}", e);
                             }
@@ -633,13 +648,14 @@ impl RecordingManager {
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
+        video_storage_type: crate::config::Mp4StorageType,
     ) -> crate::errors::Result<()> {
         if frames.is_empty() {
             return Ok(());
         }
 
         // Create video segment based on storage type
-        if config.video_storage_type == crate::config::Mp4StorageType::Database {
+        if video_storage_type == crate::config::Mp4StorageType::Database {
             // Store MP4 data in database as BLOB
             Self::create_database_video_segment(config.clone(), database, camera_id, session_id, start_time, end_time, frames).await
         } else {

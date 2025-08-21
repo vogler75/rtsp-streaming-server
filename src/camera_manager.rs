@@ -190,7 +190,7 @@ impl AppState {
         self.remove_camera(&camera_id).await?;
         
         // Add the new camera with updated config
-        self.add_camera(camera_id.clone(), camera_config).await?;
+        self.add_camera(camera_id.clone(), camera_config.clone()).await?;
         
         // Restart recording if it was previously active
         if let Some((requested_duration, reason)) = was_recording {
@@ -207,6 +207,7 @@ impl AppState {
                         Some(&reason),
                         requested_duration,
                         frame_sender,
+                        &camera_config,
                     ).await {
                         Ok(session_id) => {
                             info!("Successfully restarted recording for camera '{}' with session ID {}", camera_id, session_id);
