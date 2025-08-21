@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 20px;
+            line-height: 1.4;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #4CAF50;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #555;
+        }
+        
+        .panel h2 {
+            margin-bottom: 15px;
+            color: #81C784;
+            border-bottom: 1px solid #555;
+            padding-bottom: 5px;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .status-indicator.connected { background: #4CAF50; }
+        .status-indicator.disconnected { background: #f44336; }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #ccc;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+        
+        input:focus, select:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+        
+        button {
+            padding: 10px 15px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        button.danger {
+            background: #f44336;
+        }
+        
+        button.danger:hover {
+            background: #da190b;
+        }
+        
+        .logs {
+            height: 700px;
+            overflow-y: auto;
+            background: #000;
+            border: 1px solid #555;
+            padding: 10px;
+            font-size: 12px;
+            border-radius: 4px;
+        }
+        
+        .log-entry {
+            margin-bottom: 0;
+            padding: 1px 0;
+        }
+        
+        .log-sent { color: #81C784; }
+        .log-received { color: #64B5F6; }
+        .log-error { color: #F44336; }
+        .log-info { color: #FFB74D; }
+        
+        .timestamp {
+            color: #999;
+            font-size: 11px;
+        }
+        
+        .video-container {
+            text-align: center;
+            background: #000;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        #videoCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            border: 1px solid #555;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .datetime-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .datetime-input input {
+            flex: 1;
+        }
+        
+        .quick-times {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+            flex-wrap: wrap;
+        }
+        
+        .quick-times button {
+            padding: 5px 10px;
+            font-size: 11px;
+            margin: 0;
+        }
+        
+        .test-section {
+            background: #333;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .test-section h3 {
+            margin-bottom: 10px;
+            color: #81C784;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 WebSocket Test Interface</h1>
+        
+        <div class="video-container full-width">
+            <canvas id="videoCanvas" width="640" height="480"></canvas>
+            <div id="noVideo" style="color: #666;">No video stream - connect and send commands to see frames</div>
+        </div>
+        
+        <div class="grid">
+            <div class="panel">
+                <h2>Connection</h2>
+                <div class="status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <span id="statusText">Disconnected</span>
+                </div>
+                
+                <div class="form-group">
+                    <label>Camera Path:</label>
+                    <input type="text" id="cameraPath" value="/cam1" placeholder="/cam1">
+                </div>
+                
+                <div class="form-group">
+                    <label>Bearer Token (optional):</label>
+                    <input type="password" id="bearerToken" placeholder="Enter token if required">
+                </div>
+                
+                <button onclick="connect()">🔗 Connect</button>
+                <button onclick="disconnect()">❌ Disconnect</button>
+                <button onclick="clearLogs()">🗑️ Clear Logs</button>
+            </div>
+            
+            <div class="panel">
+                <h2>Current Frame Info</h2>
+                <div id="frameInfo">
+                    <div>Timestamp: <span id="currentTimestamp">-</span></div>
+                    <div>Frame Size: <span id="frameSize">-</span></div>
+                    <div>Frames Received: <span id="frameCount">0</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="panel">
+                <h2>Test Commands</h2>
+                
+                <div class="test-section">
+                    <h3>🎯 Goto Command</h3>
+                    <div class="form-group">
+                        <label>Timestamp:</label>
+                        <div class="datetime-input">
+                            <input type="datetime-local" id="gotoTimestamp">
+                            <button onclick="setGotoNow()">Now</button>
+                            <button onclick="setGoto5MinAgo()">-5min</button>
+                        </div>
+                        <div class="quick-times">
+                            <button onclick="setGoto1MinAgo()">-1min</button>
+                            <button onclick="setGoto10MinAgo()">-10min</button>
+                            <button onclick="setGoto1HourAgo()">-1hour</button>
+                        </div>
+                    </div>
+                    <button onclick="sendGoto()">📍 Send Goto</button>
+                </div>
+                
+                <div class="test-section">
+                    <h3>▶️ Play Commands</h3>
+                    <div class="form-group">
+                        <label>From Timestamp:</label>
+                        <div class="datetime-input">
+                            <input type="datetime-local" id="playFromTimestamp">
+                            <button onclick="setPlayFrom5MinAgo()">-5min</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>To Timestamp (optional):</label>
+                        <div class="datetime-input">
+                            <input type="datetime-local" id="playToTimestamp">
+                            <button onclick="setPlayToNow()">Now</button>
+                            <button onclick="setPlayTo1HourFromNow()">+1h</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Speed:</label>
+                        <select id="playSpeed">
+                            <option value="0.25">0.25x</option>
+                            <option value="0.5">0.5x</option>
+                            <option value="1" selected>1.0x</option>
+                            <option value="2">2.0x</option>
+                            <option value="5">5.0x</option>
+                            <option value="10">10.0x</option>
+                        </select>
+                    </div>
+                    <button onclick="sendPlay()">▶️ Start Play</button>
+                    <button onclick="sendStop()" class="danger">⏹️ Stop</button>
+                    <button onclick="sendLive()">🔴 Live</button>
+                </div>
+                
+                <div class="test-section">
+                    <h3>⚡ Speed Control</h3>
+                    <button onclick="sendSpeed(0.5)">0.5x</button>
+                    <button onclick="sendSpeed(1)">1.0x</button>
+                    <button onclick="sendSpeed(2)">2.0x</button>
+                    <button onclick="sendSpeed(5)">5.0x</button>
+                </div>
+                
+                <div class="test-section">
+                    <h3>🧪 Test Scenarios</h3>
+                    <button onclick="testRecentFrames()">Test Recent Frames</button>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h2>WebSocket Logs</h2>
+                <div class="logs" id="logs"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        let frameCount = 0;
+        let canvas = null;
+        let ctx = null;
+        // Removed: let commandInProgress = false;
+        let lastCommandTime = 0;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            canvas = document.getElementById('videoCanvas');
+            ctx = canvas.getContext('2d');
+            setDefaultTimestamps();
+            autoFillCameraPath();
+        });
+
+        function autoFillCameraPath() {
+            // Extract camera path from current URL
+            // URL format: /cam1/debug or /cam2/debug etc.
+            const currentPath = window.location.pathname;
+            const pathParts = currentPath.split('/');
+            
+            // Find the part before '/debug'
+            const debugIndex = pathParts.indexOf('debug');
+            if (debugIndex > 0 && pathParts[debugIndex - 1]) {
+                const cameraPath = '/' + pathParts[debugIndex - 1];
+                document.getElementById('cameraPath').value = cameraPath;
+                console.log('Auto-detected camera path:', cameraPath);
+            }
+        }
+
+        function setDefaultTimestamps() {
+            const now = new Date();
+            const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
+            
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(fiveMinAgo);
+            document.getElementById('playFromTimestamp').value = formatDateTimeLocal(fiveMinAgo);
+            document.getElementById('playToTimestamp').value = formatDateTimeLocal(now);
+        }
+
+        function formatDateTimeLocal(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('Already connected', 'info');
+                return;
+            }
+
+            const cameraPath = document.getElementById('cameraPath').value.trim();
+            if (!cameraPath) {
+                log('Please enter a camera path', 'error');
+                return;
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            let wsUrl = `${protocol}//${window.location.host}${cameraPath}/control`;
+            
+            const token = document.getElementById('bearerToken').value.trim();
+            if (token) {
+                wsUrl += `?token=${encodeURIComponent(token)}`;
+            }
+
+            log(`Connecting to: ${wsUrl.replace(/token=[^&]*/, 'token=***')}`, 'info');
+            
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = function() {
+                isConnected = true;
+                updateStatus('Connected', true);
+                log('WebSocket connected successfully', 'info');
+            };
+
+            ws.onmessage = function(event) {
+                if (event.data instanceof ArrayBuffer) {
+                    handleBinaryMessage(event.data);
+                } else {
+                    handleTextMessage(event.data);
+                }
+            };
+
+            ws.onclose = function() {
+                isConnected = false;
+                updateStatus('Disconnected', false);
+                log('WebSocket connection closed', 'info');
+            };
+
+            ws.onerror = function(error) {
+                log('WebSocket error: ' + error, 'error');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function handleBinaryMessage(data) {
+            const view = new Uint8Array(data);
+            const contentType = view[0];
+            const payload = view.slice(1);
+
+            if (contentType === 0x00) { // Video frame
+                handleVideoFrame(payload);
+            } else if (contentType === 0x01) { // JSON response
+                const json = new TextDecoder().decode(payload);
+                try {
+                    const response = JSON.parse(json);
+                    log('JSON Response: ' + json, 'received');
+                } catch (e) {
+                    log('Invalid JSON: ' + json, 'error');
+                }
+            }
+        }
+
+        function handleTextMessage(data) {
+            log('Text Message: ' + data, 'received');
+        }
+
+        function handleVideoFrame(data) {
+            if (data.length < 8) {
+                log('Invalid frame data (too short)', 'error');
+                return;
+            }
+
+            // Extract timestamp (first 8 bytes, little-endian)
+            const timestampMs = new DataView(data.buffer, data.byteOffset).getBigInt64(0, true);
+            const timestamp = new Date(Number(timestampMs));
+            const frameData = data.slice(8);
+
+            frameCount++;
+            document.getElementById('frameCount').textContent = frameCount;
+            document.getElementById('currentTimestamp').textContent = timestamp.toLocaleString();
+            document.getElementById('frameSize').textContent = formatBytes(frameData.length);
+
+            // Display frame on canvas
+            const blob = new Blob([frameData], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            
+            img.onload = function() {
+                document.getElementById('noVideo').style.display = 'none';
+                canvas.style.display = 'block';
+                
+                // Scale image to fit canvas
+                const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+                const scaledWidth = img.width * scale;
+                const scaledHeight = img.height * scale;
+                const x = (canvas.width - scaledWidth) / 2;
+                const y = (canvas.height - scaledHeight) / 2;
+                
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+
+            log(`Frame received: ${timestamp.toLocaleTimeString()} (${formatBytes(frameData.length)})`, 'received');
+        }
+
+        function sendCommand(command) {
+            if (!isConnected || !ws) {
+                log('Not connected to WebSocket', 'error');
+                return false;
+            }
+
+            // Never block commands - removed progress check
+
+            const json = JSON.stringify(command);
+            ws.send(json);
+            log('Sent: ' + json, 'sent');
+
+            // Removed command progress tracking
+
+            return true;
+        }
+
+        function setCommandInProgress(inProgress) {
+            // Never block commands - removed all progress tracking
+        }
+
+        function updateCommandButtons() {
+            // Never disable buttons - keep them always active
+        }
+
+        // Command functions
+        function sendGoto() {
+            const timestamp = document.getElementById('gotoTimestamp').value;
+            if (!timestamp) {
+                log('Please select a timestamp for goto', 'error');
+                return;
+            }
+            
+            const isoTimestamp = new Date(timestamp).toISOString();
+            sendCommand({
+                cmd: 'goto',
+                timestamp: isoTimestamp
+            });
+        }
+
+        function sendPlay() {
+            const fromTimestamp = document.getElementById('playFromTimestamp').value;
+            if (!fromTimestamp) {
+                log('Please select a from timestamp', 'error');
+                return;
+            }
+
+            const command = {
+                cmd: 'start',
+                from: new Date(fromTimestamp).toISOString()
+            };
+
+            const toTimestamp = document.getElementById('playToTimestamp').value;
+            if (toTimestamp) {
+                command.to = new Date(toTimestamp).toISOString();
+            }
+
+            const speed = parseFloat(document.getElementById('playSpeed').value);
+            if (speed !== 1.0) {
+                command.speed = speed;
+            }
+
+            sendCommand(command);
+        }
+
+        function sendStop() {
+            sendCommand({ cmd: 'stop' });
+        }
+
+        function sendLive() {
+            sendCommand({ cmd: 'live' });
+        }
+
+        function sendSpeed(speed) {
+            sendCommand({ cmd: 'speed', speed: speed });
+        }
+
+        // Quick timestamp setters
+        function setGotoNow() {
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(new Date());
+        }
+
+        function setGoto1MinAgo() {
+            const time = new Date(Date.now() - 1 * 60 * 1000);
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(time);
+        }
+
+        function setGoto5MinAgo() {
+            const time = new Date(Date.now() - 5 * 60 * 1000);
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(time);
+        }
+
+        function setGoto10MinAgo() {
+            const time = new Date(Date.now() - 10 * 60 * 1000);
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(time);
+        }
+
+        function setGoto1HourAgo() {
+            const time = new Date(Date.now() - 60 * 60 * 1000);
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(time);
+        }
+
+        function setPlayFrom5MinAgo() {
+            const time = new Date(Date.now() - 5 * 60 * 1000);
+            document.getElementById('playFromTimestamp').value = formatDateTimeLocal(time);
+        }
+
+        function setPlayToNow() {
+            document.getElementById('playToTimestamp').value = formatDateTimeLocal(new Date());
+        }
+
+        function setPlayTo1HourFromNow() {
+            const time = new Date(Date.now() + 60 * 60 * 1000);
+            document.getElementById('playToTimestamp').value = formatDateTimeLocal(time);
+        }
+
+        // Test scenarios
+        function testRecentFrames() {
+            log('🧪 Testing recent frames (should use live buffer cache)', 'info');
+            const now = new Date();
+            const twoMinAgo = new Date(now.getTime() - 2 * 60 * 1000);
+            
+            document.getElementById('gotoTimestamp').value = formatDateTimeLocal(twoMinAgo);
+            setTimeout(() => sendGoto(), 100);
+        }
+
+        // Removed testMp4Conversion and testCachePerformance functions
+
+        // Utility functions
+        function updateStatus(text, connected) {
+            document.getElementById('statusText').textContent = text;
+            document.getElementById('statusIndicator').className = 
+                `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+            
+            const logs = document.getElementById('logs');
+            logs.appendChild(logEntry);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+            frameCount = 0;
+            document.getElementById('frameCount').textContent = '0';
+        }
+    </script>
+</body>
+</html>
