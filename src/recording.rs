@@ -504,8 +504,8 @@ impl RecordingManager {
             let database = self.get_camera_database(camera_id).await
                 .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
             
-            // Find MP4 segments for this time range
-            let segments = database.list_video_segments(camera_id, window_start, window_end).await?;
+            // Find MP4 segments for this time range (with MP4 data loaded for conversion)
+            let segments = database.list_video_segments_with_data(camera_id, window_start, window_end).await?;
             
             if !segments.is_empty() {
                 // Convert and cache the window

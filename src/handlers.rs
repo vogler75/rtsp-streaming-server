@@ -49,6 +49,11 @@ async fn serve_test_with_mode(is_full_mode: bool) -> axum::response::Html<String
     axum::response::Html(html)
 }
 
+pub async fn serve_debug_page() -> axum::response::Html<String> {
+    let html = include_str!("../static/debug.html").to_string();
+    axum::response::Html(html)
+}
+
 // Dynamic handlers that check current state instead of using captured state
 pub async fn dynamic_camera_stream_handler(
     ws: Option<axum::extract::WebSocketUpgrade>,

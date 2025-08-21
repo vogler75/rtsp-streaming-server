@@ -347,7 +347,6 @@
                     
                     <div id="videoContainer">
                         <canvas id="videoCanvas"></canvas>
-                        <video id="videoPlayer" style="display: none; width: 100%; height: 100%;" controls></video>
                         <div id="statusMessage">Ready for commands (responses logged to console)</div>
                         
                         <div class="video-overlay-controls">
@@ -708,10 +707,6 @@
                     return this.fetchVideoSegments();
                 }
 
-                // Show canvas, hide video player for frame-by-frame
-                document.getElementById('videoPlayer').style.display = 'none';
-                document.getElementById('videoCanvas').style.display = 'block';
-
                 const from = document.getElementById('fromDate').value;
                 const to = document.getElementById('toDate').value;
                 if (!from || !to) {
@@ -871,7 +866,7 @@
                     const reasonText = seg.recording_reason && seg.recording_reason !== 'Unknown' ? `<br>📝 <em>${seg.recording_reason}</em>` : '';
                     item.innerHTML = `<strong>${startTime} - ${endTime}</strong>${durationText}<br>${sizeMB} MB${reasonText}`;
                     item.addEventListener('click', () => {
-                        this.playVideoSegment(seg.url);
+                        this.playMp4Segment(seg);
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
                         item.classList.add('selected');
                     });
@@ -879,28 +874,43 @@
                 });
             }
 
-            playVideoSegment(url) {
-                const videoPlayer = document.getElementById('videoPlayer');
-                const canvas = document.getElementById('videoCanvas');
-
-                // Stop any active stream (live or replay) before playing MP4
-                if (this.streamState === 'live' || this.streamState === 'replaying') {
-                    this.sendCommand({ cmd: 'stop' });
-                    this.streamState = 'stopped';
-                    this.updatePlayerUI();
-                }
-
-                canvas.style.display = 'none';
-                videoPlayer.style.display = 'block';
-
-                videoPlayer.src = url;
-                videoPlayer.play();
+            playMp4Segment(segment) {
+                // Stop any current stream first to ensure clean state
+                this.sendCommand({ cmd: 'stop' });
+                
+                // Clear any previous seek state since we're starting a new segment
+                this.lastSeekPosition = null;
+                this.wasLiveBeforeSeek = false;
+                
+                // Set up timeline for the MP4 segment time range
+                this.timelineStart = new Date(segment.start_time);
+                this.timelineEnd = new Date(segment.end_time);
+                document.getElementById('timelineStart').textContent = this.timelineStart.toLocaleTimeString();
+                document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
+                document.getElementById('timelineSlider').disabled = false;
+                
+                // Create a fake recording object for compatibility with existing replay logic
+                this.selectedRecording = {
+                    start_time: segment.start_time,
+                    end_time: segment.end_time,
+                    id: `MP4-${segment.start_time}`,
+                    reason: segment.recording_reason || 'MP4 Segment'
+                };
+                
+                // Start playing the MP4 segment using the same replay system as frame recordings
+                const command = {
+                    cmd: 'start',
+                    from: segment.start_time,
+                    to: segment.end_time
+                };
+                this.sendCommand(command);
+                
+                // Update UI to show we're playing
+                this.streamState = 'replaying';
+                this.updatePlayerUI();
             }
 
             startReplay(recording) {
-                // Show canvas, hide video player
-                document.getElementById('videoPlayer').style.display = 'none';
-                document.getElementById('videoCanvas').style.display = 'block';
 
                 // Always stop any current stream first to ensure clean state
                 this.sendCommand({ cmd: 'stop' });
@@ -931,16 +941,6 @@
             }
 
             startLiveStream() {
-                // Switch back to canvas if we were playing video segments
-                const videoPlayer = document.getElementById('videoPlayer');
-                const canvas = document.getElementById('videoCanvas');
-                if (videoPlayer.style.display !== 'none') {
-                    videoPlayer.pause();
-                    videoPlayer.src = '';
-                    videoPlayer.style.display = 'none';
-                    canvas.style.display = 'block';
-                }
-
                 this.sendCommand({ cmd: 'live' });
                 this.streamState = 'live';
                 this.updatePlayerUI();
@@ -1197,19 +1197,11 @@
             }
 
             updateRecordingControlsVisibility() {
-                const mode = document.querySelector('input[name="playbackMode"]:checked').value;
+                // No longer need to hide/show controls since we always use the same playback system
                 const videoOverlayControls = document.querySelector('.video-overlay-controls');
                 const statusMessage = document.getElementById('statusMessage');
-                
-                if (mode === 'segments') {
-                    // Hide timeline/playback controls overlay and status message in video segments mode
-                    videoOverlayControls.style.display = 'none';
-                    statusMessage.style.display = 'none';
-                } else {
-                    // Show timeline/playback controls overlay and status message in frame-by-frame mode
-                    videoOverlayControls.style.display = 'block';
-                    statusMessage.style.display = 'block';
-                }
+                videoOverlayControls.style.display = 'block';
+                statusMessage.style.display = 'block';
             }
 
             updatePlayerUI() {

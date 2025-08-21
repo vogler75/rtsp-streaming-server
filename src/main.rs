@@ -437,6 +437,10 @@ async fn main() -> Result<()> {
         let test_path = format!("{}/test", path);
         app = app.route(&test_path, axum::routing::get(handlers::serve_test_page));
 
+        // Debug endpoint: /<camera_path>/debug serves debug.html
+        let debug_path = format!("{}/debug", path);
+        app = app.route(&debug_path, axum::routing::get(handlers::serve_debug_page));
+
         // REST API endpoints: /<camera_path>/control/*
         if stream_info.recording_manager.is_some() {
             let api_info = stream_info.clone();

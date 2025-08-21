@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, Row, FromRow};
-use tracing::error;
+use tracing::{error, debug};
 use crate::errors::Result;
 
 // Table name constants for easy configuration
@@ -176,6 +176,14 @@ pub trait DatabaseProvider: Send + Sync {
         camera_id: &str,
         filename: &str,
     ) -> Result<Option<VideoSegment>>;
+
+    /// List video segments with MP4 data loaded (for frame conversion)
+    async fn list_video_segments_with_data(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<VideoSegment>>;
 }
 
 pub struct SqliteDatabase {
@@ -1156,5 +1164,72 @@ impl DatabaseProvider for SqliteDatabase {
         } else {
             Ok(None)
         }
+    }
+
+    async fn list_video_segments_with_data(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<VideoSegment>> {
+        let start_time = std::time::Instant::now();
+        
+        let query_str = format!(r#"
+            SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data,
+                   rs.reason as recording_reason, rs.camera_id
+            FROM {} vs
+            LEFT JOIN {} rs ON vs.session_id = rs.id
+            WHERE rs.camera_id = ? AND vs.end_time > ? AND vs.start_time < ?
+            ORDER BY vs.start_time ASC
+            "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
+        
+        debug!(
+            "Executing SQL query for list_video_segments_with_data:\n{}\nParameters: camera_id='{}', from='{}', to='{}'",
+            query_str, camera_id, from, to
+        );
+        
+        let rows = sqlx::query(&query_str)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
+        
+        let elapsed = start_time.elapsed();
+        let row_count = rows.len();
+        
+        debug!(
+            "Query completed in {:.3}ms, returned {} rows with MP4 data",
+            elapsed.as_secs_f64() * 1000.0,
+            row_count
+        );
+
+        let mut segments = Vec::new();
+        for row in rows {
+            let mp4_data: Option<Vec<u8>> = row.get("mp4_data");
+            let file_path: Option<String> = row.get("file_path");
+            
+            debug!(
+                "Segment: start={}, end={}, has_file_path={}, has_mp4_data={}, size_bytes={}",
+                row.get::<DateTime<Utc>, _>("start_time"),
+                row.get::<DateTime<Utc>, _>("end_time"),
+                file_path.is_some(),
+                mp4_data.is_some(),
+                row.get::<i64, _>("size_bytes")
+            );
+            
+            segments.push(VideoSegment {
+                session_id: row.get("session_id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                file_path,
+                size_bytes: row.get("size_bytes"),
+                mp4_data, // MP4 data IS loaded for conversion
+                recording_reason: row.get("recording_reason"),
+                camera_id: row.get("camera_id"),
+            });
+        }
+
+        Ok(segments)
     }
 }

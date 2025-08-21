@@ -68,8 +68,8 @@ impl CachedFrameStream {
         // Calculate window range
         let (window_start, window_end) = UnifiedFrameCache::calculate_window_range(timestamp);
         
-        // Find MP4 segments that overlap with this window
-        let segments = self.database.list_video_segments(
+        // Find MP4 segments that overlap with this window (with MP4 data loaded)
+        let segments = self.database.list_video_segments_with_data(
             &self.camera_id,
             window_start,
             window_end,

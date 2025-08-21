@@ -320,6 +320,26 @@ impl UnifiedFrameCache {
             camera_id, window_id, window_start, window_end
         );
 
+        debug!("Found {} MP4 segments for conversion:", segments.len());
+        for (i, seg) in segments.iter().enumerate() {
+            debug!(
+                "Segment {}: start={}, end={}, session_id={}, has_file_path={}, has_mp4_data={}, size_bytes={}",
+                i + 1,
+                seg.start_time,
+                seg.end_time,
+                seg.session_id,
+                seg.file_path.is_some(),
+                seg.mp4_data.is_some(),
+                seg.size_bytes
+            );
+            if let Some(ref path) = seg.file_path {
+                debug!("  File path: {}", path);
+            }
+            if seg.mp4_data.is_some() {
+                debug!("  MP4 data length: {} bytes", seg.mp4_data.as_ref().unwrap().len());
+            }
+        }
+
         // Create a new cache window
         let mut window = CacheWindow::new(window_start, window_end, CacheSource::Mp4Conversion);
 
