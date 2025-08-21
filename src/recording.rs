@@ -567,6 +567,24 @@ impl RecordingManager {
         }
     }
 
+    pub async fn list_video_segments_filtered(
+        &self,
+        camera_id: &str,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        reason: Option<&str>,
+        limit: i64,
+        sort_order: &str,
+    ) -> crate::errors::Result<Vec<VideoSegment>> {
+        if let Some(database) = self.get_camera_database(camera_id).await {
+            database.list_video_segments_filtered(camera_id, from, to, reason, limit, sort_order).await
+        } else {
+            Err(crate::errors::StreamError::database(format!(
+                "No database found for camera '{}'", camera_id
+            )).into())
+        }
+    }
+
     pub fn get_recordings_path(&self) -> &str {
         &self.config.database_path
     }

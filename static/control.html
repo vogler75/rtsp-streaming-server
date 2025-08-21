@@ -758,12 +758,29 @@
                 const toDate = new Date(to + 'T23:59:59');
 
                 const sortOrder = document.getElementById('sortOrder').value;
-                this.sendCommand({
-                    cmd: 'list_segments',
+                
+                // Use REST API for MP4 segments
+                const baseUrl = window.location.origin + window.location.pathname.replace('/control', '');
+                const params = new URLSearchParams({
                     from: fromDate.toISOString(),
                     to: toDate.toISOString(),
-                    sort_order: sortOrder,
+                    sort_order: sortOrder
                 });
+                
+                const url = `${baseUrl}/recordings/mp4/segments?${params}`;
+                
+                fetch(url)
+                    .then(response => response.json())
+                    .then(result => {
+                        if (result.status === 'success') {
+                            this.displayVideoSegments(result.data.segments || []);
+                        } else {
+                            this.logJson({ error: 'Failed to fetch MP4 segments', details: result });
+                        }
+                    })
+                    .catch(error => {
+                        this.logJson({ error: 'Network error fetching MP4 segments', details: error.message });
+                    });
             }
 
             displayRecordings(recordings) {

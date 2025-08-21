@@ -153,6 +153,16 @@ pub trait DatabaseProvider: Send + Sync {
         to: DateTime<Utc>,
     ) -> Result<Vec<VideoSegment>>;
 
+    async fn list_video_segments_filtered(
+        &self,
+        camera_id: &str,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        reason: Option<&str>,
+        limit: i64,
+        sort_order: &str,
+    ) -> Result<Vec<VideoSegment>>;
+
     async fn delete_old_video_segments(
         &self,
         older_than: DateTime<Utc>,
@@ -899,6 +909,100 @@ impl DatabaseProvider for SqliteDatabase {
         .bind(from)
         .fetch_all(&self.pool)
         .await?;
+        
+        let elapsed = start_time.elapsed();
+        let row_count = rows.len();
+        
+        tracing::debug!(
+            "Query completed in {:.3}ms, returned {} rows",
+            elapsed.as_secs_f64() * 1000.0,
+            row_count
+        );
+
+        let mut segments = Vec::new();
+        for row in rows {
+            segments.push(VideoSegment {
+                session_id: row.get("session_id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                file_path: row.get("file_path"),
+                size_bytes: row.get("size_bytes"),
+                mp4_data: None,  // Not loaded for listing performance
+                recording_reason: row.get("recording_reason"),
+                camera_id: row.get("camera_id"),
+            });
+        }
+
+        Ok(segments)
+    }
+
+    async fn list_video_segments_filtered(
+        &self,
+        camera_id: &str,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        reason: Option<&str>,
+        limit: i64,
+        sort_order: &str,
+    ) -> Result<Vec<VideoSegment>> {
+        let start_time = std::time::Instant::now();
+        
+        let mut conditions = vec!["rs.camera_id = ?"];
+        let mut bind_values: Vec<Box<dyn std::any::Any + Send>> = vec![Box::new(camera_id.to_string())];
+
+        if let Some(from_time) = from {
+            conditions.push("vs.end_time > ?");
+            bind_values.push(Box::new(from_time));
+        }
+
+        if let Some(to_time) = to {
+            conditions.push("vs.start_time < ?");
+            bind_values.push(Box::new(to_time));
+        }
+
+        if let Some(reason_filter) = reason {
+            conditions.push("rs.reason LIKE ?");
+            bind_values.push(Box::new(format!("%{}%", reason_filter)));
+        }
+
+        let where_clause = format!("WHERE {}", conditions.join(" AND "));
+        
+        let order_direction = match sort_order {
+            "oldest" => "ASC",
+            _ => "DESC", // default to newest first
+        };
+
+        let query_str = format!(r#"
+            SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
+                   rs.reason as recording_reason, rs.camera_id
+            FROM {} vs
+            LEFT JOIN {} rs ON vs.session_id = rs.id
+            {}
+            ORDER BY vs.start_time {}
+            LIMIT ?
+            "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS, where_clause, order_direction);
+        
+        tracing::debug!(
+            "Executing SQL query for list_video_segments_filtered:\n{}\nParameters: camera_id='{}', from='{:?}', to='{:?}', reason='{:?}', limit={}, sort_order='{}'",
+            query_str, camera_id, from, to, reason, limit, sort_order
+        );
+        
+        let mut query = sqlx::query(&query_str);
+        
+        // Bind parameters in order
+        query = query.bind(camera_id);
+        if let Some(from_time) = from {
+            query = query.bind(from_time);
+        }
+        if let Some(to_time) = to {
+            query = query.bind(to_time);
+        }
+        if let Some(reason_filter) = reason {
+            query = query.bind(format!("%{}%", reason_filter));
+        }
+        query = query.bind(limit);
+        
+        let rows = query.fetch_all(&self.pool).await?;
         
         let elapsed = start_time.elapsed();
         let row_count = rows.len();

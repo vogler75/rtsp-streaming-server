@@ -32,6 +32,21 @@ pub struct GetFramesQuery {
     pub to: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GetMp4SegmentsQuery {
+    pub from: Option<chrono::DateTime<chrono::Utc>>,
+    pub to: Option<chrono::DateTime<chrono::Utc>>,
+    pub reason: Option<String>,
+    #[serde(default = "default_segments_limit")]
+    pub limit: i64,
+    #[serde(default = "default_sort_order_recordings")]
+    pub sort_order: String,
+}
+
+fn default_segments_limit() -> i64 {
+    1000
+}
+
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T> {
     status: String,
@@ -296,6 +311,74 @@ pub async fn api_get_recording_size(
         Err(_) => {
             (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
              Json(ApiResponse::<()>::error("Failed to get database size", 500)))
+             .into_response()
+        }
+    }
+}
+
+pub async fn api_list_mp4_segments(
+    headers: axum::http::HeaderMap,
+    Query(query): Query<GetMp4SegmentsQuery>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    match recording_manager.list_video_segments_filtered(
+        &camera_id,
+        query.from,
+        query.to,
+        query.reason.as_deref(),
+        query.limit,
+        &query.sort_order,
+    ).await {
+        Ok(segments) => {
+            let segments_data: Vec<serde_json::Value> = segments
+                .into_iter()
+                .map(|s| {
+                    // Calculate duration from start and end times
+                    let duration_seconds = s.end_time.signed_duration_since(s.start_time).num_seconds();
+                    
+                    serde_json::json!({
+                        "id": format!("{}_{}", s.session_id, s.start_time.timestamp()),
+                        "session_id": s.session_id,
+                        "start_time": s.start_time,
+                        "end_time": s.end_time,
+                        "duration_seconds": duration_seconds,
+                        "file_path": s.file_path,
+                        "size_bytes": s.size_bytes,
+                        "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
+                        "camera_id": s.camera_id,
+                        "url": s.file_path
+                            .as_ref()
+                            .and_then(|path| std::path::Path::new(path).file_name())
+                            .and_then(|name| name.to_str())
+                            .map(|filename| format!("/api/recordings/{}/{}", camera_id, filename))
+                            .unwrap_or_default()
+                    })
+                })
+                .collect();
+
+            let data = serde_json::json!({
+                "segments": segments_data,
+                "count": segments_data.len(),
+                "camera_id": camera_id,
+                "query": {
+                    "from": query.from,
+                    "to": query.to,
+                    "reason": query.reason,
+                    "limit": query.limit,
+                    "sort_order": query.sort_order
+                }
+            });
+            Json(ApiResponse::success(data)).into_response()
+        }
+        Err(_) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error("Failed to list MP4 segments", 500)))
              .into_response()
         }
     }

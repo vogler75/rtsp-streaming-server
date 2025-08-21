@@ -514,6 +514,19 @@ async fn main() -> Result<()> {
                     size_info.recording_manager.clone().unwrap()
                 )
             ));
+
+            // List MP4 segments
+            let segments_path = format!("{}/recordings/mp4/segments", path);
+            let segments_info = api_info.clone();
+            app = app.route(&segments_path, axum::routing::get(
+                move |headers, query| api_recording::api_list_mp4_segments(
+                    headers,
+                    query,
+                    segments_info.camera_id.clone(),
+                    segments_info.camera_config.clone(),
+                    segments_info.recording_manager.clone().unwrap()
+                )
+            ));
         }
 
         // PTZ control endpoints (handlers will validate if enabled in camera config)

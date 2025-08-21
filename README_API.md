@@ -40,6 +40,9 @@ This document provides a hierarchical overview of the available REST API endpoin
   GET  /recording/size                    # Recording DB size
   GET  /recordings/:session_id/frames     # Frames metadata for a recording
 
+<camera_path>/recordings
+  GET  /mp4/segments                      # List MP4 video segments
+
   # PTZ API (if enabled for the camera)
   POST /ptz/move                          # Continuous pan/tilt/zoom
   POST /ptz/stop                          # Stop movement
@@ -181,6 +184,61 @@ Gets the total size of the recording database for the camera.
       "size_gb": 0.009765625
     }
   }
+  ```
+
+### `GET /<camera_path>/recordings/mp4/segments`
+
+Lists MP4 video segments for the camera with advanced filtering options.
+
+- **Method**: `GET`
+- **Path**: `/<camera_path>/recordings/mp4/segments` (e.g., `/cam1/recordings/mp4/segments`)
+- **Query Parameters**:
+  - `from`: (Optional) ISO 8601 timestamp to filter segments that end after this time.
+  - `to`: (Optional) ISO 8601 timestamp to filter segments that start before this time.
+  - `reason`: (Optional) Filter by recording reason using SQL wildcards (e.g., `Manual` or `%alarm%`).
+  - `limit`: (Optional) Maximum number of results to return (default: 1000).
+  - `sort_order`: (Optional) Sort order: `newest` (default) or `oldest`.
+- **Response**:
+  ```json
+  {
+    "status": "success",
+    "data": {
+      "segments": [
+        {
+          "id": "2_1724214554",
+          "session_id": 2,
+          "start_time": "2025-08-21T05:39:14.610108Z",
+          "end_time": "2025-08-21T06:00:00.084373Z",
+          "duration_seconds": 1245,
+          "file_path": "recordings/cam1/2025/08/21/2025-08-21T05-39-14Z.mp4",
+          "size_bytes": 25653248,
+          "recording_reason": "Manual recording started from dashboard",
+          "camera_id": "cam1",
+          "url": "/api/recordings/cam1/2025-08-21T05-39-14Z.mp4"
+        }
+      ],
+      "count": 1,
+      "camera_id": "cam1",
+      "query": {
+        "from": "2025-08-21T00:00:00.000Z",
+        "to": "2025-08-21T23:59:59.999Z",
+        "reason": null,
+        "limit": 1000,
+        "sort_order": "newest"
+      }
+    }
+  }
+  ```
+- **Example Usage**:
+  ```bash
+  # Get all segments for cam1
+  GET /cam1/recordings/mp4/segments
+  
+  # Get segments with date range and reason filter
+  GET /cam1/recordings/mp4/segments?from=2025-08-21T00:00:00Z&to=2025-08-21T23:59:59Z&reason=Manual&limit=100
+  
+  # Search for segments containing "alarm" in the reason
+  GET /cam1/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
   ```
 
 ### PTZ Endpoints (if enabled)

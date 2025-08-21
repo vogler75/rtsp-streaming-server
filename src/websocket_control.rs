@@ -400,7 +400,7 @@ impl ControlHandler {
             ControlCommand::GoToTimestamp { timestamp } => {
                 Self::handle_goto_timestamp(camera_id, timestamp, recording_manager, sender).await
             }
-            ControlCommand::ListSegments { from, to, sort_order } => {
+            ControlCommand::ListSegments { from, to, sort_order } => { // TODO: deprecated
                 Self::handle_list_segments(camera_id, from, to, &sort_order, recording_manager).await
             }
         }
