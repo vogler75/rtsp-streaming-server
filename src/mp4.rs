@@ -1,11 +1,44 @@
 use axum::response::IntoResponse;
 use chrono::{DateTime, Datelike, Utc};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use serde::Deserialize;
 use tokio::process::Command;
 
 use crate::{config, recording::RecordingManager};
 use crate::AppState;
+
+/// Cleanup old HLS directories on server startup
+pub async fn cleanup_old_hls_directories() {
+    info!("Starting cleanup of old HLS directories...");
+    
+    let tmp_dir = "/tmp";
+    let mut entries = match tokio::fs::read_dir(tmp_dir).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            warn!("Failed to read /tmp directory for HLS cleanup: {}", e);
+            return;
+        }
+    };
+    
+    let mut cleanup_count = 0;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Some(name) = entry.file_name().to_str() {
+            if name.starts_with("hls_") {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Err(e) = tokio::fs::remove_dir_all(&path).await {
+                        warn!("Failed to remove old HLS directory {:?}: {}", path, e);
+                    } else {
+                        cleanup_count += 1;
+                        info!("Removed old HLS directory: {:?}", path);
+                    }
+                }
+            }
+        }
+    }
+    
+    info!("HLS directory cleanup completed: {} directories removed", cleanup_count);
+}
 
 pub fn parse_range_header(range_header: Option<&axum::http::HeaderValue>) -> Option<(u64, Option<u64>)> {
     if let Some(range_value) = range_header {
@@ -287,8 +320,39 @@ pub async fn serve_hls_playlist(
     let storage_type = recording_manager.get_storage_type_for_camera(camera_config);
     drop(camera_configs);
     
-    // Create HLS output directory
+    // Create or reuse HLS output directory
     let hls_dir = format!("/tmp/hls_{}", playlist_id);
+    let playlist_path = format!("{}/playlist.m3u8", hls_dir);
+    
+    // Check if we already have a cached HLS playlist for this exact request
+    if tokio::fs::metadata(&playlist_path).await.is_ok() {
+        info!("Reusing cached HLS playlist for {}", playlist_id);
+        
+        // Read the cached playlist
+        let cached_playlist = match tokio::fs::read_to_string(&playlist_path).await {
+            Ok(content) => content,
+            Err(e) => {
+                warn!("Failed to read cached HLS playlist: {}", e);
+                // Fall through to regenerate
+                String::new()
+            }
+        };
+        
+        if !cached_playlist.is_empty() {
+            return axum::response::Response::builder()
+                .status(axum::http::StatusCode::OK)
+                .header("Content-Type", "application/vnd.apple.mpegurl")
+                .header("Cache-Control", "public, max-age=1800") // Cache for 30 minutes
+                .header("Access-Control-Allow-Origin", "*")
+                .body(axum::body::Body::from(cached_playlist))
+                .unwrap_or_else(|e| {
+                    error!("Failed to create cached HLS response: {}", e);
+                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create playlist").into_response()
+                });
+        }
+    }
+    
+    // Create directory if it doesn't exist
     if let Err(e) = tokio::fs::create_dir_all(&hls_dir).await {
         error!("Failed to create HLS directory: {}", e);
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create HLS directory").into_response();
@@ -356,7 +420,7 @@ pub async fn serve_hls_playlist(
     }
 
     // Generate HLS segments using FFmpeg
-    let playlist_path = format!("{}/playlist.m3u8", hls_dir);
+    // playlist_path is already defined above
     let mut hls_cmd = Command::new("ffmpeg");
     hls_cmd.args([
         "-f", "concat",
@@ -437,10 +501,23 @@ pub async fn serve_hls_playlist(
     
     info!("Generated HLS playlist with {} segments", input_files.len());
 
+    // Schedule cleanup of HLS directory after cache expires (30 minutes)
+    // This prevents /tmp from filling up with old HLS segments
+    let hls_dir_cleanup = hls_dir.clone();
+    tokio::spawn(async move {
+        // Wait for cache expiration time + 5 minutes buffer
+        tokio::time::sleep(tokio::time::Duration::from_secs(35 * 60)).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&hls_dir_cleanup).await {
+            warn!("Failed to cleanup HLS directory {}: {}", hls_dir_cleanup, e);
+        } else {
+            info!("Cleaned up expired HLS cache directory: {}", hls_dir_cleanup);
+        }
+    });
+
     axum::response::Response::builder()
         .status(axum::http::StatusCode::OK)
         .header("Content-Type", "application/vnd.apple.mpegurl")
-        .header("Cache-Control", "no-cache")
+        .header("Cache-Control", "public, max-age=1800") // Cache for 30 minutes
         .header("Access-Control-Allow-Origin", "*")
         .body(axum::body::Body::from(m3u8_content))
         .unwrap_or_else(|e| {

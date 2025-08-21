@@ -155,6 +155,9 @@ async fn main() -> Result<()> {
     };
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
+    
+    // Cleanup old HLS directories from previous runs
+    mp4::cleanup_old_hls_directories().await;
 
     // Initialize MQTT if enabled
     let mqtt_handle: Option<MqttHandle> = if let Some(mqtt_config) = config.mqtt.clone() {
