@@ -820,7 +820,7 @@ impl ControlHandler {
                             "id": format!("{}_{}", s.session_id, s.start_time.timestamp()),
                             "start_time": s.start_time,
                             "end_time": s.end_time,
-                            "url": format!("/api/recordings/{}/{}", camera_id, filename),
+                            "url": format!("/api/recordings/{}/mp4/segments/{}", camera_id, filename),
                             "size_bytes": s.size_bytes,
                             "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
                         })

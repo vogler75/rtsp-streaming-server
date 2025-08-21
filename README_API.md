@@ -209,11 +209,10 @@ Lists MP4 video segments for the camera with advanced filtering options.
           "start_time": "2025-08-21T05:39:14.610108Z",
           "end_time": "2025-08-21T06:00:00.084373Z",
           "duration_seconds": 1245,
-          "file_path": "recordings/cam1/2025/08/21/2025-08-21T05-39-14Z.mp4",
+          "url": "/api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4",
           "size_bytes": 25653248,
           "recording_reason": "Manual recording started from dashboard",
-          "camera_id": "cam1",
-          "url": "/api/recordings/cam1/2025-08-21T05-39-14Z.mp4"
+          "camera_id": "cam1"
         }
       ],
       "count": 1,
@@ -238,6 +237,28 @@ Lists MP4 video segments for the camera with advanced filtering options.
   
   # Search for segments containing "alarm" in the reason
   GET /cam1/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
+  ```
+
+### Stream MP4 Recording
+
+- **Endpoint**: `GET /api/recordings/<camera_id>/mp4/segments/<filename>`
+- **Description**: Stream an MP4 recording file for playback. Supports both database and filesystem storage.
+- **Authentication**: None required (public endpoint)
+- **Headers**:
+  - `Range` (optional): Supports byte-range requests for video seeking (e.g., `bytes=0-1024`)
+- **Response**: 
+  - `200 OK`: Full video file
+  - `206 Partial Content`: When Range header is provided
+  - `404 Not Found`: Recording not found
+  - Headers include: `Content-Type: video/mp4`, `Accept-Ranges: bytes`, `Cache-Control: public, max-age=3600`
+- **Example Usage**:
+  ```bash
+  # Stream full MP4 file
+  GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
+  
+  # Stream with byte range (for seeking)
+  GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
+  Range: bytes=1024-2048
   ```
 
 ### PTZ Endpoints (if enabled)

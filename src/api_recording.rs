@@ -366,7 +366,7 @@ pub async fn api_list_mp4_segments(
                         "start_time": s.start_time,
                         "end_time": s.end_time,
                         "duration_seconds": duration_seconds,
-                        "url": format!("/api/recordings/{}/{}", camera_id, filename),
+                        "url": format!("/api/recordings/{}/mp4/segments/{}", camera_id, filename),
                         "size_bytes": s.size_bytes,
                         "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
                         "camera_id": s.camera_id
