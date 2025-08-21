@@ -836,8 +836,23 @@
                     const endTime = new Date(seg.end_time).toLocaleTimeString();
                     const sizeMB = (seg.size_bytes / (1024 * 1024)).toFixed(2);
 
+                    // Use duration from server response
+                    let durationText = '';
+                    if (seg.duration_seconds) {
+                        const totalSeconds = seg.duration_seconds;
+                        const hours = Math.floor(totalSeconds / 3600);
+                        const minutes = Math.floor((totalSeconds % 3600) / 60);
+                        const seconds = totalSeconds % 60;
+                        
+                        if (hours > 0) {
+                            durationText = ` (${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')})`;
+                        } else {
+                            durationText = ` (${minutes}:${seconds.toString().padStart(2, '0')})`;
+                        }
+                    }
+
                     const reasonText = seg.recording_reason && seg.recording_reason !== 'Unknown' ? `<br>📝 <em>${seg.recording_reason}</em>` : '';
-                    item.innerHTML = `<strong>${startTime} - ${endTime}</strong><br>${sizeMB} MB${reasonText}`;
+                    item.innerHTML = `<strong>${startTime} - ${endTime}</strong>${durationText}<br>${sizeMB} MB${reasonText}`;
                     item.addEventListener('click', () => {
                         this.playVideoSegment(seg.url);
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
