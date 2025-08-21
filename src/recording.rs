@@ -9,6 +9,8 @@ use crate::config::RecordingConfig;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery, VideoSegment};
+use crate::frame_cache::{UnifiedFrameCache, CacheConfig};
+use crate::cached_frame_stream;
 
 
 #[derive(Debug, Clone)]
@@ -25,15 +27,34 @@ pub struct RecordingManager {
     pub databases: Arc<RwLock<HashMap<String, Arc<dyn DatabaseProvider>>>>, // camera_id -> database
     active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>, // camera_id -> recording
     frame_subscribers: Arc<RwLock<HashMap<String, broadcast::Receiver<Bytes>>>>, // camera_id -> receiver
+    frame_cache: Arc<UnifiedFrameCache>, // Unified frame cache for playback
 }
 
 impl RecordingManager {
-    pub async fn new(config: Arc<RecordingConfig>) -> crate::errors::Result<Self> {        
+    pub async fn new(config: Arc<RecordingConfig>) -> crate::errors::Result<Self> {
+        // Create cache configuration from recording config
+        let cache_config = CacheConfig {
+            live_buffer_minutes: config.frame_cache.live_buffer_minutes,
+            live_buffer_fps: config.frame_cache.live_buffer_fps,
+            mp4_window_minutes: config.frame_cache.mp4_window_minutes,
+            max_windows_per_camera: config.frame_cache.max_windows_per_camera,
+            mp4_conversion_fps: config.mp4_framerate,
+            ffmpeg_path: "ffmpeg".to_string(),
+        };
+        
+        let frame_cache = if config.frame_cache.enabled {
+            Arc::new(UnifiedFrameCache::new(cache_config))
+        } else {
+            // Create a minimal cache even if disabled (for compatibility)
+            Arc::new(UnifiedFrameCache::new(cache_config))
+        };
+        
         Ok(Self {
             config,
             databases: Arc::new(RwLock::new(HashMap::new())),
             active_recordings: Arc::new(RwLock::new(HashMap::new())),
             frame_subscribers: Arc::new(RwLock::new(HashMap::new())),
+            frame_cache,
         })
     }
 
@@ -251,6 +272,7 @@ impl RecordingManager {
         };
         let config = self.config.clone();
         let active_recordings = self.active_recordings.clone();
+        let frame_cache = self.frame_cache.clone();
         
         // Get the effective video storage type for this camera
         let video_storage_type = self.get_storage_type_for_camera(&camera_config);
@@ -279,6 +301,7 @@ impl RecordingManager {
                     camera_id.clone(),
                     frame_sender.subscribe(),
                     video_storage_type,
+                    frame_cache,
                 ));
                 tasks.push(segmenter_task);
             }
@@ -396,7 +419,23 @@ impl RecordingManager {
 
         // If no end time specified, use start time plus 1 hour
         let end_time = to.unwrap_or_else(|| from + chrono::Duration::hours(1));
-        database.create_frame_stream(camera_id, from, end_time).await
+        
+        // Check if we should use cache or database playback
+        let cache = if self.config.frame_cache.enabled && !self.config.frame_cache.database_playback_enabled {
+            Some(self.frame_cache.clone())
+        } else {
+            None
+        };
+        
+        // Use cached frame stream with unified cache or fallback to database
+        cached_frame_stream::create_frame_stream(
+            camera_id,
+            from,
+            end_time,
+            cache,
+            database,
+            self.config.frame_cache.live_buffer_fps as f32,
+        ).await
     }
 
     pub async fn is_recording(&self, camera_id: &str) -> bool {
@@ -451,11 +490,44 @@ impl RecordingManager {
         camera_id: &str,
         timestamp: DateTime<Utc>,
     ) -> crate::errors::Result<Option<RecordedFrame>> {
-        // Get the database for this camera
-        let database = self.get_camera_database(camera_id).await
-            .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
-
-        database.get_frame_at_timestamp(camera_id, timestamp).await
+        // Check if cache is enabled
+        if self.config.frame_cache.enabled && !self.config.frame_cache.database_playback_enabled {
+            // First try to get from cache (instant for cached data)
+            if let Some(frame) = self.frame_cache.get_frame_at_timestamp(camera_id, timestamp).await? {
+                return Ok(Some(frame));
+            }
+            
+            // Cache miss - need to convert from MP4
+            let (window_start, window_end) = crate::frame_cache::UnifiedFrameCache::calculate_window_range(timestamp);
+            
+            // Get the database for this camera
+            let database = self.get_camera_database(camera_id).await
+                .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
+            
+            // Find MP4 segments for this time range
+            let segments = database.list_video_segments(camera_id, window_start, window_end).await?;
+            
+            if !segments.is_empty() {
+                // Convert and cache the window
+                self.frame_cache.convert_and_cache_mp4_window(
+                    camera_id,
+                    segments,
+                    window_start,
+                    window_end,
+                ).await?;
+                
+                // Try again from cache
+                return self.frame_cache.get_frame_at_timestamp(camera_id, timestamp).await;
+            }
+            
+            // No MP4 segments found, return None
+            Ok(None)
+        } else {
+            // Fallback to database query
+            let database = self.get_camera_database(camera_id).await
+                .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
+            database.get_frame_at_timestamp(camera_id, timestamp).await
+        }
     }
 
     /// Check for active recordings at startup and restart them
@@ -596,21 +668,31 @@ impl RecordingManager {
         camera_id: String,
         mut frame_receiver: broadcast::Receiver<Bytes>,
         video_storage_type: crate::config::Mp4StorageType,
+        frame_cache: Arc<UnifiedFrameCache>,
     ) {
         let segment_duration = chrono::Duration::minutes(config.video_segment_minutes as i64);
         let mut segment_start_time = Utc::now();
         let mut frame_buffer = Vec::new();
 
+        // Initialize cache for this camera
+        frame_cache.init_camera(&camera_id).await;
+
         loop {
             match frame_receiver.recv().await {
                 Ok(frame_data) => {
+                    let timestamp = Utc::now();
+                    
                     // Check if recording is still active
                     if !active_recordings.read().await.contains_key(&camera_id) {
                         trace!("Recording stopped for camera '{}', ending segmenter task", camera_id);
                         break;
                     }
 
-                    frame_buffer.push(frame_data);
+                    // Add to MP4 segment buffer (existing)
+                    frame_buffer.push(frame_data.clone());
+                    
+                    // ALSO add to live cache for instant playback
+                    frame_cache.add_live_frame(&camera_id, timestamp, frame_data).await;
 
                     if Utc::now().signed_duration_since(segment_start_time) >= segment_duration {
                         let frames_to_process = std::mem::take(&mut frame_buffer);

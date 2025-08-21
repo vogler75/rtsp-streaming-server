@@ -16,7 +16,16 @@
   "recording": {
     "cleanup_interval_hours": 1,
     "database_path": "recordings",
-    "frame_storage_enabled": true,
+    "frame_cache": {
+      "database_playback_enabled": false,
+      "enabled": true,
+      "live_buffer_fps": 15,
+      "live_buffer_minutes": 5,
+      "max_windows_per_camera": 3,
+      "mp4_window_minutes": 5,
+      "preload_threshold_seconds": 30
+    },
+    "frame_storage_enabled": false,
     "frame_storage_retention": "1h",
     "max_frame_size": 10485760,
     "mp4_framerate": 5,

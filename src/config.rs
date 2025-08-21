@@ -210,9 +210,51 @@ pub struct RecordingConfig {
     #[serde(default = "default_cleanup_interval_hours")]
     pub cleanup_interval_hours: u64, // How often to run cleanup (default: 1 hour)
     
+    // Frame cache settings for playback optimization
+    #[serde(default)]
+    pub frame_cache: FrameCacheConfig,
+    
     // BACKWARD COMPATIBILITY: Handle old video_storage_enabled field
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_storage_enabled: Option<bool>, // For migration only
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrameCacheConfig {
+    #[serde(default = "default_cache_enabled")]
+    pub enabled: bool,
+    
+    #[serde(default = "default_live_buffer_minutes")]
+    pub live_buffer_minutes: u32,
+    
+    #[serde(default = "default_live_buffer_fps")]
+    pub live_buffer_fps: u32,
+    
+    #[serde(default = "default_mp4_window_minutes")]
+    pub mp4_window_minutes: u32,
+    
+    #[serde(default = "default_max_windows_per_camera")]
+    pub max_windows_per_camera: usize,
+    
+    #[serde(default = "default_preload_threshold_seconds")]
+    pub preload_threshold_seconds: u32,
+    
+    #[serde(default = "default_database_playback_enabled")]
+    pub database_playback_enabled: bool,  // Fallback to old DB-based playback
+}
+
+impl Default for FrameCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cache_enabled(),
+            live_buffer_minutes: default_live_buffer_minutes(),
+            live_buffer_fps: default_live_buffer_fps(),
+            mp4_window_minutes: default_mp4_window_minutes(),
+            max_windows_per_camera: default_max_windows_per_camera(),
+            preload_threshold_seconds: default_preload_threshold_seconds(),
+            database_playback_enabled: default_database_playback_enabled(),
+        }
+    }
 }
 
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
@@ -220,6 +262,15 @@ fn default_video_storage_retention() -> String { "30d".to_string() }
 fn default_video_segment_minutes() -> u64 { 5 }
 fn default_mp4_framerate() -> f32 { 5.0 }
 fn default_cleanup_interval_hours() -> u64 { 1 }
+
+// Default functions for frame cache config
+fn default_cache_enabled() -> bool { true }
+fn default_live_buffer_minutes() -> u32 { 5 }
+fn default_live_buffer_fps() -> u32 { 15 }
+fn default_mp4_window_minutes() -> u32 { 5 }
+fn default_max_windows_per_camera() -> usize { 3 }
+fn default_preload_threshold_seconds() -> u32 { 30 }
+fn default_database_playback_enabled() -> bool { false }
 
 impl MqttConfig {
     pub fn substitute_variables(&mut self) {
@@ -276,6 +327,7 @@ impl Default for Config {
                 video_segment_minutes: default_video_segment_minutes(),
                 mp4_framerate: default_mp4_framerate(),
                 cleanup_interval_hours: default_cleanup_interval_hours(),
+                frame_cache: FrameCacheConfig::default(),
                 video_storage_enabled: None, // For migration only
             }),
         }

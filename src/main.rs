@@ -30,6 +30,8 @@ mod mp4;
 mod handlers;
 mod ptz;
 mod api_ptz;
+mod frame_cache;
+mod cached_frame_stream;
 
 use config::Config;
 use errors::{Result, StreamError};
