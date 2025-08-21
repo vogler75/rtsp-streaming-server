@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.23",
+			"version": "1.0.26",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -112,6 +112,26 @@
 						"type": "boolean",
 						"default": false,
 						"description": "Enable debug logging for troubleshooting"
+					},
+					"ptz_move": {
+						"type": "string",
+						"default": "",
+						"description": "PTZ move command as JSON string (e.g., '{\"pan\": 1, \"tilt\": 0, \"zoom\": 0}')"
+					},
+					"ptz_stop": {
+						"type": "boolean",
+						"default": false,
+						"description": "Stop all PTZ movements when set to true"
+					},
+					"ptz_goto_preset": {
+						"type": "string",
+						"default": "",
+						"description": "Go to PTZ preset as JSON string (e.g., '{\"preset\": 1}')"
+					},
+					"ptz_set_preset": {
+						"type": "string",
+						"default": "",
+						"description": "Set PTZ preset as JSON string (e.g., '{\"preset\": 1, \"name\": \"Entrance\"}')"
 					}
 				}
 			}

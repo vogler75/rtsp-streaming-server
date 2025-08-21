@@ -37,6 +37,12 @@ let currentRecordingActive = false;
 let currentGoto = '';
 let debugEnabled = false;
 
+// PTZ control variables
+let currentPtzMove = '';
+let currentPtzStop = false;
+let currentPtzGotoPreset = '';
+let currentPtzSetPreset = '';
+
 ////////////////////////////////////////////
 // Debug helper function
 function debugLog(...args) {
@@ -654,6 +660,69 @@ function handleRecordingControl(active, reason) {
     });
 }
 
+function handlePtzControl(endpoint, jsonData) {
+  if (!currentURL) {
+    debugLog('PTZ control requires URL to be set');
+    return;
+  }
+  
+  // Convert WebSocket URL to HTTP URL
+  // currentURL is now just the base path like /cam1
+  let baseUrl = currentURL.replace(/^ws(s?):\/\//, 'http$1://');
+  
+  // Build the full PTZ endpoint URL
+  const fullUrl = baseUrl + '/control/ptz/' + endpoint;
+  
+  const requestOptions = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  };
+  
+  if (currentToken) {
+    requestOptions.headers['Authorization'] = 'Bearer ' + currentToken;
+    debugLog('Using token authentication for PTZ request');
+  }
+  
+  if (jsonData) {
+    requestOptions.body = jsonData;
+  }
+  
+  debugLog('🎯 SENDING PTZ REQUEST:', {
+    method: 'POST',
+    url: fullUrl,
+    body: requestOptions.body || '(no body)',
+    headers: requestOptions.headers
+  });
+  
+  fetch(fullUrl, requestOptions)
+    .then(response => {
+      debugLog('⬅ PTZ RESPONSE STATUS:', response.status, response.statusText);
+      
+      // Check if response is successful
+      if (response.ok) {
+        // Try to parse as JSON, but handle plain text responses
+        return response.text().then(text => {
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            // If it's not JSON, return the text as is
+            return { message: text };
+          }
+        });
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+    })
+    .then(data => {
+      debugLog('⬅ PTZ RESPONSE DATA:', data);
+    })
+    .catch(error => {
+      debugError('⬅ PTZ REQUEST ERROR:', error);
+    });
+}
+
 function setProperty(data) {  
   switch (data.key) {
     case 'URL':
@@ -861,6 +930,68 @@ function setProperty(data) {
       debugEnabled = data.value;
       console.log('Debug logging:', debugEnabled ? 'enabled' : 'disabled');
       break;
+    case 'ptz_move':
+      currentPtzMove = data.value;
+      debugLog('🎯 PTZ move command changed to:', currentPtzMove);
+      
+      if (currentPtzMove && currentPtzMove.trim() !== '') {
+        try {
+          // Validate JSON format
+          JSON.parse(currentPtzMove);
+          debugLog('🎯 Triggering PTZ move command');
+          handlePtzControl('move', currentPtzMove);
+        } catch (e) {
+          debugError('❌ Invalid JSON in ptz_move:', e, 'Value:', currentPtzMove);
+        }
+      } else {
+        debugWarn('⚠️ PTZ move command ignored - empty value');
+      }
+      break;
+    case 'ptz_stop':
+      currentPtzStop = data.value;
+      debugLog('🎯 PTZ stop changed to:', currentPtzStop);
+      
+      if (currentPtzStop) {
+        debugLog('🛑 Triggering PTZ stop command');
+        handlePtzControl('stop', null);
+        // Reset the property back to false after sending
+        WebCC.Properties.ptz_stop = false;
+      }
+      break;
+    case 'ptz_goto_preset':
+      currentPtzGotoPreset = data.value;
+      debugLog('🎯 PTZ goto preset changed to:', currentPtzGotoPreset);
+      
+      if (currentPtzGotoPreset && currentPtzGotoPreset.trim() !== '') {
+        try {
+          // Validate JSON format
+          JSON.parse(currentPtzGotoPreset);
+          debugLog('🎯 Triggering PTZ goto preset command');
+          handlePtzControl('goto-preset', currentPtzGotoPreset);
+        } catch (e) {
+          debugError('❌ Invalid JSON in ptz_goto_preset:', e, 'Value:', currentPtzGotoPreset);
+        }
+      } else {
+        debugWarn('⚠️ PTZ goto preset command ignored - empty value');
+      }
+      break;
+    case 'ptz_set_preset':
+      currentPtzSetPreset = data.value;
+      debugLog('🎯 PTZ set preset changed to:', currentPtzSetPreset);
+      
+      if (currentPtzSetPreset && currentPtzSetPreset.trim() !== '') {
+        try {
+          // Validate JSON format
+          JSON.parse(currentPtzSetPreset);
+          debugLog('🎯 Triggering PTZ set preset command');
+          handlePtzControl('set-preset', currentPtzSetPreset);
+        } catch (e) {
+          debugError('❌ Invalid JSON in ptz_set_preset:', e, 'Value:', currentPtzSetPreset);
+        }
+      } else {
+        debugWarn('⚠️ PTZ set preset command ignored - empty value');
+      }
+      break;
   }
 }
 
@@ -886,6 +1017,12 @@ WebCC.start(
       currentRecordingActive = WebCC.Properties.recording_active || false;
       currentGoto = WebCC.Properties.goto || '';
       debugEnabled = WebCC.Properties.debug || false;
+      
+      // Initialize PTZ properties
+      currentPtzMove = WebCC.Properties.ptz_move || '';
+      currentPtzStop = WebCC.Properties.ptz_stop || false;
+      currentPtzGotoPreset = WebCC.Properties.ptz_goto_preset || '';
+      currentPtzSetPreset = WebCC.Properties.ptz_set_preset || '';
       
       // Check version property at startup
       if (versionElement && WebCC.Properties.version) {
@@ -929,7 +1066,11 @@ WebCC.start(
       recording_active: false,
       goto: '',
       timestamp: '',
-      debug: false
+      debug: false,
+      ptz_move: '',
+      ptz_stop: false,
+      ptz_goto_preset: '',
+      ptz_set_preset: ''
     }
   },
   // placeholder to include additional Unified dependencies

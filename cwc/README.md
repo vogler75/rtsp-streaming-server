@@ -128,6 +128,33 @@ The VideoPlayer CWC exposes the following properties that can be configured and 
 - **Default**: `false`
 - **Usage**: Set to `true` to start recording, `false` to stop recording
 
+### PTZ Control Properties
+
+*These properties are available for cameras that support Pan-Tilt-Zoom control*
+
+#### `ptz_move` (string)
+- **Description**: PTZ move command as JSON string
+- **Default**: `""` (empty string)
+- **Example**: `'{"pan": 1, "tilt": 0, "zoom": 0}'` or `'{"pan": -0.5, "tilt": 0.3, "zoom": 0.2}'`
+- **Usage**: Set JSON command to move camera. Values typically range from -1.0 to 1.0
+
+#### `ptz_stop` (boolean)
+- **Description**: Stop all PTZ movements
+- **Default**: `false`
+- **Usage**: Set to `true` to stop all camera movements. Automatically resets to `false` after command is sent
+
+#### `ptz_goto_preset` (string)
+- **Description**: Go to PTZ preset as JSON string
+- **Default**: `""` (empty string)
+- **Example**: `'{"preset": 1}'` or `'{"preset": "entrance"}'`
+- **Usage**: Set JSON command to move camera to a saved preset position
+
+#### `ptz_set_preset` (string)
+- **Description**: Set/save current position as PTZ preset
+- **Default**: `""` (empty string)
+- **Example**: `'{"preset": 1, "name": "Entrance"}'` or `'{"preset": "parking", "name": "Parking Area"}'`
+- **Usage**: Set JSON command to save current camera position as a preset
+
 ## Usage Examples
 
 ### Basic Live Streaming
@@ -165,6 +192,28 @@ control.properties.recording_active = true;
 control.properties.recording_active = false;
 ```
 
+### PTZ Camera Control
+
+```javascript
+// Move camera (pan right, tilt up slightly)
+control.properties.ptz_move = '{"pan": 0.5, "tilt": 0.2, "zoom": 0}';
+
+// Stop all camera movements
+control.properties.ptz_stop = true;
+
+// Go to preset position 1
+control.properties.ptz_goto_preset = '{"preset": 1}';
+
+// Save current position as preset 2 with name
+control.properties.ptz_set_preset = '{"preset": 2, "name": "Main Entrance"}';
+
+// Zoom in
+control.properties.ptz_move = '{"pan": 0, "tilt": 0, "zoom": 0.3}';
+
+// Pan left at half speed
+control.properties.ptz_move = '{"pan": -0.5, "tilt": 0, "zoom": 0}';
+```
+
 ### Performance Monitoring
 
 ```javascript
@@ -184,10 +233,10 @@ The control automatically constructs the full endpoint URL based on the base URL
 - **Stream Mode** (`control=false`): Appends `/stream` to base URL
 - **Control Mode** (`control=true`): Appends `/control` to base URL
 
-### Future Endpoints
+### Additional Endpoints
 
-The base URL approach allows for future expansion with additional endpoints:
-- **PTZ Control**: `/camera-path/ptz` (planned)
+The base URL approach supports multiple endpoints for different functionality:
+- **PTZ Control**: `/camera-path/control/ptz/{command}` (move, stop, goto-preset, set-preset)
 - **Configuration**: `/camera-path/config` (planned)
 
 Example usage:
