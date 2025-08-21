@@ -40,6 +40,7 @@ pub async fn stream_mp4_recording(
     axum::extract::State(app_state): axum::extract::State<AppState>,
 ) -> axum::response::Response {
     let (camera_id, filename) = path.0;
+    tracing::info!("Streaming MP4 recording: camera_id={}, filename={}", camera_id, filename);
     let range = parse_range_header(headers.get("range"));
 
     let recording_manager = match app_state.recording_manager {
@@ -88,8 +89,13 @@ async fn stream_from_database(
     drop(camera_streams);
 
     let segment = match database.get_video_segment_by_filename(camera_id, filename).await {
-        Ok(Some(segment)) => segment,
+        Ok(Some(segment)) => {
+            tracing::info!("Found segment: size_bytes={}, has_mp4_data={}", 
+                segment.size_bytes, segment.mp4_data.is_some());
+            segment
+        },
         Ok(None) => {
+            tracing::warn!("Recording not found for camera_id={}, filename={}", camera_id, filename);
             return (axum::http::StatusCode::NOT_FOUND, "Recording not found").into_response();
         }
         Err(e) => {
@@ -102,8 +108,23 @@ async fn stream_from_database(
     let (start, end) = calculate_range(range, file_size);
 
     let data = match segment.mp4_data {
-        Some(blob_data) => blob_data,
+        Some(blob_data) => {
+            tracing::info!("MP4 data retrieved from database: {} bytes", blob_data.len());
+            // Log first few bytes to check if it's valid MP4
+            if blob_data.len() >= 8 {
+                let header = &blob_data[0..8];
+                tracing::info!("MP4 header bytes: {:?}", header);
+                // MP4 files should start with ftyp box after 4 bytes of size
+                if header[4..8] == *b"ftyp" {
+                    tracing::info!("Valid MP4 header detected");
+                } else {
+                    tracing::warn!("Invalid MP4 header - expected 'ftyp' at offset 4");
+                }
+            }
+            blob_data
+        },
         None => {
+            tracing::error!("Segment data not found in database");
             return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Segment data not found in database").into_response();
         }
     };

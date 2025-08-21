@@ -20,7 +20,7 @@
     "frame_storage_retention": "1h",
     "max_frame_size": 10485760,
     "mp4_framerate": 5,
-    "video_segment_minutes": 5,
+    "video_segment_minutes": 1,
     "video_storage_retention": "30d",
     "video_storage_type": "database"
   },

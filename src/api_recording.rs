@@ -342,22 +342,34 @@ pub async fn api_list_mp4_segments(
                     // Calculate duration from start and end times
                     let duration_seconds = s.end_time.signed_duration_since(s.start_time).num_seconds();
                     
+                    // Generate filename from file_path if it exists, otherwise create one from timestamp
+                    let filename = match &s.file_path {
+                        Some(path) => {
+                            std::path::Path::new(path)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| {
+                                    // Fallback to generating filename from timestamp
+                                    s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                                })
+                        },
+                        None => {
+                            // For database storage, generate a filename based on timestamp
+                            s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                        }
+                    };
+                    
                     serde_json::json!({
                         "id": format!("{}_{}", s.session_id, s.start_time.timestamp()),
                         "session_id": s.session_id,
                         "start_time": s.start_time,
                         "end_time": s.end_time,
                         "duration_seconds": duration_seconds,
-                        "file_path": s.file_path,
+                        "url": format!("/api/recordings/{}/{}", camera_id, filename),
                         "size_bytes": s.size_bytes,
                         "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
-                        "camera_id": s.camera_id,
-                        "url": s.file_path
-                            .as_ref()
-                            .and_then(|path| std::path::Path::new(path).file_name())
-                            .and_then(|name| name.to_str())
-                            .map(|filename| format!("/api/recordings/{}/{}", camera_id, filename))
-                            .unwrap_or_default()
+                        "camera_id": s.camera_id
                     })
                 })
                 .collect();

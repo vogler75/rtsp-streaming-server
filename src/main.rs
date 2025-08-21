@@ -517,7 +517,7 @@ async fn main() -> Result<()> {
             ));
 
             // List MP4 segments
-            let segments_path = format!("{}/recordings/mp4/segments", path);
+            let segments_path = format!("{}/control/recordings/mp4/segments", path);
             let segments_info = api_info.clone();
             app = app.route(&segments_path, axum::routing::get(
                 move |headers, query| api_recording::api_list_mp4_segments(

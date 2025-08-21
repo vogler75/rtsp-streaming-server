@@ -767,7 +767,7 @@
                     sort_order: sortOrder
                 });
                 
-                const url = `${baseUrl}/recordings/mp4/segments?${params}`;
+                const url = `${baseUrl}/control/recordings/mp4/segments?${params}`;
                 
                 fetch(url)
                     .then(response => response.json())
@@ -883,6 +883,8 @@
                 const videoPlayer = document.getElementById('videoPlayer');
                 const canvas = document.getElementById('videoCanvas');
 
+                console.log('Playing video segment with URL:', url);
+
                 // Stop any active stream (live or replay) before playing MP4
                 if (this.streamState === 'live' || this.streamState === 'replaying') {
                     this.sendCommand({ cmd: 'stop' });
@@ -894,7 +896,11 @@
                 videoPlayer.style.display = 'block';
 
                 videoPlayer.src = url;
-                videoPlayer.play();
+                videoPlayer.play().catch(error => {
+                    console.error('Failed to play video:', error);
+                    console.error('Video URL was:', url);
+                    alert(`Failed to play video: ${error.message}\nURL: ${url}`);
+                });
             }
 
             startReplay(recording) {
