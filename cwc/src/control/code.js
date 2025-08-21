@@ -165,10 +165,22 @@ function connectToWebSocket(url) {
     return;
   }
   
+  // Build the full URL based on control mode
+  // URL should be base path like /cam1, we append /stream or /control
+  let fullUrl = url;
+  
+  // Remove any trailing slash
+  if (fullUrl.endsWith('/')) {
+    fullUrl = fullUrl.slice(0, -1);
+  }
+  
   // Check if we're in control mode and need to connect to control endpoint
   if (isControlMode) {
-    connectToControlWebSocket(url);
+    fullUrl = fullUrl + '/control';
+    connectToControlWebSocket(fullUrl);
     return;
+  } else {
+    fullUrl = fullUrl + '/stream';
   }
   
   if (websocket) {
@@ -183,14 +195,14 @@ function connectToWebSocket(url) {
   
   try {
     debugLog('Attempting WebSocket connection...');
-    debugLog('URL:', url);
-    debugLog('Protocol:', url.startsWith('wss://') ? 'Secure WebSocket (WSS)' : 'WebSocket (WS)');
+    debugLog('URL:', fullUrl);
+    debugLog('Protocol:', fullUrl.startsWith('wss://') ? 'Secure WebSocket (WSS)' : 'WebSocket (WS)');
     
     // Add token to URL if provided
-    let connectUrl = url;
+    let connectUrl = fullUrl;
     if (currentToken && currentToken.trim() !== '') {
-      const separator = url.includes('?') ? '&' : '?';
-      connectUrl = url + separator + 'token=' + encodeURIComponent(currentToken);
+      const separator = fullUrl.includes('?') ? '&' : '?';
+      connectUrl = fullUrl + separator + 'token=' + encodeURIComponent(currentToken);
       debugLog('Using authentication token');
     }
     
@@ -310,15 +322,15 @@ function connectToWebSocket(url) {
     
     websocket.onerror = function(error) {
       debugError('WebSocket error occurred');
-      debugError('URL:', currentURL);
+      debugError('URL:', fullUrl);
       debugError('ReadyState:', websocket ? websocket.readyState : 'null');
       debugError('Error event:', error);
       
       // Provide specific guidance for WSS certificate issues
-      if (currentURL.startsWith('wss://')) {
+      if (fullUrl.startsWith('wss://')) {
         debugError('====== WSS CONNECTION TROUBLESHOOTING ======');
         debugError('If this is a self-signed certificate error:');
-        debugError('1. Open the server URL in a browser: ' + currentURL.replace('wss://', 'https://'));
+        debugError('1. Open the server URL in a browser: ' + fullUrl.replace('wss://', 'https://'));
         debugError('2. Accept the security warning to trust the certificate');
         debugError('3. Or disable TLS in server config.toml and use ws:// instead');
         debugError('4. Or add the certificate to the system trust store');
@@ -334,7 +346,7 @@ function connectToWebSocket(url) {
       debugLog('Code:', event.code);
       debugLog('Reason:', event.reason || 'No reason provided');
       debugLog('Was clean:', event.wasClean);
-      debugLog('URL was:', currentURL);
+      debugLog('URL was:', fullUrl);
       
       // Common WebSocket close codes
       const closeReasons = {
@@ -384,7 +396,7 @@ function connectToControlWebSocket(url) {
   }
   
   try {
-    // Convert the URL to control endpoint (add /control to the path)
+    // URL already has /control appended by connectToWebSocket
     let controlUrl = url;
     
     // Only add token if provided - no other parameters
@@ -597,12 +609,11 @@ function handleRecordingControl(active, reason) {
   }
   
   // Use HTTP API for recording control
-  // Convert WebSocket URL to HTTP URL and preserve the camera path
+  // Convert WebSocket URL to HTTP URL
+  // currentURL is now just the base path like /cam1
   let baseUrl = currentURL.replace(/^ws(s?):\/\//, 'http$1://');
   
-  // Remove /control from the end if it exists (from control WebSocket URL)
-  baseUrl = baseUrl.replace(/\/control(\?.*)?$/, '');
-  
+  // Build the full endpoint URL
   const endpoint = active ? '/control/recording/start' : '/control/recording/stop';
   const fullUrl = baseUrl + endpoint;
   

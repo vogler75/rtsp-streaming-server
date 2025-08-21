@@ -13,10 +13,10 @@ The VideoPlayer CWC exposes the following properties that can be configured and 
 ### Connection Properties
 
 #### `URL` (string)
-- **Description**: WebSocket connection URL for the video stream
+- **Description**: Base WebSocket URL for the camera (without endpoint suffix)
 - **Default**: `""` (empty string)
-- **Example**: `"ws://localhost:8080/cam1/live"` or `"wss://server.example.com/camera1/stream"`
-- **Usage**: Set this to the WebSocket endpoint of your RTSP streaming server
+- **Example**: `"ws://localhost:8080/cam1"` or `"wss://server.example.com/camera1"`
+- **Usage**: Set this to the base camera path. The control will automatically append `/stream` or `/control` based on the `control` property
 
 #### `token` (string)
 - **Description**: Authentication token for WebSocket connection (Bearer token)
@@ -63,7 +63,7 @@ The VideoPlayer CWC exposes the following properties that can be configured and 
 #### `control` (boolean)
 - **Description**: Enable control mode instead of normal video streaming
 - **Default**: `false`
-- **Usage**: Set to `true` to enable advanced playback controls for recorded video
+- **Usage**: Set to `true` to enable advanced playback controls for recorded video. When true, the control appends `/control` to the URL; when false, it appends `/stream`
 
 ### Playback Control Properties
 
@@ -176,19 +176,29 @@ if (control.properties.connected) {
 }
 ```
 
-## URL Endpoints
+## URL Structure
 
-The control supports different WebSocket endpoints based on usage:
+The control automatically constructs the full endpoint URL based on the base URL and control mode:
 
-- **Live Streaming**: `/camera-path/live`
-- **Stream Viewing**: `/camera-path/stream` 
-- **Control Mode**: `/camera-path/control`
+- **Base URL**: Set via the `URL` property (e.g., `ws://localhost:8080/cam1`)
+- **Stream Mode** (`control=false`): Appends `/stream` to base URL
+- **Control Mode** (`control=true`): Appends `/control` to base URL
 
-Example URLs:
-```
-ws://localhost:8080/cam1/live
-ws://localhost:8080/cam1/control
-wss://server.example.com/camera1/stream
+### Future Endpoints
+
+The base URL approach allows for future expansion with additional endpoints:
+- **PTZ Control**: `/camera-path/ptz` (planned)
+- **Configuration**: `/camera-path/config` (planned)
+
+Example usage:
+```javascript
+// For streaming mode
+control.properties.URL = "ws://localhost:8080/cam1";
+control.properties.control = false;  // Results in ws://localhost:8080/cam1/stream
+
+// For control mode
+control.properties.URL = "ws://localhost:8080/cam1";
+control.properties.control = true;   // Results in ws://localhost:8080/cam1/control
 ```
 
 ## Authentication
