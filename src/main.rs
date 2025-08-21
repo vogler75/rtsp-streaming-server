@@ -381,6 +381,8 @@ async fn main() -> Result<()> {
         .route("/debug", axum::routing::get(handlers::debug_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
         .route("/api/recordings/:camera_id/mp4/segments/:filename", axum::routing::get(mp4::stream_mp4_recording))
+        .route("/api/recordings/:camera_id/hls/timerange", axum::routing::get(mp4::serve_hls_playlist))
+        .route("/api/recordings/:camera_id/hls/segments/:playlist_id/:segment_name", axum::routing::get(mp4::serve_hls_segment))
         .nest_service("/recordings", tower_http::services::ServeDir::new(app_state.recording_config.as_ref().map_or("recordings", |c| &c.database_path)));
     
     // Add routes for each camera (both stream and control endpoints)

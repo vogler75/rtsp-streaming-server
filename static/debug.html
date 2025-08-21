@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Test Interface</title>
+    <title>Debug Interface</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         * {
             margin: 0;
@@ -207,10 +208,31 @@
 </head>
 <body>
     <div class="container">
-        <h1>🧪 WebSocket Test Interface</h1>
+        <h1>🧪 Debug Interface</h1>
         
+        <div class="panel full-width" style="margin-bottom: 20px;">
+            <h2>🎮 Player Mode</h2>
+            <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 10px;">
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="radio" name="playerMode" value="websocket" checked onchange="switchPlayerMode()">
+                    🔗 WebSocket Frame Player
+                </label>
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="radio" name="playerMode" value="http" onchange="switchPlayerMode()">
+                    🎬 HTTP Video Player
+                </label>
+            </div>
+            <div style="font-size: 12px; color: #999;">
+                <strong>WebSocket:</strong> Real-time frame streaming via WebSocket connection<br>
+                <strong>HTTP:</strong> Standard video player for MP4/HLS URLs
+            </div>
+        </div>
+
         <div class="video-container full-width">
             <canvas id="videoCanvas" width="640" height="480"></canvas>
+            <video id="testVideoPlayer" width="640" height="480" controls style="display: none; max-width: 100%; max-height: 100%;">
+                Your browser does not support the video tag.
+            </video>
             <div id="noVideo" style="color: #666;">No video stream - connect and send commands to see frames</div>
         </div>
         
@@ -247,9 +269,9 @@
             </div>
         </div>
         
-        <div class="grid">
+        <div class="grid" id="websocketControls">
             <div class="panel">
-                <h2>Test Commands</h2>
+                <h2>WebSocket Commands</h2>
                 
                 <div class="test-section">
                     <h3>🎯 Goto Command</h3>
@@ -321,6 +343,83 @@
                 <div class="logs" id="logs"></div>
             </div>
         </div>
+        
+        <div class="grid" id="httpControls" style="display: none;">
+            <div class="panel">
+                <h2>🎬 HTTP Video Player</h2>
+                <p style="color: #ccc; font-size: 12px; margin-bottom: 15px;">Test MP4 and HLS URLs directly in the browser</p>
+                
+                <div class="test-section">
+                    <h3>📹 Manual URL Testing</h3>
+                    <div class="form-group">
+                        <label>Video URL:</label>
+                        <input type="text" id="testVideoUrl" placeholder="Enter HLS URL to test" style="font-size: 11px;">
+                        <div style="margin-top: 5px; font-size: 11px; color: #999;">
+                            Examples:
+                            <br>• /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <button onclick="playTestUrl()">▶️ Play URL</button>
+                        <button onclick="stopTestVideo()">⏹️ Stop</button>
+                        <button onclick="testUrlExists()">🔍 Test URL</button>
+                    </div>
+                    <div id="urlTestResult" style="font-size: 11px; color: #999; margin-top: 5px;"></div>
+                </div>
+                
+                <div class="test-section">
+                    <h3>⚡ Quick URL Builder</h3>
+                    <div class="form-group">
+                        <label>Camera ID:</label>
+                        <input type="text" id="quickCameraId" value="cam1" placeholder="cam1">
+                    </div>
+                    <div class="form-group">
+                        <label>Time Range:</label>
+                        <div class="datetime-input">
+                            <input type="datetime-local" id="quickStartTime">
+                            <span style="color: #999;">to</span>
+                            <input type="datetime-local" id="quickEndTime">
+                        </div>
+                        <div class="quick-times">
+                            <button onclick="setQuickLast5Min()">Last 5min</button>
+                            <button onclick="setQuickLast30Min()">Last 30min</button>
+                            <button onclick="setQuickLast1Hour()">Last 1hour</button>
+                        </div>
+                    </div>
+                    <button onclick="buildAndPlayHlsUrl()">📺 Build & Play HLS</button>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h2>📊 Video Player Status</h2>
+                <div id="videoPlayerInfo">
+                    <div>Current Mode: <span id="currentVideoMode">WebSocket Stream</span></div>
+                    <div>Video URL: <span id="currentVideoUrl" style="font-size: 11px; color: #999;">-</span></div>
+                    <div>Player State: <span id="playerState">Ready</span></div>
+                    <div>Duration: <span id="videoDuration">-</span></div>
+                    <div>Current Time: <span id="videoCurrentTime">-</span></div>
+                    <div>Video Dimensions: <span id="videoDimensions">-</span></div>
+                </div>
+                
+                <div class="test-section">
+                    <h3>🎛️ Player Controls</h3>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                        <button onclick="seekVideo(-30)">⏪ -30s</button>
+                        <button onclick="seekVideo(-10)">⏪ -10s</button>
+                        <button onclick="togglePlayPause()" id="playPauseBtn">⏸️ Pause</button>
+                        <button onclick="seekVideo(10)">⏩ +10s</button>
+                        <button onclick="seekVideo(30)">⏩ +30s</button>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <span style="font-size: 12px;">Speed:</span>
+                        <button onclick="setPlaybackRate(0.5)">0.5x</button>
+                        <button onclick="setPlaybackRate(1)">1x</button>
+                        <button onclick="setPlaybackRate(1.5)">1.5x</button>
+                        <button onclick="setPlaybackRate(2)">2x</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -338,6 +437,8 @@
             ctx = canvas.getContext('2d');
             setDefaultTimestamps();
             autoFillCameraPath();
+            initializeVideoPlayer();
+            setQuickTimestamps();
         });
 
         function autoFillCameraPath() {
@@ -652,6 +753,408 @@
             document.getElementById('logs').innerHTML = '';
             frameCount = 0;
             document.getElementById('frameCount').textContent = '0';
+        }
+
+        // Video player functionality
+        let testVideoPlayer = null;
+        let updateInterval = null;
+        let hls = null; // HLS.js instance
+
+        function initializeVideoPlayer() {
+            testVideoPlayer = document.getElementById('testVideoPlayer');
+            
+            // Video event listeners
+            testVideoPlayer.addEventListener('loadedmetadata', function() {
+                updateVideoStatus();
+                document.getElementById('playerState').textContent = 'Loaded';
+                document.getElementById('videoDuration').textContent = formatTime(testVideoPlayer.duration);
+                document.getElementById('videoDimensions').textContent = `${testVideoPlayer.videoWidth}x${testVideoPlayer.videoHeight}`;
+                log('Video loaded: ' + testVideoPlayer.src, 'info');
+            });
+
+            testVideoPlayer.addEventListener('play', function() {
+                document.getElementById('playerState').textContent = 'Playing';
+                document.getElementById('playPauseBtn').textContent = '⏸️ Pause';
+                startUpdateInterval();
+                log('Video started playing', 'info');
+            });
+
+            testVideoPlayer.addEventListener('pause', function() {
+                document.getElementById('playerState').textContent = 'Paused';
+                document.getElementById('playPauseBtn').textContent = '▶️ Play';
+                clearInterval(updateInterval);
+                log('Video paused', 'info');
+            });
+
+            testVideoPlayer.addEventListener('ended', function() {
+                document.getElementById('playerState').textContent = 'Ended';
+                document.getElementById('playPauseBtn').textContent = '▶️ Play';
+                clearInterval(updateInterval);
+                log('Video ended', 'info');
+            });
+
+            testVideoPlayer.addEventListener('error', function(e) {
+                log('Video error: ' + testVideoPlayer.error.message, 'error');
+                document.getElementById('playerState').textContent = 'Error';
+            });
+        }
+
+        function startUpdateInterval() {
+            clearInterval(updateInterval);
+            updateInterval = setInterval(updateVideoStatus, 500);
+        }
+
+        function updateVideoStatus() {
+            if (testVideoPlayer && !testVideoPlayer.paused) {
+                document.getElementById('videoCurrentTime').textContent = formatTime(testVideoPlayer.currentTime);
+            }
+        }
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return '-';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function playTestUrl() {
+            const url = document.getElementById('testVideoUrl').value.trim();
+            if (!url) {
+                log('Please enter a video URL', 'error');
+                return;
+            }
+
+            // Switch to HTTP player mode if not already selected
+            if (document.querySelector('input[name="playerMode"]:checked').value !== 'http') {
+                document.querySelector('input[name="playerMode"][value="http"]').checked = true;
+                switchPlayerMode();
+            }
+            
+            document.getElementById('currentVideoUrl').textContent = url;
+            document.getElementById('playerState').textContent = 'Loading...';
+            log('Loading video URL: ' + url, 'info');
+            
+            // Clean up any existing HLS instance
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
+            
+            // Detect if this is an HLS URL
+            if (url.includes('hls') || url.endsWith('.m3u8')) {
+                log('Detected HLS URL, using HLS.js', 'info');
+                playHlsUrl(url);
+            } else {
+                log('Detected MP4 URL, using native video player', 'info');
+                playMp4Url(url);
+            }
+        }
+
+        function playMp4Url(url) {
+            // For MP4, use native video element
+            testVideoPlayer.src = url;
+            
+            // Add detailed debugging for MP4
+            testVideoPlayer.addEventListener('loadstart', function() {
+                log('MP4: Load started', 'info');
+            }, { once: true });
+            
+            testVideoPlayer.addEventListener('loadeddata', function() {
+                log('MP4: Data loaded successfully', 'info');
+            }, { once: true });
+            
+            testVideoPlayer.addEventListener('canplay', function() {
+                log('MP4: Can start playing', 'info');
+            }, { once: true });
+            
+            testVideoPlayer.addEventListener('error', function(e) {
+                const error = testVideoPlayer.error;
+                let errorMsg = 'Unknown error';
+                if (error) {
+                    switch(error.code) {
+                        case error.MEDIA_ERR_ABORTED:
+                            errorMsg = 'Playback aborted';
+                            break;
+                        case error.MEDIA_ERR_NETWORK:
+                            errorMsg = 'Network error';
+                            break;
+                        case error.MEDIA_ERR_DECODE:
+                            errorMsg = 'Decode error - invalid MP4 format';
+                            break;
+                        case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                            errorMsg = 'Source not supported - check URL and format';
+                            break;
+                    }
+                }
+                log('MP4 Error: ' + errorMsg + ' (code: ' + (error ? error.code : 'unknown') + ')', 'error');
+            }, { once: true });
+            
+            // Try to play
+            testVideoPlayer.play().catch(function(error) {
+                log('Failed to play MP4: ' + error.message, 'error');
+            });
+        }
+
+        function playHlsUrl(url) {
+            if (Hls.isSupported()) {
+                // Use HLS.js for browsers that don't support HLS natively
+                hls = new Hls({
+                    debug: true,
+                    enableWorker: true
+                });
+                
+                hls.loadSource(url);
+                hls.attachMedia(testVideoPlayer);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    log('HLS: Manifest parsed successfully', 'info');
+                    testVideoPlayer.play().catch(function(error) {
+                        log('Failed to play HLS: ' + error.message, 'error');
+                    });
+                });
+                
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    log('HLS Error: ' + data.type + ' - ' + data.details, 'error');
+                    if (data.fatal) {
+                        switch(data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                log('HLS: Fatal network error - trying to recover', 'error');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                log('HLS: Fatal media error - trying to recover', 'error');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                log('HLS: Fatal error, destroying HLS instance', 'error');
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+                
+                hls.on(Hls.Events.LEVEL_LOADED, function(event, data) {
+                    log('HLS: Level loaded - ' + data.details + ' segments', 'info');
+                });
+                
+            } else if (testVideoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                log('Using native HLS support', 'info');
+                testVideoPlayer.src = url;
+                testVideoPlayer.play().catch(function(error) {
+                    log('Failed to play HLS natively: ' + error.message, 'error');
+                });
+            } else {
+                log('HLS not supported in this browser', 'error');
+            }
+        }
+
+        function stopTestVideo() {
+            if (testVideoPlayer) {
+                testVideoPlayer.pause();
+                testVideoPlayer.currentTime = 0;
+                clearInterval(updateInterval);
+            }
+            
+            // Clean up HLS instance
+            if (hls) {
+                hls.destroy();
+                hls = null;
+                log('HLS instance destroyed', 'info');
+            }
+        }
+
+
+        function switchPlayerMode() {
+            const mode = document.querySelector('input[name="playerMode"]:checked').value;
+            
+            if (mode === 'websocket') {
+                // Switch to WebSocket mode
+                showWebSocketPlayer();
+            } else if (mode === 'http') {
+                // Switch to HTTP player mode
+                showHttpPlayer();
+            }
+        }
+
+        function showWebSocketPlayer() {
+            // Stop any HTTP video playback
+            if (testVideoPlayer) {
+                testVideoPlayer.pause();
+                clearInterval(updateInterval);
+            }
+            
+            // Clean up HLS instance
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
+            
+            // Show WebSocket canvas, hide video player
+            canvas.style.display = 'block';
+            testVideoPlayer.style.display = 'none';
+            
+            // Show WebSocket controls, hide HTTP controls
+            document.getElementById('websocketControls').style.display = 'block';
+            document.getElementById('httpControls').style.display = 'none';
+            
+            // Update status
+            document.getElementById('currentVideoMode').textContent = 'WebSocket Stream';
+            document.getElementById('currentVideoUrl').textContent = '-';
+            document.getElementById('playerState').textContent = 'Ready';
+            
+            // Show "no video" message if no WebSocket frames
+            if (frameCount === 0) {
+                document.getElementById('noVideo').style.display = 'block';
+            } else {
+                document.getElementById('noVideo').style.display = 'none';
+            }
+            
+            log('Switched to WebSocket Frame Player mode', 'info');
+        }
+
+        function showHttpPlayer() {
+            // Show video player, hide canvas
+            testVideoPlayer.style.display = 'block';
+            canvas.style.display = 'none';
+            document.getElementById('noVideo').style.display = 'none';
+            
+            // Show HTTP controls, hide WebSocket controls
+            document.getElementById('websocketControls').style.display = 'none';
+            document.getElementById('httpControls').style.display = 'block';
+            
+            // Update status
+            document.getElementById('currentVideoMode').textContent = 'HTTP Video Player';
+            if (!testVideoPlayer.src) {
+                document.getElementById('currentVideoUrl').textContent = 'No URL loaded';
+                document.getElementById('playerState').textContent = 'Ready - Enter URL to play';
+            }
+            
+            log('Switched to HTTP Video Player mode', 'info');
+        }
+
+        function showWebSocketVideo() {
+            // This function is kept for compatibility but now just switches radio button
+            document.querySelector('input[name="playerMode"][value="websocket"]').checked = true;
+            switchPlayerMode();
+        }
+
+        // Quick timestamp setters for URL builder
+        function setQuickTimestamps() {
+            const now = new Date();
+            const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
+            
+            document.getElementById('quickStartTime').value = formatDateTimeLocal(thirtyMinAgo);
+            document.getElementById('quickEndTime').value = formatDateTimeLocal(now);
+        }
+
+        function setQuickLast5Min() {
+            const now = new Date();
+            const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
+            
+            document.getElementById('quickStartTime').value = formatDateTimeLocal(fiveMinAgo);
+            document.getElementById('quickEndTime').value = formatDateTimeLocal(now);
+        }
+
+        function setQuickLast30Min() {
+            const now = new Date();
+            const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
+            
+            document.getElementById('quickStartTime').value = formatDateTimeLocal(thirtyMinAgo);
+            document.getElementById('quickEndTime').value = formatDateTimeLocal(now);
+        }
+
+        function setQuickLast1Hour() {
+            const now = new Date();
+            const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+            
+            document.getElementById('quickStartTime').value = formatDateTimeLocal(oneHourAgo);
+            document.getElementById('quickEndTime').value = formatDateTimeLocal(now);
+        }
+
+
+        function buildAndPlayHlsUrl() {
+            const cameraId = document.getElementById('quickCameraId').value.trim();
+            const startTime = document.getElementById('quickStartTime').value;
+            const endTime = document.getElementById('quickEndTime').value;
+
+            if (!cameraId || !startTime || !endTime) {
+                log('Please fill in all fields for URL building', 'error');
+                return;
+            }
+
+            const t1 = new Date(startTime).toISOString();
+            const t2 = new Date(endTime).toISOString();
+            const url = `/api/recordings/${cameraId}/hls/timerange?t1=${encodeURIComponent(t1)}&t2=${encodeURIComponent(t2)}`;
+            
+            document.getElementById('testVideoUrl').value = url;
+            
+            // For HLS, we need to check if the browser supports it natively or needs HLS.js
+            log('Note: HLS playback may require HLS.js library for full browser support', 'info');
+            playTestUrl();
+        }
+
+        // Video player controls
+        function togglePlayPause() {
+            if (!testVideoPlayer) return;
+            
+            if (testVideoPlayer.paused) {
+                testVideoPlayer.play();
+            } else {
+                testVideoPlayer.pause();
+            }
+        }
+
+        function seekVideo(seconds) {
+            if (!testVideoPlayer) return;
+            
+            testVideoPlayer.currentTime = Math.max(0, Math.min(testVideoPlayer.duration, testVideoPlayer.currentTime + seconds));
+            updateVideoStatus();
+        }
+
+        function setPlaybackRate(rate) {
+            if (!testVideoPlayer) return;
+            
+            testVideoPlayer.playbackRate = rate;
+            log(`Playback rate set to ${rate}x`, 'info');
+        }
+
+        function testUrlExists() {
+            const url = document.getElementById('testVideoUrl').value.trim();
+            if (!url) {
+                log('Please enter a URL to test', 'error');
+                return;
+            }
+
+            const resultDiv = document.getElementById('urlTestResult');
+            resultDiv.textContent = 'Testing URL...';
+            resultDiv.style.color = '#FFB74D';
+
+            fetch(url, { method: 'HEAD' })
+                .then(response => {
+                    const status = response.status;
+                    const contentType = response.headers.get('content-type') || 'unknown';
+                    const contentLength = response.headers.get('content-length') || 'unknown';
+                    
+                    if (response.ok) {
+                        resultDiv.innerHTML = `✅ URL accessible<br>Status: ${status}<br>Content-Type: ${contentType}<br>Size: ${contentLength} bytes`;
+                        resultDiv.style.color = '#4CAF50';
+                        log(`URL test passed: ${status} - ${contentType}`, 'info');
+                    } else {
+                        resultDiv.innerHTML = `❌ URL error<br>Status: ${status}`;
+                        resultDiv.style.color = '#F44336';
+                        log(`URL test failed: ${status}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    resultDiv.innerHTML = `❌ Network error<br>${error.message}`;
+                    resultDiv.style.color = '#F44336';
+                    log(`URL test error: ${error.message}`, 'error');
+                });
         }
     </script>
 </body>

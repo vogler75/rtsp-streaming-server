@@ -1,276 +1,417 @@
-# REST API Endpoints
+# REST API Documentation
 
-This document provides a hierarchical overview of the available REST API endpoints.
+This document provides a comprehensive overview of all available REST API endpoints for the RTSP streaming server.
 
-## API Endpoint Hierarchy
+## 🎥 Quick Reference - Video Streaming
+
+| Endpoint | Purpose | Format | Parameters |
+|----------|---------|---------|------------|
+| `/api/recordings/{camera_id}/mp4/segments/{filename}` | Single MP4 recording | MP4 | - |
+| `/api/recordings/{camera_id}/hls/timerange` | HLS playlist for time range | M3U8 | `t1`, `t2`, `segment_duration` |
+
+**Example:**
+```bash
+# HLS playlist for a time range
+GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
+```
+
+---
+
+## 🏗️ API Endpoint Hierarchy
 
 ```text
 /
-  GET  /dashboard                         # Dashboard page
+├── dashboard                                 # Dashboard page
+├── debug                                     # Debug interface
+└── api/
+    ├── status                                # Server status
+    ├── cameras                               # List cameras
+    ├── recordings/
+    │   └── {camera_id}/
+    │       ├── mp4/
+    │       │   └── segments/
+    │       │       └── {filename}            # Stream single MP4
+    │       └── hls/
+    │           ├── timerange                 # Generate HLS playlist
+    │           └── segments/
+    │               └── {playlist_id}/
+    │                   └── {segment_name}    # Serve HLS segments
+    └── admin/
+        ├── cameras/
+        │   ├── POST /                        # Create camera
+        │   ├── GET /{id}                     # Get camera config
+        │   ├── PUT /{id}                     # Update camera config
+        │   └── DELETE /{id}                  # Delete camera
+        └── config/
+            ├── GET /                         # Get server config
+            └── PUT /                         # Update server config
 
-/api
-  GET  /status                            # Server status
-  GET  /cameras                           # List cameras
-  /recordings
-    GET  /:camera_id/:filename            # Stream MP4 recording
-  /admin
-    /cameras
-      POST /                              # Create camera
-      GET  /:id                           # Get camera config
-      PUT  /:id                           # Update camera config
-      DELETE /:id                         # Delete camera
-    /config
-      GET  /                              # Get server config
-      PUT  /                              # Update server config
-
-# Per-camera routes (use the configured camera path, e.g., /cam1)
-<camera_path>
-  GET  /                                  # Camera test page
-  GET  /stream                            # Stream page (WebSocket used for frames)
-  GET  /control                           # Control page (WebSocket used for control)
-  GET  /live                              # Live stream over WebSocket
-  GET  /test                              # Alternate test page
-
-<camera_path>/control
-  # Recording API
-  POST /recording/start                   # Start recording
-  POST /recording/stop                    # Stop recording
-  GET  /recording/active                  # Active recording status
-  GET  /recording/size                    # Recording DB size
-  
-  GET  /recordings                        # List recordings
-  GET  /recordings/:session_id/frames     # Frames metadata for a recording
-  GET  /recordings/mp4/segments           # List MP4 video segments
-
-  # PTZ API (if enabled for the camera)
-  POST /ptz/move                          # Continuous pan/tilt/zoom
-  POST /ptz/stop                          # Stop movement
-  POST /ptz/goto_preset                   # Move to preset by token
-  POST /ptz/set_preset                    # Create/update a preset
+# Per-camera routes (using configured camera path, e.g., /cam1)
+{camera_path}/
+├── /                                         # Camera test page
+├── stream                                    # Stream page (WebSocket frames)
+├── control                                   # Control page (WebSocket control)
+├── live                                      # Live stream over WebSocket
+├── test                                      # Alternate test page
+└── control/
+    ├── recording/
+    │   ├── POST start                        # Start recording
+    │   ├── POST stop                         # Stop recording
+    │   ├── GET active                        # Active recording status
+    │   └── GET size                          # Recording DB size
+    ├── recordings/
+    │   ├── GET /                             # List recordings
+    │   ├── GET /{session_id}/frames          # Frame metadata
+    │   └── mp4/
+    │       └── segments                      # List MP4 segments
+    └── ptz/                                  # PTZ controls (if enabled)
+        ├── POST move                         # Pan/tilt/zoom
+        ├── POST stop                         # Stop movement
+        ├── POST goto_preset                  # Move to preset
+        └── POST set_preset                   # Create/update preset
 ```
 
+---
 
-## Camera Management API (`/api/admin/cameras`)
+## 📺 Video Streaming
 
-These endpoints are used for managing camera configurations and require an admin token set in the `Authorization` header (e.g., `Authorization: Bearer <your_admin_token>`).
+### Overview
 
-### `POST /api/admin/cameras`
+The server provides two main ways to access recorded video content:
 
-Creates a new camera configuration. The server will automatically detect the new configuration file and start the camera stream.
+- **🎬 Individual MP4 Segments**: Direct access to single recording files
+- **📺 HLS Time Range Playlists**: Adaptive streaming for time ranges
 
-- **Method**: `POST`
-- **Path**: `/api/admin/cameras`
-- **Request Body**:
-  ```json
-  {
-    "camera_id": "new_cam",
-    "config": {
-      "path": "/new_cam",
-      "url": "rtsp://...",
-      "transport": "tcp",
-      "reconnect_interval": 10,
-      "token": "some-secure-token"
-    }
+### Key Features
+
+- **HLS Transcoding**: Multiple MP4 segments transcoded to HLS on-the-fly using FFmpeg
+- **Storage Agnostic**: Works with both database and filesystem storage
+- **Browser Compatible**: MP4 works with HTML5 `<video>`, HLS works with HLS.js
+- **Time Range Queries**: ISO 8601 timestamps for precise time selection
+- **Byte Range Support**: HTTP range requests for video seeking
+
+### Single MP4 Recording
+
+**Endpoint:** `GET /api/recordings/{camera_id}/mp4/segments/{filename}`
+
+Stream an individual MP4 recording file for playback.
+
+- **Authentication**: None required (public endpoint)
+- **Headers**:
+  - `Range` (optional): Byte-range requests for seeking (e.g., `bytes=0-1024`)
+- **Response**: 
+  - `200 OK`: Full video file
+  - `206 Partial Content`: When Range header provided
+  - `404 Not Found`: Recording not found
+  - Headers: `Content-Type: video/mp4`, `Accept-Ranges: bytes`, `Cache-Control: public, max-age=3600`
+
+**Examples:**
+```bash
+# Stream full MP4 file
+GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
+
+# Stream with byte range for seeking
+GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
+Range: bytes=1024-2048
+```
+
+### HLS Time Range Playlist
+
+**Endpoint:** `GET /api/recordings/{camera_id}/hls/timerange`
+
+Generate an HLS (HTTP Live Streaming) playlist for recordings within a time range.
+
+- **Authentication**: None required (public endpoint)
+- **Query Parameters**:
+  - `t1` (required): Start time in ISO 8601 format
+  - `t2` (required): End time in ISO 8601 format  
+  - `segment_duration` (optional): Target segment duration in seconds (default: 10)
+- **Response**: 
+  - `200 OK`: M3U8 playlist content
+  - `404 Not Found`: No recordings in time range
+  - Headers: `Content-Type: application/vnd.apple.mpegurl`, `Access-Control-Allow-Origin: *`
+
+**Features:**
+- Creates MPEG-TS segments from MP4 recordings
+- Compatible with HLS.js, Video.js, and native iOS/macOS players
+- Supports adaptive bitrate streaming workflows
+- Works with both database and filesystem storage
+
+**Examples:**
+```bash
+# Basic HLS playlist
+GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
+
+# Custom segment duration
+GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z&segment_duration=5
+```
+
+**HTML5 Usage:**
+```html
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<video id="video" controls></video>
+<script>
+  const video = document.getElementById('video');
+  const hls = new Hls();
+  hls.loadSource('/api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z');
+  hls.attachMedia(video);
+</script>
+```
+
+---
+
+## 🛠️ Camera Management API
+
+All camera management endpoints require admin authentication via `Authorization: Bearer <admin_token>` header.
+
+**Base Path:** `/api/admin/cameras`
+
+### Create Camera
+
+**Endpoint:** `POST /api/admin/cameras`
+
+Creates a new camera configuration. The server automatically detects and starts the camera stream.
+
+**Request Body:**
+```json
+{
+  "camera_id": "new_cam",
+  "config": {
+    "path": "/new_cam",
+    "url": "rtsp://...",
+    "transport": "tcp",
+    "reconnect_interval": 10,
+    "token": "some-secure-token"
   }
-  ```
-- **Response**: A success or error message.
+}
+```
 
-### `GET /api/admin/cameras/:id`
+**Response:** Success or error message
+
+### Get Camera Configuration
+
+**Endpoint:** `GET /api/admin/cameras/{id}`
 
 Retrieves the current configuration for a specific camera.
 
-- **Method**: `GET`
-- **Path**: `/api/admin/cameras/:id` (e.g., `/api/admin/cameras/cam1`)
-- **Response**: The camera's configuration object.
+**Response:** Camera configuration object
 
-### `PUT /api/admin/cameras/:id`
+### Update Camera Configuration
 
-Updates the configuration for a specific camera. The server will detect the change and restart the camera stream.
+**Endpoint:** `PUT /api/admin/cameras/{id}`
 
-- **Method**: `PUT`
-- **Path**: `/api/admin/cameras/:id`
-- **Request Body**: A `CameraConfig` JSON object.
-- **Response**: A success or error message.
+Updates camera configuration. The server detects changes and restarts the camera stream.
 
-### `DELETE /api/admin/cameras/:id`
+**Request Body:** Complete `CameraConfig` JSON object  
+**Response:** Success or error message
 
-Deletes a camera's configuration file. The server will detect the removal and stop the corresponding camera stream.
+### Delete Camera
 
-- **Method**: `DELETE`
-- **Path**: `/api/admin/cameras/:id`
-- **Response**: A success or error message.
+**Endpoint:** `DELETE /api/admin/cameras/{id}`
 
-## Camera Control API
+Deletes camera configuration. The server detects removal and stops the camera stream.
 
-These endpoints are available for each camera, identified by its configured `path`. If a `token` is configured for the camera, it must be provided in the `Authorization` header as a Bearer token.
+**Response:** Success or error message
 
-### `POST /<camera_path>/control/recording/start`
+---
 
-Starts a new recording session for the camera.
+## 🎮 Camera Control API
 
-- **Method**: `POST`
-- **Path**: `/<camera_path>/control/recording/start` (e.g., `/cam1/control/recording/start`)
-- **Request Body** (optional):
-  ```json
-  {
-    "reason": "Motion detected"
+These endpoints control individual cameras using their configured path. Authentication via Bearer token if camera has `token` configured.
+
+**Base Path:** `/{camera_path}/control`
+
+### Recording Controls
+
+#### Start Recording
+**Endpoint:** `POST /{camera_path}/control/recording/start`
+
+**Request Body (optional):**
+```json
+{
+  "reason": "Motion detected"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "session_id": 123,
+    "message": "Recording started",
+    "camera_id": "cam1"
   }
-  ```
-- **Response**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "session_id": 123,
-      "message": "Recording started",
-      "camera_id": "cam1"
-    }
+}
+```
+
+#### Stop Recording
+**Endpoint:** `POST /{camera_path}/control/recording/stop`
+
+**Response:** Success message
+
+#### Get Active Recording
+**Endpoint:** `GET /{camera_path}/control/recording/active`
+
+**Response:** Active recording info or message indicating none active
+
+#### Get Recording Database Size
+**Endpoint:** `GET /{camera_path}/control/recording/size`
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "camera_id": "cam1",
+    "size_bytes": 10485760,
+    "size_mb": 10.0,
+    "size_gb": 0.009765625
   }
-  ```
+}
+```
 
-### `POST /<camera_path>/control/recording/stop`
+### Recording Queries
 
-Stops the currently active recording session for the camera.
+#### List Recordings
+**Endpoint:** `GET /{camera_path}/control/recordings`
 
-- **Method**: `POST`
-- **Path**: `/<camera_path>/control/recording/stop`
-- **Response**: A success message indicating the recording has been stopped.
+**Query Parameters:**
+- `from` (optional): ISO 8601 timestamp filter
+- `to` (optional): ISO 8601 timestamp filter
 
-### `GET /<camera_path>/control/recordings`
+**Response:** List of recording session objects
 
-Lists all recorded sessions for the camera.
+#### Get Frame Metadata
+**Endpoint:** `GET /{camera_path}/control/recordings/{session_id}/frames`
 
-- **Method**: `GET`
-- **Path**: `/<camera_path>/control/recordings`
-- **Query Parameters**:
-  - `from`: (Optional) ISO 8601 timestamp to filter recordings that started after this time.
-  - `to`: (Optional) ISO 8601 timestamp to filter recordings that started before this time.
-- **Response**: A list of recording session objects.
+**Query Parameters:**
+- `from` (optional): ISO 8601 timestamp
+- `to` (optional): ISO 8601 timestamp
 
-### `GET /<camera_path>/control/recordings/:session_id/frames`
+**Response:** List of frame metadata objects (timestamp, size)
 
-Retrieves metadata for frames within a specific recording session. Note that this does not return the actual frame data.
+#### List MP4 Segments
+**Endpoint:** `GET /{camera_path}/recordings/mp4/segments`
 
-- **Method**: `GET`
-- **Path**: `/<camera_path>/control/recordings/:session_id/frames`
-- **Query Parameters**:
-  - `from`: (Optional) ISO 8601 timestamp.
-  - `to`: (Optional) ISO 8601 timestamp.
-- **Response**: A list of frame metadata objects (timestamp, size).
+Advanced filtering for MP4 video segments.
 
-### `GET /<camera_path>/control/recording/active`
+**Query Parameters:**
+- `from` (optional): ISO 8601 timestamp (segments ending after this time)
+- `to` (optional): ISO 8601 timestamp (segments starting before this time)
+- `reason` (optional): Filter by recording reason with SQL wildcards
+- `limit` (optional): Max results (default: 1000)
+- `sort_order` (optional): `newest` (default) or `oldest`
 
-Gets the status of the currently active recording for the camera.
-
-- **Method**: `GET`
-- **Path**: `/<camera_path>/control/recording/active`
-- **Response**: Information about the active recording session, or a message indicating no active recording.
-
-### `GET /<camera_path>/control/recording/size`
-
-Gets the total size of the recording database for the camera.
-
-- **Method**: `GET`
-- **Path**: `/<camera_path>/control/recording/size`
-- **Response**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "camera_id": "cam1",
-      "size_bytes": 10485760,
-      "size_mb": 10.0,
-      "size_gb": 0.009765625
-    }
-  }
-  ```
-
-### `GET /<camera_path>/recordings/mp4/segments`
-
-Lists MP4 video segments for the camera with advanced filtering options.
-
-- **Method**: `GET`
-- **Path**: `/<camera_path>/recordings/mp4/segments` (e.g., `/cam1/recordings/mp4/segments`)
-- **Query Parameters**:
-  - `from`: (Optional) ISO 8601 timestamp to filter segments that end after this time.
-  - `to`: (Optional) ISO 8601 timestamp to filter segments that start before this time.
-  - `reason`: (Optional) Filter by recording reason using SQL wildcards (e.g., `Manual` or `%alarm%`).
-  - `limit`: (Optional) Maximum number of results to return (default: 1000).
-  - `sort_order`: (Optional) Sort order: `newest` (default) or `oldest`.
-- **Response**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "segments": [
-        {
-          "id": "2_1724214554",
-          "session_id": 2,
-          "start_time": "2025-08-21T05:39:14.610108Z",
-          "end_time": "2025-08-21T06:00:00.084373Z",
-          "duration_seconds": 1245,
-          "url": "/api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4",
-          "size_bytes": 25653248,
-          "recording_reason": "Manual recording started from dashboard",
-          "camera_id": "cam1"
-        }
-      ],
-      "count": 1,
-      "camera_id": "cam1",
-      "query": {
-        "from": "2025-08-21T00:00:00.000Z",
-        "to": "2025-08-21T23:59:59.999Z",
-        "reason": null,
-        "limit": 1000,
-        "sort_order": "newest"
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "segments": [
+      {
+        "id": "2_1724214554",
+        "session_id": 2,
+        "start_time": "2025-08-21T05:39:14.610108Z",
+        "end_time": "2025-08-21T06:00:00.084373Z",
+        "duration_seconds": 1245,
+        "url": "/api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4",
+        "size_bytes": 25653248,
+        "recording_reason": "Manual recording started from dashboard",
+        "camera_id": "cam1"
       }
+    ],
+    "count": 1,
+    "camera_id": "cam1",
+    "query": {
+      "from": "2025-08-21T00:00:00.000Z",
+      "to": "2025-08-21T23:59:59.999Z",
+      "reason": null,
+      "limit": 1000,
+      "sort_order": "newest"
     }
   }
-  ```
-- **Example Usage**:
-  ```bash
-  # Get all segments for cam1
-  GET /cam1/recordings/mp4/segments
-  
-  # Get segments with date range and reason filter
-  GET /cam1/recordings/mp4/segments?from=2025-08-21T00:00:00Z&to=2025-08-21T23:59:59Z&reason=Manual&limit=100
-  
-  # Search for segments containing "alarm" in the reason
-  GET /cam1/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
-  ```
+}
+```
 
-### Stream MP4 Recording
+**Examples:**
+```bash
+# Get all segments
+GET /cam1/recordings/mp4/segments
 
-- **Endpoint**: `GET /api/recordings/<camera_id>/mp4/segments/<filename>`
-- **Description**: Stream an MP4 recording file for playback. Supports both database and filesystem storage.
-- **Authentication**: None required (public endpoint)
-- **Headers**:
-  - `Range` (optional): Supports byte-range requests for video seeking (e.g., `bytes=0-1024`)
-- **Response**: 
-  - `200 OK`: Full video file
-  - `206 Partial Content`: When Range header is provided
-  - `404 Not Found`: Recording not found
-  - Headers include: `Content-Type: video/mp4`, `Accept-Ranges: bytes`, `Cache-Control: public, max-age=3600`
-- **Example Usage**:
-  ```bash
-  # Stream full MP4 file
-  GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
-  
-  # Stream with byte range (for seeking)
-  GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
-  Range: bytes=1024-2048
-  ```
+# Date range and reason filter
+GET /cam1/recordings/mp4/segments?from=2025-08-21T00:00:00Z&to=2025-08-21T23:59:59Z&reason=Manual&limit=100
 
-### PTZ Endpoints (if enabled)
+# Search for alarm segments
+GET /cam1/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
+```
 
-All PTZ endpoints live under the camera control path: `/<camera_path>/control/ptz/*`.
+---
 
-- `POST /<camera_path>/control/ptz/move`
-  - Body: `{ "pan": -1.0..1.0, "tilt": -1.0..1.0, "zoom": -1.0..1.0, "timeout_secs": 0.. }`
-- `POST /<camera_path>/control/ptz/stop`
-- `POST /<camera_path>/control/ptz/goto_preset`
-  - Body: `{ "token": "preset-token" }`
-- `POST /<camera_path>/control/ptz/set_preset`
-  - Body: `{ "name": "Home", "token": "home" }` (either field optional)
+## 🎛️ PTZ Control API
 
-Note: If a `token` is configured for the camera, include `Authorization: Bearer <token>` when calling these endpoints.
+Available only for cameras with PTZ capabilities enabled.
+
+**Base Path:** `/{camera_path}/control/ptz`
+
+### Move Camera
+**Endpoint:** `POST /{camera_path}/control/ptz/move`
+
+**Request Body:**
+```json
+{
+  "pan": -1.0,        // -1.0 to 1.0
+  "tilt": 0.5,        // -1.0 to 1.0  
+  "zoom": 0.0,        // -1.0 to 1.0
+  "timeout_secs": 5   // Movement duration
+}
+```
+
+### Stop Movement
+**Endpoint:** `POST /{camera_path}/control/ptz/stop`
+
+### Go to Preset
+**Endpoint:** `POST /{camera_path}/control/ptz/goto_preset`
+
+**Request Body:**
+```json
+{
+  "token": "preset-token"
+}
+```
+
+### Set Preset
+**Endpoint:** `POST /{camera_path}/control/ptz/set_preset`
+
+**Request Body:**
+```json
+{
+  "name": "Home",     // Optional
+  "token": "home"     // Optional  
+}
+```
+
+**Note:** Include `Authorization: Bearer <token>` header if camera has token configured.
+
+---
+
+## 📋 General API Information
+
+### Authentication
+- **Admin APIs**: Require `Authorization: Bearer <admin_token>` header
+- **Camera APIs**: Require `Authorization: Bearer <camera_token>` header if camera has token configured
+- **Video Streaming**: No authentication required (public endpoints)
+
+### Response Formats
+- **Success**: JSON with `status: "success"` and `data` object
+- **Error**: JSON with `status: "error"` and `message` string
+- **Video Content**: Binary streams with appropriate MIME types
+
+### Timestamps
+- All timestamps use ISO 8601 format: `2025-08-21T05:00:00Z`
+- Query parameters accept both with and without milliseconds
+- Responses include full precision timestamps
+
+### CORS
+- All endpoints include CORS headers for cross-origin requests
+- Video streaming endpoints specifically allow `Access-Control-Allow-Origin: *`

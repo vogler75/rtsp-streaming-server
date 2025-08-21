@@ -1,6 +1,8 @@
 use axum::response::IntoResponse;
-use chrono::Datelike;
-use tracing::error;
+use chrono::{DateTime, Datelike, Utc};
+use tracing::{error, info};
+use serde::Deserialize;
+use tokio::process::Command;
 
 use crate::{config, recording::RecordingManager};
 use crate::AppState;
@@ -218,4 +220,273 @@ async fn stream_from_filesystem(
         Ok(response) => response,
         Err(e) => { error!("Failed to create response: {}", e); (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create response").into_response() }
     }
+}
+
+// HLS-specific functionality
+
+#[derive(Debug, Deserialize)]
+pub struct HlsTimeRangeQuery {
+    t1: DateTime<Utc>,
+    t2: DateTime<Utc>,
+    #[serde(default = "default_hls_segment_duration")]
+    segment_duration: u32, // seconds per HLS segment
+}
+
+fn default_hls_segment_duration() -> u32 {
+    10 // 10 second segments by default
+}
+
+pub async fn serve_hls_playlist(
+    path: axum::extract::Path<String>, // camera_id
+    axum::extract::Query(query): axum::extract::Query<HlsTimeRangeQuery>,
+    axum::extract::State(app_state): axum::extract::State<AppState>,
+) -> axum::response::Response {
+    let camera_id = path.0;
+    info!("Serving HLS playlist: camera_id={}, from={}, to={}", camera_id, query.t1, query.t2);
+    
+    let recording_manager = match app_state.recording_manager {
+        Some(ref rm) => rm,
+        None => {
+            return (axum::http::StatusCode::SERVICE_UNAVAILABLE, "Recording system not available").into_response();
+        }
+    };
+
+    // Get all video segments in the time range
+    let segments = match recording_manager.list_video_segments_filtered(
+        &camera_id,
+        Some(query.t1),
+        Some(query.t2),
+        None, // no reason filter
+        1000, // max segments
+        "oldest", // chronological order
+    ).await {
+        Ok(segments) => segments,
+        Err(e) => {
+            error!("Failed to list video segments: {}", e);
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to list video segments").into_response();
+        }
+    };
+
+    if segments.is_empty() {
+        return (axum::http::StatusCode::NOT_FOUND, "No recordings found in the specified time range").into_response();
+    }
+
+    // For HLS, we need to generate proper HLS segments, not use MP4 files directly
+    // Create a unique playlist ID for this request
+    let playlist_id = format!("{}_{}_{}_{}", camera_id, query.t1.timestamp(), query.t2.timestamp(), query.segment_duration);
+    
+    // Get camera config for storage type
+    let camera_configs = app_state.camera_configs.read().await;
+    let camera_config = match camera_configs.get(&camera_id) {
+        Some(config) => config,
+        None => {
+            return (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response();
+        }
+    };
+
+    let storage_type = recording_manager.get_storage_type_for_camera(camera_config);
+    drop(camera_configs);
+    
+    // Create HLS output directory
+    let hls_dir = format!("/tmp/hls_{}", playlist_id);
+    if let Err(e) = tokio::fs::create_dir_all(&hls_dir).await {
+        error!("Failed to create HLS directory: {}", e);
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create HLS directory").into_response();
+    }
+
+    // Prepare input files for FFmpeg
+    let mut input_files = Vec::new();
+    let mut temp_files = Vec::new();
+    
+    for (i, segment) in segments.iter().enumerate() {
+        match storage_type {
+            config::Mp4StorageType::Database => {
+                let camera_streams = recording_manager.databases.read().await;
+                let database = match camera_streams.get(&camera_id) {
+                    Some(db) => db.clone(),
+                    None => continue,
+                };
+                drop(camera_streams);
+                
+                let filename = segment.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string();
+                let db_segment = match database.get_video_segment_by_filename(&camera_id, &filename).await {
+                    Ok(Some(seg)) => seg,
+                    _ => continue,
+                };
+                
+                if let Some(mp4_data) = db_segment.mp4_data {
+                    let temp_path = format!("/tmp/hls_input_{}_{}.mp4", playlist_id, i);
+                    if let Err(e) = tokio::fs::write(&temp_path, &mp4_data).await {
+                        error!("Failed to write temp file: {}", e);
+                        continue;
+                    }
+                    input_files.push(temp_path.clone());
+                    temp_files.push(temp_path);
+                }
+            },
+            config::Mp4StorageType::Filesystem => {
+                if let Some(file_path) = &segment.file_path {
+                    input_files.push(file_path.clone());
+                }
+            },
+            config::Mp4StorageType::Disabled => {
+                return (axum::http::StatusCode::NOT_FOUND, "MP4 storage disabled").into_response();
+            }
+        }
+    }
+
+    if input_files.is_empty() {
+        return (axum::http::StatusCode::NOT_FOUND, "No valid segments found").into_response();
+    }
+
+    // Create concat list for FFmpeg
+    let concat_list_path = format!("/tmp/hls_concat_{}.txt", playlist_id);
+    let concat_content = input_files.iter()
+        .map(|path| format!("file '{}'", path))
+        .collect::<Vec<String>>()
+        .join("\n");
+    
+    if let Err(e) = tokio::fs::write(&concat_list_path, &concat_content).await {
+        error!("Failed to write concat list: {}", e);
+        // Cleanup
+        for temp_file in temp_files {
+            let _ = tokio::fs::remove_file(temp_file).await;
+        }
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare HLS").into_response();
+    }
+
+    // Generate HLS segments using FFmpeg
+    let playlist_path = format!("{}/playlist.m3u8", hls_dir);
+    let mut hls_cmd = Command::new("ffmpeg");
+    hls_cmd.args([
+        "-f", "concat",
+        "-safe", "0",
+        "-i", &concat_list_path,
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-preset", "ultrafast",
+        "-hls_time", &query.segment_duration.to_string(),
+        "-hls_playlist_type", "vod",
+        "-hls_segment_type", "mpegts", // Use MPEG-TS segments for better HLS compatibility
+        "-hls_segment_filename", &format!("{}/segment_%03d.ts", hls_dir),
+        "-start_number", "0",
+        &playlist_path,
+    ]);
+    hls_cmd.stdout(std::process::Stdio::null());
+    hls_cmd.stderr(std::process::Stdio::null());
+
+    match hls_cmd.status().await {
+        Ok(status) if status.success() => {
+            info!("HLS generation completed successfully");
+        },
+        Ok(status) => {
+            error!("FFmpeg failed with exit code: {:?}", status.code());
+            // Cleanup
+            for temp_file in temp_files {
+                let _ = tokio::fs::remove_file(temp_file).await;
+            }
+            let _ = tokio::fs::remove_file(&concat_list_path).await;
+            let _ = tokio::fs::remove_dir_all(&hls_dir).await;
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate HLS segments").into_response();
+        },
+        Err(e) => {
+            error!("Failed to run FFmpeg: {}", e);
+            // Cleanup
+            for temp_file in temp_files {
+                let _ = tokio::fs::remove_file(temp_file).await;
+            }
+            let _ = tokio::fs::remove_file(&concat_list_path).await;
+            let _ = tokio::fs::remove_dir_all(&hls_dir).await;
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to run FFmpeg").into_response();
+        }
+    }
+
+    // Read and modify the generated playlist to use our URLs
+    let playlist_content = match tokio::fs::read_to_string(&playlist_path).await {
+        Ok(content) => content,
+        Err(e) => {
+            error!("Failed to read generated playlist: {}", e);
+            // Cleanup
+            for temp_file in temp_files {
+                let _ = tokio::fs::remove_file(temp_file).await;
+            }
+            let _ = tokio::fs::remove_file(&concat_list_path).await;
+            let _ = tokio::fs::remove_dir_all(&hls_dir).await;
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to read playlist").into_response();
+        }
+    };
+
+    // Update URLs in playlist to point to our segment handler
+    let m3u8_content = playlist_content
+        .lines()
+        .map(|line| {
+            if line.starts_with("segment_") && line.ends_with(".ts") {
+                format!("/api/recordings/{}/hls/segments/{}/{}", camera_id, playlist_id, line)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    // Cleanup temp files but keep HLS directory for segment serving
+    for temp_file in temp_files {
+        let _ = tokio::fs::remove_file(temp_file).await;
+    }
+    let _ = tokio::fs::remove_file(&concat_list_path).await;
+    
+    info!("Generated HLS playlist with {} segments", input_files.len());
+
+    axum::response::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header("Content-Type", "application/vnd.apple.mpegurl")
+        .header("Cache-Control", "no-cache")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(axum::body::Body::from(m3u8_content))
+        .unwrap_or_else(|e| {
+            error!("Failed to create HLS response: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create playlist").into_response()
+        })
+}
+
+pub async fn serve_hls_segment(
+    path: axum::extract::Path<(String, String, String)>, // camera_id, playlist_id, segment_name
+    axum::extract::State(_app_state): axum::extract::State<AppState>,
+) -> axum::response::Response {
+    let (camera_id, playlist_id, segment_name) = path.0;
+    info!("Serving HLS segment: camera_id={}, playlist_id={}, segment={}", camera_id, playlist_id, segment_name);
+    
+    // Validate segment name to prevent path traversal
+    if segment_name.contains("..") || segment_name.contains("/") || !segment_name.ends_with(".ts") {
+        return (axum::http::StatusCode::BAD_REQUEST, "Invalid segment name").into_response();
+    }
+    
+    let hls_dir = format!("/tmp/hls_{}", playlist_id);
+    let segment_path = format!("{}/{}", hls_dir, segment_name);
+    
+    // Check if segment file exists
+    if !tokio::fs::metadata(&segment_path).await.is_ok() {
+        return (axum::http::StatusCode::NOT_FOUND, "Segment not found").into_response();
+    }
+    
+    // Read and serve the segment file
+    let segment_data = match tokio::fs::read(&segment_path).await {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Failed to read HLS segment: {}", e);
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to read segment").into_response();
+        }
+    };
+    
+    axum::response::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header("Content-Type", "video/mp2t") // MPEG-TS MIME type
+        .header("Cache-Control", "public, max-age=3600")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Content-Length", segment_data.len().to_string())
+        .body(axum::body::Body::from(segment_data))
+        .unwrap_or_else(|e| {
+            error!("Failed to create segment response: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create response").into_response()
+        })
 }
