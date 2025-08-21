@@ -8,6 +8,8 @@ use crate::errors::Result;
 const TABLE_RECORDING_SESSIONS: &str = "recording_sessions";
 const TABLE_RECORDING_MJPEG: &str = "recording_mjpeg";  // formerly recorded_frames
 const TABLE_RECORDING_MP4: &str = "recording_mp4";      // formerly video_segments
+const TABLE_HLS_PLAYLISTS: &str = "hls_playlists";
+const TABLE_HLS_SEGMENTS: &str = "hls_segments";
 
 #[derive(Debug, Clone)]
 pub struct RecordingSession {
@@ -38,6 +40,28 @@ pub struct VideoSegment {
     #[sqlx(default)]  // This field comes from the JOIN with recording_sessions
     #[allow(dead_code)]  // Available from JOIN but not always used
     pub camera_id: Option<String>,  // Camera ID from recording_sessions when needed
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct HlsPlaylist {
+    pub playlist_id: String,  // Unique identifier for the playlist
+    pub camera_id: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub segment_duration: i32,  // Segment duration in seconds
+    pub playlist_content: String,  // M3U8 playlist content
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,  // When this playlist expires
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct HlsSegment {
+    pub playlist_id: String,  // References HlsPlaylist
+    pub segment_name: String,  // e.g., "segment_000.ts"
+    pub segment_index: i32,    // Segment number in playlist
+    pub segment_data: Vec<u8>, // MPEG-TS segment data
+    pub size_bytes: i64,
+    pub created_at: DateTime<Utc>,
 }
 
 
@@ -176,6 +200,14 @@ pub trait DatabaseProvider: Send + Sync {
         camera_id: &str,
         filename: &str,
     ) -> Result<Option<VideoSegment>>;
+        
+    // HLS-specific methods
+    async fn store_hls_playlist(&self, playlist: &HlsPlaylist) -> Result<()>;
+    async fn store_hls_segment(&self, segment: &HlsSegment) -> Result<()>;
+    async fn store_hls_playlist_with_segments(&self, playlist: &HlsPlaylist, segments: &[HlsSegment]) -> Result<()>;
+    async fn get_hls_playlist(&self, playlist_id: &str) -> Result<Option<HlsPlaylist>>;
+    async fn get_hls_segment(&self, playlist_id: &str, segment_name: &str) -> Result<Option<HlsSegment>>;
+    async fn cleanup_expired_hls(&self) -> Result<usize>;
 }
 
 pub struct SqliteDatabase {
@@ -431,6 +463,71 @@ impl DatabaseProvider for SqliteDatabase {
             TABLE_RECORDING_SESSIONS
         );
         sqlx::query(&idx_camera_start_time)
+            .execute(&self.pool)
+            .await?;
+
+        // Create HLS playlists table
+        let create_hls_playlists_query = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {} (
+                playlist_id TEXT PRIMARY KEY,
+                camera_id TEXT NOT NULL,
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP NOT NULL,
+                segment_duration INTEGER NOT NULL,
+                playlist_content TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+            "#,
+            TABLE_HLS_PLAYLISTS
+        );
+        sqlx::query(&create_hls_playlists_query)
+            .execute(&self.pool)
+            .await?;
+
+        // Create HLS segments table
+        let create_hls_segments_query = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {} (
+                playlist_id TEXT NOT NULL,
+                segment_name TEXT NOT NULL,
+                segment_index INTEGER NOT NULL,
+                segment_data BLOB NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (playlist_id, segment_name),
+                FOREIGN KEY (playlist_id) REFERENCES {}(playlist_id) ON DELETE CASCADE
+            )
+            "#,
+            TABLE_HLS_SEGMENTS, TABLE_HLS_PLAYLISTS
+        );
+        sqlx::query(&create_hls_segments_query)
+            .execute(&self.pool)
+            .await?;
+
+        // Add indexes for HLS tables
+        let idx_hls_playlists_camera = format!(
+            "CREATE INDEX IF NOT EXISTS idx_hls_playlists_camera ON {}(camera_id, start_time, end_time)",
+            TABLE_HLS_PLAYLISTS
+        );
+        sqlx::query(&idx_hls_playlists_camera)
+            .execute(&self.pool)
+            .await?;
+
+        let idx_hls_playlists_expires = format!(
+            "CREATE INDEX IF NOT EXISTS idx_hls_playlists_expires ON {}(expires_at)",
+            TABLE_HLS_PLAYLISTS
+        );
+        sqlx::query(&idx_hls_playlists_expires)
+            .execute(&self.pool)
+            .await?;
+
+        let idx_hls_segments_playlist = format!(
+            "CREATE INDEX IF NOT EXISTS idx_hls_segments_playlist ON {}(playlist_id, segment_index)",
+            TABLE_HLS_SEGMENTS
+        );
+        sqlx::query(&idx_hls_segments_playlist)
             .execute(&self.pool)
             .await?;
 
@@ -1156,5 +1253,200 @@ impl DatabaseProvider for SqliteDatabase {
         } else {
             Ok(None)
         }
+    }
+
+    // HLS-specific methods
+    
+    /// Store an HLS playlist in the database
+    async fn store_hls_playlist(&self, playlist: &HlsPlaylist) -> Result<()> {
+        let query = format!(
+            r#"
+            INSERT OR REPLACE INTO {} (playlist_id, camera_id, start_time, end_time, segment_duration, playlist_content, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            TABLE_HLS_PLAYLISTS
+        );
+        sqlx::query(&query)
+            .bind(&playlist.playlist_id)
+            .bind(&playlist.camera_id)
+            .bind(playlist.start_time)
+            .bind(playlist.end_time)
+            .bind(playlist.segment_duration)
+            .bind(&playlist.playlist_content)
+            .bind(playlist.created_at)
+            .bind(playlist.expires_at)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Store HLS playlist and segments in a transaction
+    async fn store_hls_playlist_with_segments(&self, playlist: &HlsPlaylist, segments: &[HlsSegment]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // First, store the playlist
+        let playlist_query = format!(
+            r#"
+            INSERT OR REPLACE INTO {} (playlist_id, camera_id, start_time, end_time, segment_duration, playlist_content, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            TABLE_HLS_PLAYLISTS
+        );
+        sqlx::query(&playlist_query)
+            .bind(&playlist.playlist_id)
+            .bind(&playlist.camera_id)
+            .bind(playlist.start_time)
+            .bind(playlist.end_time)
+            .bind(playlist.segment_duration)
+            .bind(&playlist.playlist_content)
+            .bind(playlist.created_at)
+            .bind(playlist.expires_at)
+            .execute(&mut *tx)
+            .await?;
+
+        // Then, store all segments
+        let segment_query = format!(
+            r#"
+            INSERT OR REPLACE INTO {} (playlist_id, segment_name, segment_index, segment_data, size_bytes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            TABLE_HLS_SEGMENTS
+        );
+
+        for segment in segments {
+            sqlx::query(&segment_query)
+                .bind(&segment.playlist_id)
+                .bind(&segment.segment_name)
+                .bind(segment.segment_index)
+                .bind(&segment.segment_data)
+                .bind(segment.size_bytes)
+                .bind(segment.created_at)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Store an HLS segment in the database
+    async fn store_hls_segment(&self, segment: &HlsSegment) -> Result<()> {
+        let query = format!(
+            r#"
+            INSERT OR REPLACE INTO {} (playlist_id, segment_name, segment_index, segment_data, size_bytes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            TABLE_HLS_SEGMENTS
+        );
+        sqlx::query(&query)
+            .bind(&segment.playlist_id)
+            .bind(&segment.segment_name)
+            .bind(segment.segment_index)
+            .bind(&segment.segment_data)
+            .bind(segment.size_bytes)
+            .bind(segment.created_at)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get an HLS playlist by ID if it hasn't expired
+    async fn get_hls_playlist(&self, playlist_id: &str) -> Result<Option<HlsPlaylist>> {
+        let query = format!(
+            r#"
+            SELECT playlist_id, camera_id, start_time, end_time, segment_duration, playlist_content, created_at, expires_at
+            FROM {} 
+            WHERE playlist_id = ? AND expires_at > CURRENT_TIMESTAMP
+            "#,
+            TABLE_HLS_PLAYLISTS
+        );
+        let row = sqlx::query(&query)
+            .bind(playlist_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if let Some(row) = row {
+            Ok(Some(HlsPlaylist {
+                playlist_id: row.get("playlist_id"),
+                camera_id: row.get("camera_id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                segment_duration: row.get("segment_duration"),
+                playlist_content: row.get("playlist_content"),
+                created_at: row.get("created_at"),
+                expires_at: row.get("expires_at"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get an HLS segment by playlist ID and segment name
+    async fn get_hls_segment(&self, playlist_id: &str, segment_name: &str) -> Result<Option<HlsSegment>> {
+        let query = format!(
+            r#"
+            SELECT playlist_id, segment_name, segment_index, segment_data, size_bytes, created_at
+            FROM {} 
+            WHERE playlist_id = ? AND segment_name = ?
+            "#,
+            TABLE_HLS_SEGMENTS
+        );
+        let row = sqlx::query(&query)
+            .bind(playlist_id)
+            .bind(segment_name)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if let Some(row) = row {
+            Ok(Some(HlsSegment {
+                playlist_id: row.get("playlist_id"),
+                segment_name: row.get("segment_name"),
+                segment_index: row.get("segment_index"),
+                segment_data: row.get("segment_data"),
+                size_bytes: row.get("size_bytes"),
+                created_at: row.get("created_at"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Clean up expired HLS playlists and their segments
+    async fn cleanup_expired_hls(&self) -> Result<usize> {
+        let mut tx = self.pool.begin().await?;
+
+        // Delete expired segments first (due to foreign key constraint)
+        let delete_segments_query = format!(
+            r#"
+            DELETE FROM {} 
+            WHERE playlist_id IN (
+                SELECT playlist_id FROM {} 
+                WHERE expires_at <= CURRENT_TIMESTAMP
+            )
+            "#,
+            TABLE_HLS_SEGMENTS, TABLE_HLS_PLAYLISTS
+        );
+        let segments_result = sqlx::query(&delete_segments_query)
+            .execute(&mut *tx)
+            .await?;
+
+        // Delete expired playlists
+        let delete_playlists_query = format!(
+            "DELETE FROM {} WHERE expires_at <= CURRENT_TIMESTAMP",
+            TABLE_HLS_PLAYLISTS
+        );
+        let playlists_result = sqlx::query(&delete_playlists_query)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        tracing::info!(
+            "Cleaned up expired HLS data: {} playlists, {} segments",
+            playlists_result.rows_affected(),
+            segments_result.rows_affected()
+        );
+
+        Ok(playlists_result.rows_affected() as usize)
     }
 }
