@@ -35,13 +35,12 @@ This document provides a hierarchical overview of the available REST API endpoin
   # Recording API
   POST /recording/start                   # Start recording
   POST /recording/stop                    # Stop recording
-  GET  /recordings                        # List recordings
   GET  /recording/active                  # Active recording status
   GET  /recording/size                    # Recording DB size
+  
+  GET  /recordings                        # List recordings
   GET  /recordings/:session_id/frames     # Frames metadata for a recording
-
-<camera_path>/recordings
-  GET  /mp4/segments                      # List MP4 video segments
+  GET  /recordings/mp4/segments           # List MP4 video segments
 
   # PTZ API (if enabled for the camera)
   POST /ptz/move                          # Continuous pan/tilt/zoom
