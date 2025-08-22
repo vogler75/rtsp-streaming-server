@@ -7,12 +7,19 @@ A high-performance, low-latency video streaming server built in Rust that connec
 - **Multi-Camera Support**: Stream from multiple RTSP cameras simultaneously
 - **RTSP Camera Support**: Connect to RTSP cameras and streams
 - **WebSocket Streaming**: Low-latency video streaming via WebSockets  
+- **HLS Video Streaming**: HTTP Live Streaming support for broader compatibility
 - **MJPEG Output**: Converts video to JPEG frames for browser compatibility
+- **Advanced Recording System**: Triple-format storage system:
+  - **Frame Storage**: Individual JPEG frames for precise seeking (short-term)
+  - **HLS Storage**: Pre-generated HLS segments for fast streaming (medium-term) 
+  - **MP4 Storage**: Efficient video segments for long-term archival
+- **Performance Optimized**: HLS storage eliminates conversion overhead for instant playback
 - **HTTPS/TLS Support**: Secure connections with configurable certificates
-- **Web Interface**: Simple HTML client for viewing streams
-- **Real-time Stats**: FPS, frame count, and latency monitoring
+- **Web Interface**: Comprehensive dashboard and control interfaces
+- **Real-time Stats**: FPS, frame count, latency monitoring, and storage analytics
 - **Auto-reconnection**: Automatic reconnection for both RTSP and WebSocket connections
 - **Per-Camera Debug**: Camera-specific logging with ID prefixes
+- **PTZ Control**: Pan/Tilt/Zoom support via ONVIF protocol
 
 ## Quick Start
 
@@ -72,6 +79,47 @@ For **Siemens WinCC Unified (CWC)** integration, use the appropriate streaming e
   ```
 
 The **`/stream`** endpoint provides a clean video streaming interface optimized for embedding in CWC, while **`/control`** provides full recording and playback functionality.
+
+#### CWC Custom Web Control Properties
+
+The VideoPlayer CWC control supports the following properties (see `cwc/src/manifest.json`):
+
+##### Connection Properties
+- **`camera_stream_url`** (string): WebSocket connection URL for the video stream
+- **`camera_auth_token`** (string): Authentication token for WebSocket connection (Bearer token)
+- **`enable_connection`** (boolean): Enable/disable video connection
+
+##### Display Properties  
+- **`show_version`** (boolean): Show build version number
+- **`enable_debug`** (boolean): Enable debug logging for troubleshooting
+
+##### Streaming Mode
+- **`use_control_stream`** (boolean): Enable control mode instead of normal video streaming
+- **`enable_livestream`** (boolean): Enable/disable live stream mode
+- **`use_hls_streaming`** (boolean): Enable HLS player mode instead of WebSocket streaming
+
+##### Recording Control
+- **`enable_recording`** (boolean): Start or stop recording (true=start, false=stop)  
+- **`recording_reason`** (string): Reason for starting a recording session
+
+##### Playback Control
+- **`enable_playback`** (boolean): Start/stop playback with the specified time range
+- **`playback_start_time`** (string): Start timestamp for playback as ISO string (e.g., '2025-08-15T10:00:00.000Z')
+- **`playback_end_time`** (string): End timestamp for playback as ISO string (optional, plays until end if empty)
+- **`playback_speed`** (number): Playback speed multiplier (e.g., 1.0 = normal, 2.0 = 2x speed)
+- **`seek_to_time`** (string): Go to specific timestamp in ISO format (e.g., '2025-08-15T10:30:00.000Z')
+
+##### PTZ Control
+- **`ptz_move`** (string): PTZ move command as JSON string (e.g., '{"pan": 1, "tilt": 0, "zoom": 0}')
+- **`ptz_stop`** (boolean): Stop all PTZ movements when set to true
+- **`ptz_goto_preset`** (string): Go to PTZ preset as JSON string (e.g., '{"preset": 1}')
+- **`ptz_set_preset`** (string): Set PTZ preset as JSON string (e.g., '{"preset": 1, "name": "Entrance"}')
+
+##### Status Properties (Read-Only)
+- **`status_connected`** (boolean): Indicates the connection state
+- **`status_fps`** (number): Current frames per second of the video stream
+- **`status_bitrate_kbps`** (number): Current bitrate in kilobits per second
+- **`status_timestamp`** (string): Current video frame timestamp in ISO format
 
 ## Configuration
 ### PTZ (Pan/Tilt/Zoom)
@@ -697,52 +745,78 @@ This makes it easy to identify issues with specific cameras.
 
 ## Recording System
 
-The server includes a comprehensive dual-format recording system that provides both granular frame-by-frame access and efficient video segment storage.
+The server includes a comprehensive **triple-format recording system** that provides optimal storage and playback performance for different use cases.
 
 ### Recording Features
 
-- **Dual Storage System**: 
-  - Frame-by-frame SQLite database for precise playback control
-  - MP4 video segments for efficient long-term storage
+- **Triple Storage System**: 
+  - **Frame Storage**: Individual JPEG frames in SQLite for precise seeking and frame-by-frame access
+  - **HLS Storage**: Pre-generated HLS segments for instant streaming without conversion overhead
+  - **MP4 Storage**: Efficient video segments for long-term archival storage
+- **Performance Optimized**: HLS segments are generated during recording, eliminating conversion delays
+- **Smart Storage Strategy**: Use different formats for different time periods:
+  - **Short-term (1-7 days)**: Frame storage for precise seeking and analysis
+  - **Medium-term (7-30 days)**: HLS storage for fast video streaming and playback
+  - **Long-term (30+ days)**: MP4 storage for efficient archival
 - **Manual Recording**: Start/stop recording via REST API or control interface
-- **Frame Storage**: Stores individual JPEG frames with timestamps for precise seeking
-- **Video Segments**: Creates time-based MP4 files for efficient storage and playback
-- **Playback**: Replay recorded footage at variable speeds from either storage format
-- **Time-based Filtering**: Query recordings by date/time ranges
-- **Automatic Cleanup**: Independent retention policies for frames vs. video segments
+- **Instant Playback**: HLS storage provides immediate streaming without MP4→HLS conversion
+- **Time-based Filtering**: Query recordings by date/time ranges across all storage formats
+- **Independent Retention**: Separate cleanup policies for each storage type
 
 ### Recording Configuration
 
-The recording system supports two storage formats with independent configuration:
+The recording system supports three storage formats with independent configuration:
 
 ```json
 {
   "recording": {
     "frame_storage_enabled": true,
-    "video_storage_enabled": true,
+    "video_storage_type": "database",
+    "hls_storage_enabled": true,
     "database_path": "recordings",
     "max_frame_size": 10485760,
+    "mp4_framerate": 5.0,
     "frame_storage_retention": "7d",
     "video_storage_retention": "30d",
     "video_segment_minutes": 5,
+    "hls_storage_retention": "30d",
+    "hls_segment_seconds": 6,
     "cleanup_interval_hours": 1
   }
 }
 ```
 
 #### Recording Options
+
+##### Core Settings
 - **frame_storage_enabled**: Enable/disable frame-by-frame SQLite storage
-- **video_storage_enabled**: Enable/disable MP4 video segment creation
+- **video_storage_type**: MP4 storage mode: `"disabled"`, `"filesystem"`, or `"database"`  
+- **hls_storage_enabled**: Enable/disable HLS segment pre-generation
 - **database_path**: Base path for database files and video segments
 - **max_frame_size**: Maximum size for a single frame in bytes (SQLite storage)
+- **mp4_framerate**: Frame rate for MP4 recordings (default: 5.0 fps)
+
+##### Retention Policies
 - **frame_storage_retention**: Maximum age for frame recordings before deletion
-  - Format: `"10m"` (minutes), `"5h"` (hours), `"7d"` (days)
-  - Typically shorter for high-granularity access (e.g., 1-7 days)
-- **video_storage_retention**: Maximum age for video segments before deletion
+  - Format: `"10m"` (minutes), `"5h"` (hours), `"7d"` (days)  
+  - **Recommended**: 1-7 days for precise seeking and analysis
+- **video_storage_retention**: Maximum age for MP4 segments before deletion
   - Format: `"10m"` (minutes), `"5h"` (hours), `"30d"` (days)
-  - Typically longer for archival storage (e.g., 30-90 days)
-- **video_segment_minutes**: Duration of each MP4 video segment in minutes (default: 5)
-- **cleanup_interval_hours**: How often to run the cleanup task (default: 1 hour)
+  - **Recommended**: 30-90 days for long-term archival
+- **hls_storage_retention**: Maximum age for HLS segments before deletion
+  - Format: `"10m"` (minutes), `"5h"` (hours), `"30d"` (days)
+  - **Recommended**: 7-30 days for fast streaming access
+
+##### Segment Configuration  
+- **video_segment_minutes**: Duration of each MP4 segment (default: 5 minutes)
+- **hls_segment_seconds**: Duration of each HLS segment (default: 6 seconds)
+- **cleanup_interval_hours**: How often to run automatic cleanup (default: 1 hour)
+
+##### Performance Recommendations
+For optimal performance and storage efficiency:
+- **Enable frame storage** for 1-7 days: Precise seeking for recent footage
+- **Enable HLS storage** for 7-30 days: Fast streaming without conversion overhead  
+- **Enable MP4 storage** for 30+ days: Efficient long-term archival storage
 
 ### Per-Camera Recording Settings
 
@@ -755,9 +829,12 @@ You can override global recording settings for individual cameras in their confi
   "recording": {
     "frame_storage_enabled": true,
     "frame_storage_retention": "1d",
-    "video_storage_type": "filesystem",
+    "video_storage_type": "database",
     "video_storage_retention": "14d",
-    "video_segment_minutes": 10
+    "video_segment_minutes": 10,
+    "hls_storage_enabled": true,
+    "hls_storage_retention": "7d",
+    "hls_segment_seconds": 6
   }
 }
 ```
