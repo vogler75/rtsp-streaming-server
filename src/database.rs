@@ -10,6 +10,7 @@ const TABLE_RECORDING_MJPEG: &str = "recording_mjpeg";  // formerly recorded_fra
 const TABLE_RECORDING_MP4: &str = "recording_mp4";      // formerly video_segments
 const TABLE_HLS_PLAYLISTS: &str = "hls_playlists";
 const TABLE_HLS_SEGMENTS: &str = "hls_segments";
+const TABLE_RECORDING_HLS: &str = "recording_hls";
 
 #[derive(Debug, Clone)]
 pub struct RecordingSession {
@@ -60,6 +61,18 @@ pub struct HlsSegment {
     pub segment_name: String,  // e.g., "segment_000.ts"
     pub segment_index: i32,    // Segment number in playlist
     pub segment_data: Vec<u8>, // MPEG-TS segment data
+    pub size_bytes: i64,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct RecordingHlsSegment {
+    pub session_id: i64,      // References RecordingSession.id
+    pub segment_index: i32,   // Segment number within the session
+    pub start_time: DateTime<Utc>, // Start timestamp of this segment
+    pub end_time: DateTime<Utc>,   // End timestamp of this segment
+    pub duration_seconds: f64,     // Actual segment duration in seconds
+    pub segment_data: Vec<u8>,     // MPEG-TS segment data
     pub size_bytes: i64,
     pub created_at: DateTime<Utc>,
 }
@@ -219,6 +232,35 @@ pub trait DatabaseProvider: Send + Sync {
     async fn get_hls_playlist(&self, playlist_id: &str) -> Result<Option<HlsPlaylist>>;
     async fn get_hls_segment(&self, playlist_id: &str, segment_name: &str) -> Result<Option<HlsSegment>>;
     async fn cleanup_expired_hls(&self) -> Result<usize>;
+    
+    // Recording HLS methods
+    async fn add_recording_hls_segment(&self, segment: &RecordingHlsSegment) -> Result<i64>;
+    async fn list_recording_hls_segments(
+        &self,
+        session_id: i64,
+        from_time: Option<DateTime<Utc>>,
+        to_time: Option<DateTime<Utc>>,
+    ) -> Result<Vec<RecordingHlsSegment>>;
+    async fn get_recording_hls_segments_for_timerange(
+        &self,
+        camera_id: &str,
+        from_time: DateTime<Utc>,
+        to_time: DateTime<Utc>,
+    ) -> Result<Vec<RecordingHlsSegment>>;
+    async fn delete_old_recording_hls_segments(
+        &self,
+        retention_duration: &str,
+        camera_id: Option<&str>,
+    ) -> Result<usize>;
+    async fn get_recording_hls_segment_by_session_and_index(
+        &self,
+        session_id: i64,
+        segment_index: i32,
+    ) -> Result<Option<RecordingHlsSegment>>;
+    async fn get_last_hls_segment_index_for_session(
+        &self,
+        session_id: i64,
+    ) -> Result<Option<i32>>;
 }
 
 pub struct SqliteDatabase {
@@ -517,6 +559,28 @@ impl DatabaseProvider for SqliteDatabase {
             .execute(&self.pool)
             .await?;
 
+        // Create recording HLS segments table
+        let create_recording_hls_query = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {} (
+                session_id INTEGER NOT NULL,
+                segment_index INTEGER NOT NULL,
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP NOT NULL,
+                duration_seconds REAL NOT NULL,
+                segment_data BLOB NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (session_id, segment_index),
+                FOREIGN KEY (session_id) REFERENCES {}(id) ON DELETE CASCADE
+            )
+            "#,
+            TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+        );
+        sqlx::query(&create_recording_hls_query)
+            .execute(&self.pool)
+            .await?;
+
         // Add indexes for HLS tables
         let idx_hls_playlists_camera = format!(
             "CREATE INDEX IF NOT EXISTS idx_hls_playlists_camera ON {}(camera_id, start_time, end_time)",
@@ -539,6 +603,14 @@ impl DatabaseProvider for SqliteDatabase {
             TABLE_HLS_SEGMENTS
         );
         sqlx::query(&idx_hls_segments_playlist)
+            .execute(&self.pool)
+            .await?;
+
+        let idx_recording_hls_time = format!(
+            "CREATE INDEX IF NOT EXISTS idx_recording_hls_time ON {}(start_time, end_time)",
+            TABLE_RECORDING_HLS
+        );
+        sqlx::query(&idx_recording_hls_time)
             .execute(&self.pool)
             .await?;
 
@@ -1310,7 +1382,7 @@ impl DatabaseProvider for SqliteDatabase {
         };
 
         // Get camera-specific config or use global config
-        let (frame_retention, video_retention, video_storage_type) = if let Some(cam_id) = &camera_id {
+        let (frame_retention, video_retention, video_storage_type, hls_enabled, hls_retention) = if let Some(cam_id) = &camera_id {
             if let Some(camera_config) = camera_configs.get(cam_id) {
                 // Use camera-specific retention settings if available, otherwise fall back to global
                 let frame_retention = camera_config.get_frame_storage_retention()
@@ -1319,18 +1391,26 @@ impl DatabaseProvider for SqliteDatabase {
                     .unwrap_or(&config.video_storage_retention);
                 let video_type = camera_config.get_video_storage_type()
                     .unwrap_or(&config.video_storage_type);
-                (frame_retention.clone(), video_retention.clone(), video_type.clone())
+                let hls_enabled = camera_config.get_hls_storage_enabled()
+                    .unwrap_or(config.hls_storage_enabled);
+                let hls_retention = camera_config.get_hls_storage_retention()
+                    .unwrap_or(&config.hls_storage_retention);
+                (frame_retention.clone(), video_retention.clone(), video_type.clone(), hls_enabled, hls_retention.clone())
             } else {
                 // Camera not found in configs, use global settings
                 (config.frame_storage_retention.clone(), 
                  config.video_storage_retention.clone(),
-                 config.video_storage_type.clone())
+                 config.video_storage_type.clone(),
+                 config.hls_storage_enabled,
+                 config.hls_storage_retention.clone())
             }
         } else {
             // No camera_id found, use global settings
             (config.frame_storage_retention.clone(), 
              config.video_storage_retention.clone(),
-             config.video_storage_type.clone())
+             config.video_storage_type.clone(),
+             config.hls_storage_enabled,
+             config.hls_storage_retention.clone())
         };
 
         // Cleanup frames with camera-specific or global retention
@@ -1354,6 +1434,23 @@ impl DatabaseProvider for SqliteDatabase {
                     tracing::info!("Starting video segment cleanup (retention: {})", video_retention);
                     if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
                         tracing::error!("Error deleting old video segments: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Cleanup HLS segments with camera-specific or global retention
+        if hls_enabled {
+            if let Ok(duration) = humantime::parse_duration(&hls_retention) {
+                if duration.as_secs() > 0 {
+                    tracing::info!("Starting HLS segment cleanup (retention: {})", hls_retention);
+                    match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
+                        Ok(deleted_count) => {
+                            tracing::info!("Deleted {} old HLS segments", deleted_count);
+                        }
+                        Err(e) => {
+                            tracing::error!("Error deleting old HLS segments: {}", e);
+                        }
                     }
                 }
             }
@@ -1618,5 +1715,199 @@ impl DatabaseProvider for SqliteDatabase {
         );
 
         Ok(playlists_result.rows_affected() as usize)
+    }
+
+    async fn add_recording_hls_segment(&self, segment: &RecordingHlsSegment) -> Result<i64> {
+        let query = format!(
+            r#"
+            INSERT INTO {} (session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+            TABLE_RECORDING_HLS
+        );
+        
+        let result = sqlx::query(&query)
+            .bind(segment.session_id)
+            .bind(segment.segment_index)
+            .bind(segment.start_time)
+            .bind(segment.end_time)
+            .bind(segment.duration_seconds)
+            .bind(&segment.segment_data)
+            .bind(segment.size_bytes)
+            .execute(&self.pool)
+            .await?;
+            
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn list_recording_hls_segments(
+        &self,
+        session_id: i64,
+        from_time: Option<DateTime<Utc>>,
+        to_time: Option<DateTime<Utc>>,
+    ) -> Result<Vec<RecordingHlsSegment>> {
+        match (from_time, to_time) {
+            (None, None) => {
+                let query = format!(
+                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? ORDER BY segment_index ASC",
+                    TABLE_RECORDING_HLS
+                );
+                let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+                    .bind(session_id)
+                    .fetch_all(&self.pool)
+                    .await?;
+                Ok(segments)
+            }
+            (Some(from), None) => {
+                let query = format!(
+                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND start_time >= ? ORDER BY segment_index ASC",
+                    TABLE_RECORDING_HLS
+                );
+                let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+                    .bind(session_id)
+                    .bind(from)
+                    .fetch_all(&self.pool)
+                    .await?;
+                Ok(segments)
+            }
+            (None, Some(to)) => {
+                let query = format!(
+                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND end_time <= ? ORDER BY segment_index ASC",
+                    TABLE_RECORDING_HLS
+                );
+                let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+                    .bind(session_id)
+                    .bind(to)
+                    .fetch_all(&self.pool)
+                    .await?;
+                Ok(segments)
+            }
+            (Some(from), Some(to)) => {
+                let query = format!(
+                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND start_time >= ? AND end_time <= ? ORDER BY segment_index ASC",
+                    TABLE_RECORDING_HLS
+                );
+                let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+                    .bind(session_id)
+                    .bind(from)
+                    .bind(to)
+                    .fetch_all(&self.pool)
+                    .await?;
+                Ok(segments)
+            }
+        }
+    }
+
+    async fn get_recording_hls_segments_for_timerange(
+        &self,
+        camera_id: &str,
+        from_time: DateTime<Utc>,
+        to_time: DateTime<Utc>,
+    ) -> Result<Vec<RecordingHlsSegment>> {
+        // Query for segments that overlap with the requested time range
+        // A segment overlaps if its start is before the range end AND its end is after the range start
+        let query = format!(
+            r#"
+            SELECT rh.session_id, rh.segment_index, rh.start_time, rh.end_time, rh.duration_seconds, 
+                   rh.segment_data, rh.size_bytes, rh.created_at
+            FROM {} rh
+            JOIN {} rs ON rh.session_id = rs.id
+            WHERE rs.camera_id = ? 
+            AND rh.start_time <= ?  -- segment starts before or at range end
+            AND rh.end_time >= ?     -- segment ends after or at range start
+            ORDER BY rh.start_time ASC, rh.segment_index ASC
+            "#,
+            TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+        );
+        
+        let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+            .bind(camera_id)
+            .bind(to_time)
+            .bind(from_time)
+            .fetch_all(&self.pool)
+            .await?;
+            
+        Ok(segments)
+    }
+
+    async fn delete_old_recording_hls_segments(
+        &self,
+        retention_duration: &str,
+        camera_id: Option<&str>,
+    ) -> Result<usize> {
+        let duration = humantime::parse_duration(retention_duration)
+            .map_err(|e| crate::errors::StreamError::config(&format!("Invalid retention duration '{}': {}", retention_duration, e)))?;
+        
+        let cutoff_time = Utc::now() - chrono::Duration::from_std(duration)
+            .map_err(|e| crate::errors::StreamError::config(&format!("Invalid duration: {}", e)))?;
+        
+        let result = if let Some(cam_id) = camera_id {
+            let query = format!(
+                r#"
+                DELETE FROM {} 
+                WHERE session_id IN (
+                    SELECT rs.id FROM {} rs 
+                    WHERE rs.camera_id = ? AND rs.start_time < ?
+                )
+                "#,
+                TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&query)
+                .bind(cam_id)
+                .bind(cutoff_time)
+                .execute(&self.pool)
+                .await?
+        } else {
+            let query = format!(
+                "DELETE FROM {} WHERE created_at < ?",
+                TABLE_RECORDING_HLS
+            );
+            sqlx::query(&query)
+                .bind(cutoff_time)
+                .execute(&self.pool)
+                .await?
+        };
+        
+        Ok(result.rows_affected() as usize)
+    }
+
+    async fn get_recording_hls_segment_by_session_and_index(
+        &self,
+        session_id: i64,
+        segment_index: i32,
+    ) -> Result<Option<RecordingHlsSegment>> {
+        let query = format!(
+            r#"
+            SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at
+            FROM {} 
+            WHERE session_id = ? AND segment_index = ?
+            "#,
+            TABLE_RECORDING_HLS
+        );
+        
+        let segment = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+            .bind(session_id)
+            .bind(segment_index)
+            .fetch_optional(&self.pool)
+            .await?;
+        
+        Ok(segment)
+    }
+
+    async fn get_last_hls_segment_index_for_session(
+        &self,
+        session_id: i64,
+    ) -> Result<Option<i32>> {
+        let query = format!(
+            "SELECT MAX(segment_index) as max_index FROM {} WHERE session_id = ?",
+            TABLE_RECORDING_HLS
+        );
+        
+        let result: Option<(Option<i32>,)> = sqlx::query_as(&query)
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        
+        Ok(result.and_then(|(max_index,)| max_index))
     }
 }

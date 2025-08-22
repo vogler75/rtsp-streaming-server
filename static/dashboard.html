@@ -669,6 +669,25 @@
                                 <input type="number" id="video_segment_minutes" name="video_segment_minutes" placeholder="5" min="1" max="60">
                                 <span class="help-text">Override global segment length (1-60 minutes)</span>
                             </div>
+                            <div class="form-group">
+                                <label>HLS Storage Override</label>
+                                <select id="hls_storage_enabled" name="hls_storage_enabled">
+                                    <option value="">Use Global Setting</option>
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                                <span class="help-text">Pre-generate HLS segments during recording for faster streaming</span>
+                            </div>
+                            <div class="form-group">
+                                <label>HLS Retention Period</label>
+                                <input type="text" id="hls_storage_retention" name="hls_storage_retention" placeholder="Use Global">
+                                <span class="help-text">e.g., 30d, 7d, 24h - overrides global HLS retention</span>
+                            </div>
+                            <div class="form-group">
+                                <label>HLS Segment Duration (seconds)</label>
+                                <input type="number" id="hls_segment_seconds" name="hls_segment_seconds" placeholder="6" min="1" max="30">
+                                <span class="help-text">Duration of each HLS segment (1-30 seconds, default 6)</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1046,6 +1065,24 @@
                                 <input type="number" id="config_recording_cleanup_interval_hours" placeholder="1" min="1">
                                 <span class="help-text">How often to run cleanup of old recordings</span>
                             </div>
+                            <div class="form-group">
+                                <label>Enable HLS Storage</label>
+                                <select id="config_recording_hls_storage_enabled">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Pre-generate HLS segments during recording for faster streaming</span>
+                            </div>
+                            <div class="form-group">
+                                <label>HLS Storage Retention</label>
+                                <input type="text" id="config_recording_hls_storage_retention" placeholder="30d">
+                                <span class="help-text">Auto-delete HLS segments older than this (e.g., 30d, 7d, 24h)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>HLS Segment Duration (seconds)</label>
+                                <input type="number" id="config_recording_hls_segment_seconds" placeholder="6" min="1" max="30">
+                                <span class="help-text">Duration of each HLS segment (1-30 seconds, default 6)</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1365,12 +1402,20 @@
                 document.getElementById('video_storage_type').value = config.recording.video_storage_type || '';
                 document.getElementById('video_storage_retention').value = config.recording.video_storage_retention || '';
                 document.getElementById('video_segment_minutes').value = config.recording.video_segment_minutes || '';
+                // HLS settings
+                document.getElementById('hls_storage_enabled').value = (config.recording.hls_storage_enabled !== undefined && config.recording.hls_storage_enabled !== null) ? config.recording.hls_storage_enabled.toString() : '';
+                document.getElementById('hls_storage_retention').value = config.recording.hls_storage_retention || '';
+                document.getElementById('hls_segment_seconds').value = config.recording.hls_segment_seconds || '';
             } else {
                 document.getElementById('frame_storage_enabled').value = '';
                 document.getElementById('frame_storage_retention').value = '';
                 document.getElementById('video_storage_type').value = '';
                 document.getElementById('video_storage_retention').value = '';
                 document.getElementById('video_segment_minutes').value = '';
+                // HLS settings
+                document.getElementById('hls_storage_enabled').value = '';
+                document.getElementById('hls_storage_retention').value = '';
+                document.getElementById('hls_segment_seconds').value = '';
             }
             
             // MQTT settings
@@ -1489,6 +1534,10 @@
             document.getElementById('config_recording_video_storage_retention').value = config.recording?.video_storage_retention || '';
             document.getElementById('config_recording_video_segment_minutes').value = config.recording?.video_segment_minutes || '';
             document.getElementById('config_recording_cleanup_interval_hours').value = config.recording?.cleanup_interval_hours || '';
+            // HLS settings
+            document.getElementById('config_recording_hls_storage_enabled').value = (config.recording?.hls_storage_enabled || false).toString();
+            document.getElementById('config_recording_hls_storage_retention').value = config.recording?.hls_storage_retention || '';
+            document.getElementById('config_recording_hls_segment_seconds').value = config.recording?.hls_segment_seconds || '';
             
             // Transcoding settings
             document.getElementById('config_transcoding_output_format').value = config.transcoding?.output_format || 'mjpeg';
@@ -1534,7 +1583,10 @@
                     frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
                     video_storage_retention: document.getElementById('config_recording_video_storage_retention').value || "30d",
                     video_segment_minutes: parseInt(document.getElementById('config_recording_video_segment_minutes').value) || 5,
-                    cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1
+                    cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1,
+                    hls_storage_enabled: document.getElementById('config_recording_hls_storage_enabled').value === 'true',
+                    hls_storage_retention: document.getElementById('config_recording_hls_storage_retention').value || "30d",
+                    hls_segment_seconds: parseInt(document.getElementById('config_recording_hls_segment_seconds').value) || 6
                 },
                 transcoding: {
                     output_format: document.getElementById('config_transcoding_output_format').value || "mjpeg",
@@ -1749,10 +1801,15 @@
             const videoStorageType = formData.get('video_storage_type');
             const videoStorageRetention = formData.get('video_storage_retention');
             const videoSegmentMinutes = formData.get('video_segment_minutes');
+            // HLS settings
+            const hlsStorageEnabled = formData.get('hls_storage_enabled');
+            const hlsStorageRetention = formData.get('hls_storage_retention');
+            const hlsSegmentSeconds = formData.get('hls_segment_seconds');
             
             // Only add recording section if at least one setting is configured
             if ((frameStorageEnabled !== '' && frameStorageEnabled !== null) ||
-                frameStorageRetention || videoStorageType || videoStorageRetention || videoSegmentMinutes) {
+                frameStorageRetention || videoStorageType || videoStorageRetention || videoSegmentMinutes ||
+                (hlsStorageEnabled !== '' && hlsStorageEnabled !== null) || hlsStorageRetention || hlsSegmentSeconds) {
                 config.recording = {};
                 
                 if (frameStorageEnabled !== '' && frameStorageEnabled !== null) {
@@ -1769,6 +1826,16 @@
                 }
                 if (videoSegmentMinutes) {
                     config.recording.video_segment_minutes = parseInt(videoSegmentMinutes);
+                }
+                // HLS settings
+                if (hlsStorageEnabled !== '' && hlsStorageEnabled !== null) {
+                    config.recording.hls_storage_enabled = hlsStorageEnabled === 'true';
+                }
+                if (hlsStorageRetention) {
+                    config.recording.hls_storage_retention = hlsStorageRetention;
+                }
+                if (hlsSegmentSeconds) {
+                    config.recording.hls_segment_seconds = parseInt(hlsSegmentSeconds);
                 }
             }
             

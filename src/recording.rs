@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::config::RecordingConfig;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery, VideoSegment};
+use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery, VideoSegment, RecordingHlsSegment};
 
 
 #[derive(Debug, Clone)]
@@ -302,6 +302,23 @@ impl RecordingManager {
                     video_storage_type,
                 ));
                 tasks.push(segmenter_task);
+            }
+
+            // Check if HLS storage is enabled for this camera
+            let hls_enabled = camera_config.get_hls_storage_enabled()
+                .unwrap_or(config.hls_storage_enabled);
+            
+            if hls_enabled {
+                let hls_task = tokio::spawn(Self::hls_segmenter_loop(
+                    config.clone(),
+                    database.clone(),
+                    active_recordings.clone(),
+                    camera_id.clone(),
+                    session_id,
+                    frame_sender.subscribe(),
+                    camera_config.clone(),
+                ));
+                tasks.push(hls_task);
             }
 
             // Wait for all recording tasks to complete
@@ -877,5 +894,219 @@ impl RecordingManager {
         let mp4_data = read_task.await.map_err(|e| crate::errors::StreamError::server(format!("Task join error: {}", e)))??;
         
         Ok(mp4_data)
+    }
+
+    async fn hls_segmenter_loop(
+        config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>,
+        camera_id: String,
+        session_id: i64,
+        mut frame_receiver: broadcast::Receiver<Bytes>,
+        camera_config: crate::config::CameraConfig,
+    ) {
+        // Get HLS segment duration (default 6 seconds)
+        let segment_seconds = camera_config.get_hls_segment_seconds()
+            .unwrap_or(config.hls_segment_seconds);
+        
+        let segment_duration = chrono::Duration::seconds(segment_seconds as i64);
+        let mut segment_start_time = Utc::now();
+        let mut frame_buffer = Vec::new();
+        
+        // Get the last segment index for this session to avoid duplicates
+        let mut segment_index = match database.get_last_hls_segment_index_for_session(session_id).await {
+            Ok(Some(last_index)) => {
+                info!("Resuming HLS segments from index {} for session {}", last_index + 1, session_id);
+                last_index + 1
+            }
+            Ok(None) => {
+                info!("Starting new HLS segment sequence for session {}", session_id);
+                0
+            }
+            Err(e) => {
+                warn!("Failed to get last HLS segment index for session {}, starting from 0: {}", session_id, e);
+                0
+            }
+        };
+
+        info!("Starting HLS segmenter for camera '{}' with {} second segments, starting at index {}", 
+              camera_id, segment_seconds, segment_index);
+        loop {
+            match frame_receiver.recv().await {
+                Ok(frame_data) => {
+                    // Check if recording is still active
+                    if !active_recordings.read().await.contains_key(&camera_id) {
+                        trace!("Recording stopped for camera '{}', ending HLS segmenter task", camera_id);
+                        break;
+                    }
+
+                    frame_buffer.push(frame_data);
+                    
+                    let elapsed = Utc::now().signed_duration_since(segment_start_time);
+                    if elapsed >= segment_duration {
+                        let frames_to_process = std::mem::take(&mut frame_buffer);
+                        let end_time = Utc::now();
+
+                        // Spawn a task to process the HLS segment
+                        let task_config = config.clone();
+                        let task_database = database.clone();
+                        let task_camera_id = camera_id.clone();
+                        let current_segment_index = segment_index;
+                        let current_start_time = segment_start_time;
+                        
+                        tokio::spawn(async move {
+                            if let Err(e) = Self::create_hls_segment(
+                                task_config,
+                                task_database,
+                                task_camera_id,
+                                session_id,
+                                current_segment_index,
+                                current_start_time,
+                                end_time,
+                                frames_to_process,
+                            ).await {
+                                error!("Failed to create HLS segment: {}", e);
+                            }
+                        });
+
+                        segment_start_time = end_time;
+                        segment_index += 1;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!("HLS segmenter lagged for camera '{}', skipped {} frames", camera_id, skipped);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Frame channel closed for camera '{}', stopping HLS segmenter", camera_id);
+                    break;
+                }
+            }
+        }
+
+        info!("HLS segmenter ended for camera '{}' session {}", camera_id, session_id);
+    }
+
+    async fn create_hls_segment(
+        config: Arc<RecordingConfig>,
+        database: Arc<dyn DatabaseProvider>,
+        camera_id: String,
+        session_id: i64,
+        segment_index: i32,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        frames: Vec<Bytes>,
+    ) -> crate::errors::Result<()> {
+        if frames.is_empty() {
+            return Ok(());
+        }
+
+        trace!("Creating HLS segment {} for camera '{}' session {} with {} frames", 
+               segment_index, camera_id, session_id, frames.len());
+
+        // Convert frames to MPEG-TS segment using FFmpeg
+        let segment_data = Self::create_hls_segment_from_frames(config.clone(), frames).await?;
+        
+        if segment_data.is_empty() {
+            warn!("Generated empty HLS segment for camera '{}' segment {}", camera_id, segment_index);
+            return Ok(());
+        }
+
+        // Calculate segment duration in seconds
+        let duration_seconds = (end_time.timestamp_millis() - start_time.timestamp_millis()) as f64 / 1000.0;
+        let size_bytes = segment_data.len() as i64;
+
+        // Create HLS segment struct
+        let hls_segment = RecordingHlsSegment {
+            session_id,
+            segment_index,
+            start_time,
+            end_time,
+            duration_seconds,
+            segment_data,
+            size_bytes,
+            created_at: Utc::now(),
+        };
+
+        // Store segment in database with better error handling
+        match database.add_recording_hls_segment(&hls_segment).await {
+            Ok(_) => {
+                info!("Stored HLS segment {} for camera '{}' session {} ({} bytes, {:.2}s duration)", 
+                      segment_index, camera_id, session_id, size_bytes, duration_seconds);
+            }
+            Err(e) => {
+                // Check if this is a unique constraint violation
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    warn!("HLS segment {} for session {} already exists, skipping duplicate insert", 
+                          segment_index, session_id);
+                    // This is not a fatal error - the segment already exists
+                } else {
+                    // For other errors, propagate them
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn create_hls_segment_from_frames(
+        config: Arc<RecordingConfig>,
+        frames: Vec<Bytes>,
+    ) -> crate::errors::Result<Vec<u8>> {
+        use tokio::process::Command;
+        
+        // Calculate framerate based on the recording config
+        let framerate = config.mp4_framerate;
+
+        let mut cmd = Command::new("ffmpeg");
+        
+        // Configure FFmpeg to create MPEG-TS segment from MJPEG frames
+        cmd.args([
+            "-f", "mjpeg",
+            "-r", &framerate.to_string(), // Input framerate
+            "-i", "-", // Input from stdin
+            "-c:v", "libx264", // H.264 codec
+            "-preset", "ultrafast", // Fast encoding
+            "-r", &framerate.to_string(), // Output framerate
+            "-f", "mpegts", // MPEG-TS format for HLS
+            "-", // Output to stdout
+        ]);
+        
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::null());
+
+        let mut child = cmd.spawn()?;
+        let mut stdin = child.stdin.take().expect("Failed to open ffmpeg stdin");
+        let stdout = child.stdout.take().expect("Failed to open ffmpeg stdout");
+
+        // Write frames to FFmpeg stdin
+        let write_task = tokio::spawn(async move {
+            for frame in frames {
+                if let Err(e) = stdin.write_all(&frame).await {
+                    error!("Failed to write frame to ffmpeg stdin: {}", e);
+                    break;
+                }
+            }
+            drop(stdin);
+        });
+
+        // Read MPEG-TS data from FFmpeg stdout
+        let read_task = tokio::spawn(async move {
+            let mut output = Vec::new();
+            let mut reader = tokio::io::BufReader::new(stdout);
+            tokio::io::copy(&mut reader, &mut output).await.map(|_| output)
+        });
+
+        let status = child.wait().await?;
+        write_task.await.map_err(|e| crate::errors::StreamError::server(format!("Task join error: {}", e)))?;
+        
+        if !status.success() {
+            return Err(crate::errors::StreamError::ffmpeg("ffmpeg command failed for HLS segment"));
+        }
+        
+        let segment_data = read_task.await.map_err(|e| crate::errors::StreamError::server(format!("Task join error: {}", e)))??;
+        
+        Ok(segment_data)
     }
 }

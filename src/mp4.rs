@@ -131,6 +131,104 @@ pub async fn serve_hls_playlist(
             });
     }
 
+    // Get camera config to check if HLS storage is enabled
+    let camera_configs = app_state.camera_configs.read().await;
+    let camera_config = match camera_configs.get(&camera_id) {
+        Some(config) => config.clone(),
+        None => {
+            return (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response();
+        }
+    };
+    drop(camera_configs);
+
+    // Check if HLS storage is enabled for this camera
+    let recording_config = recording_manager.get_recording_config();
+    let hls_enabled = camera_config.get_hls_storage_enabled()
+        .unwrap_or(recording_config.hls_storage_enabled);
+    
+    // Also check MP4 storage type to determine priority
+    let video_storage_type = camera_config.get_video_storage_type()
+        .unwrap_or(&recording_config.video_storage_type);
+    let mp4_enabled = video_storage_type != &config::Mp4StorageType::Disabled;
+
+    // When both HLS and MP4 are enabled, ALWAYS prefer HLS
+    if hls_enabled {
+        info!("HLS storage enabled for camera '{}', checking for pre-generated segments", camera_id);
+        
+        // Try to find pre-generated HLS segments in database
+        match database.get_recording_hls_segments_for_timerange(&camera_id, query.t1, query.t2).await {
+            Ok(hls_segments) if !hls_segments.is_empty() => {
+                info!("Found {} pre-generated HLS segments for camera '{}' in time range", hls_segments.len(), camera_id);
+                
+                // Create HLS playlist from database-stored segments
+                let mut playlist_content = String::new();
+                playlist_content.push_str("#EXTM3U\n");
+                playlist_content.push_str("#EXT-X-VERSION:3\n");
+                playlist_content.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", query.segment_duration));
+                playlist_content.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
+                
+                for segment in &hls_segments {
+                    playlist_content.push_str(&format!("#EXTINF:{:.3},\n", segment.duration_seconds));
+                    // Create segment URL that will be handled by serve_hls_segment_from_database
+                    // Use "db" as a placeholder playlist_id for database-stored segments
+                    let segment_url = format!("segments/db/recording_{}_{}_{}.ts", 
+                                            segment.session_id, 
+                                            segment.segment_index,
+                                            segment.start_time.timestamp());
+                    playlist_content.push_str(&format!("{}\n", segment_url));
+                }
+                
+                playlist_content.push_str("#EXT-X-ENDLIST\n");
+                
+                info!("Generated HLS playlist from {} database segments for camera '{}'", hls_segments.len(), camera_id);
+                
+                return axum::response::Response::builder()
+                    .status(axum::http::StatusCode::OK)
+                    .header("Content-Type", "application/vnd.apple.mpegurl")
+                    .header("Cache-Control", "public, max-age=300") // Cache for 5 minutes
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(axum::body::Body::from(playlist_content))
+                    .unwrap_or_else(|e| {
+                        error!("Failed to create HLS response from database segments: {}", e);
+                        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create playlist").into_response()
+                    });
+            }
+            Ok(_) => {
+                // When HLS is enabled but no segments found yet - NO FALLBACK
+                // Get HLS segment duration to inform the user
+                let hls_segment_seconds = camera_config.get_hls_segment_seconds()
+                    .unwrap_or(recording_config.hls_segment_seconds);
+                info!("No pre-generated HLS segments found for camera '{}' in time range (HLS-only mode, no MP4 fallback)", camera_id);
+                let message = format!(
+                    "No HLS segments available yet. Recording may have just started. Please wait at least {} seconds for the first segment to be generated, or check if recording is active.",
+                    hls_segment_seconds
+                );
+                return (axum::http::StatusCode::NOT_FOUND, message).into_response();
+            }
+            Err(e) => {
+                // When HLS is enabled and query failed - NO FALLBACK
+                error!("Failed to query HLS segments for camera '{}' (HLS-only mode, no MP4 fallback): {}", camera_id, e);
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to retrieve HLS segments").into_response();
+            }
+        }
+    }
+    
+    // Only proceed with MP4 conversion if HLS is DISABLED
+    // When HLS is enabled, we NEVER fall back to MP4
+    if hls_enabled {
+        // This should never be reached because we return early above when HLS is enabled
+        error!("Unexpected code path: HLS is enabled but reached MP4 conversion section for camera '{}'", camera_id);
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal error: HLS-only mode but no segments available").into_response();
+    }
+    
+    // HLS is disabled, check if MP4 is enabled
+    if !mp4_enabled {
+        info!("Neither HLS nor MP4 storage enabled for camera '{}'", camera_id);
+        return (axum::http::StatusCode::NOT_FOUND, "No recording storage enabled for this camera").into_response();
+    }
+    
+    info!("Using MP4 segments for camera '{}' (HLS disabled, MP4 enabled)", camera_id);
+
     // Get all video segments in the time range
     let segments = match recording_manager.list_video_segments_filtered(
         &camera_id,
@@ -384,7 +482,49 @@ pub async fn serve_hls_segment(
     };
     drop(camera_streams);
     
-    // Get HLS segment from database
+    // Check if this is a database-stored HLS segment from recording
+    // These use "db" as the playlist_id and segment names like "recording_1_8_timestamp.ts"
+    if (playlist_id == "db" || segment_name.starts_with("recording_")) && segment_name.ends_with(".ts") {
+        // Parse the segment name: recording_{session_id}_{segment_index}_{timestamp}.ts
+        let parts: Vec<&str> = segment_name.trim_end_matches(".ts").split('_').collect();
+        if parts.len() >= 4 && parts[0] == "recording" {
+            if let (Ok(session_id), Ok(segment_index)) = (parts[1].parse::<i64>(), parts[2].parse::<i32>()) {
+                info!("Serving database-stored HLS segment from recording_hls table: session_id={}, segment_index={}", session_id, segment_index);
+                
+                match database.get_recording_hls_segment_by_session_and_index(session_id, segment_index).await {
+                    Ok(Some(hls_segment)) => {
+                        return axum::response::Response::builder()
+                            .status(axum::http::StatusCode::OK)
+                            .header("Content-Type", "video/mp2t") // MPEG-TS MIME type
+                            .header("Cache-Control", "public, max-age=3600")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header("Content-Length", hls_segment.segment_data.len().to_string())
+                            .body(axum::body::Body::from(hls_segment.segment_data))
+                            .unwrap_or_else(|e| {
+                                error!("Failed to create database HLS segment response: {}", e);
+                                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to create response").into_response()
+                            });
+                    }
+                    Ok(None) => {
+                        warn!("Database-stored HLS segment not found: session_id={}, segment_index={}", session_id, segment_index);
+                        return (axum::http::StatusCode::NOT_FOUND, "HLS segment not found in database").into_response();
+                    }
+                    Err(e) => {
+                        error!("Failed to get database-stored HLS segment: {}", e);
+                        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                    }
+                }
+            }
+        }
+    }
+    
+    // Only fall back to legacy HLS segment lookup if this is NOT a database-stored segment request
+    if playlist_id == "db" {
+        // If we get here with playlist_id "db", the segment wasn't found in recording_hls
+        return (axum::http::StatusCode::NOT_FOUND, "HLS segment not found in recording_hls table").into_response();
+    }
+    
+    // Fall back to legacy HLS segment lookup (for MP4-converted segments)
     let segment = match database.get_hls_segment(&playlist_id, &segment_name).await {
         Ok(Some(segment)) => segment,
         Ok(None) => {
