@@ -69,7 +69,6 @@ transport = "tcp"
 reconnect_interval = 5
 chunk_read_size = 8192 # 32768
 #token = "secure-cam1-token"  # Optional: Token required for WebSocket authentication
-#max_recording_age = "1d"  # Override max age for this camera (e.g., "10m", "5h", "1d")
 
 # MQTT configuration for this camera
 [cameras.cam1.mqtt]

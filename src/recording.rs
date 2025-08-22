@@ -25,6 +25,7 @@ pub struct RecordingManager {
     pub databases: Arc<RwLock<HashMap<String, Arc<dyn DatabaseProvider>>>>, // camera_id -> database
     active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>, // camera_id -> recording
     frame_subscribers: Arc<RwLock<HashMap<String, broadcast::Receiver<Bytes>>>>, // camera_id -> receiver
+    camera_configs: Arc<RwLock<HashMap<String, crate::config::CameraConfig>>>, // camera configs for cleanup
 }
 
 impl RecordingManager {
@@ -34,7 +35,14 @@ impl RecordingManager {
             databases: Arc::new(RwLock::new(HashMap::new())),
             active_recordings: Arc::new(RwLock::new(HashMap::new())),
             frame_subscribers: Arc::new(RwLock::new(HashMap::new())),
+            camera_configs: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Update camera configs for cleanup purposes
+    pub async fn update_camera_configs(&self, configs: HashMap<String, crate::config::CameraConfig>) {
+        let mut camera_configs = self.camera_configs.write().await;
+        *camera_configs = configs;
     }
 
     /// Add a database for a specific camera
@@ -45,6 +53,14 @@ impl RecordingManager {
     ) -> crate::errors::Result<()> {
         // Initialize the database
         database.initialize().await?;
+        
+        // Perform initial cleanup for this camera database
+        info!("Performing initial cleanup for camera '{}' database", camera_id);
+        let camera_configs = self.camera_configs.read().await;
+        if let Err(e) = database.cleanup_database(&self.config, &camera_configs).await {
+            error!("Failed to perform initial cleanup for camera '{}': {}", camera_id, e);
+        }
+        drop(camera_configs);
         
         // Add to the databases map
         let mut databases = self.databases.write().await;
@@ -470,8 +486,10 @@ impl RecordingManager {
     
     pub async fn cleanup_task(&self) -> crate::errors::Result<()> {
         let databases = self.databases.read().await;
+        let camera_configs = self.camera_configs.read().await;
+        
         for (camera_id, database) in databases.iter() {
-            if let Err(e) = database.cleanup_database(&self.config).await {
+            if let Err(e) = database.cleanup_database(&self.config, &camera_configs).await {
                 error!("Failed to cleanup database for camera '{}': {}", camera_id, e);
             }
         }
@@ -496,6 +514,22 @@ impl RecordingManager {
         camera_frame_senders: &HashMap<String, Arc<broadcast::Sender<Bytes>>>,
         camera_configs: &HashMap<String, crate::config::CameraConfig>,
     ) -> crate::errors::Result<()> {
+        info!("Performing startup cleanup for all camera databases...");
+        
+        // Update camera configs for cleanup
+        self.update_camera_configs(camera_configs.clone()).await;
+        
+        // Perform cleanup for all existing databases at startup
+        let databases = self.databases.read().await;
+        for (camera_id, database) in databases.iter() {
+            info!("Performing startup cleanup for camera '{}'", camera_id);
+            let configs = self.camera_configs.read().await;
+            if let Err(e) = database.cleanup_database(&self.config, &configs).await {
+                error!("Failed to perform startup cleanup for camera '{}': {}", camera_id, e);
+            }
+        }
+        drop(databases);
+        
         info!("Checking for active recordings to restart at startup...");
         
         let mut restarted_count = 0;

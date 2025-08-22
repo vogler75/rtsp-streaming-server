@@ -153,6 +153,11 @@ pub trait DatabaseProvider: Send + Sync {
         older_than: DateTime<Utc>,
     ) -> Result<usize>;
     
+    async fn delete_unused_sessions(
+        &self,
+        camera_id: Option<&str>,
+    ) -> Result<usize>;
+    
     async fn get_frame_at_timestamp(
         &self,
         camera_id: &str,
@@ -190,10 +195,15 @@ pub trait DatabaseProvider: Send + Sync {
 
     async fn delete_old_video_segments(
         &self,
+        camera_id: Option<&str>,
         older_than: DateTime<Utc>,
     ) -> Result<usize>;
 
-    async fn cleanup_database(&self, config: &crate::config::RecordingConfig) -> Result<()>;
+    async fn cleanup_database(
+        &self,
+        config: &crate::config::RecordingConfig,
+        camera_configs: &std::collections::HashMap<String, crate::config::CameraConfig>,
+    ) -> Result<()>;
     
     /// Get a specific video segment by filename (for HTTP streaming)
     async fn get_video_segment_by_filename(
@@ -823,6 +833,8 @@ impl DatabaseProvider for SqliteDatabase {
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
+        let start_time = std::time::Instant::now();
+        
         // Delete old frames based on their timestamp
         let frames_result = if let Some(cam_id) = camera_id {
             // Delete frames for a specific camera
@@ -849,15 +861,103 @@ impl DatabaseProvider for SqliteDatabase {
         };
         let deleted_frames = frames_result.rows_affected();
         
+        let elapsed = start_time.elapsed();
+        
         if deleted_frames > 0 {
             tracing::info!(
-                "Cleanup complete: {} frames deleted",
-                deleted_frames
+                "Deleted {} frames in {:.3}ms{}",
+                deleted_frames,
+                elapsed.as_secs_f64() * 1000.0,
+                if let Some(cam_id) = camera_id {
+                    format!(" for camera '{}'", cam_id)
+                } else {
+                    String::new()
+                }
+            );
+        } else {
+            tracing::info!(
+                "No frames to delete (query took {:.3}ms)",
+                elapsed.as_secs_f64() * 1000.0
             );
         }
         
         // Return number of frames deleted
         Ok(deleted_frames as usize)
+    }
+    
+    async fn delete_unused_sessions(
+        &self,
+        camera_id: Option<&str>,
+    ) -> Result<usize> {
+        // Delete sessions that have:
+        // 1. No frames in recording_mjpeg table
+        // 2. No segments in recording_mp4 table
+        // 3. Are not currently active (end_time is not NULL)
+        
+        let start_time = std::time::Instant::now();
+        
+        let result = if let Some(cam_id) = camera_id {
+            // Delete unused sessions for a specific camera
+            let query = format!(
+                r#"
+                DELETE FROM {} 
+                WHERE camera_id = ?
+                AND end_time IS NOT NULL
+                AND id NOT IN (
+                    SELECT DISTINCT session_id FROM {}
+                )
+                AND id NOT IN (
+                    SELECT DISTINCT session_id FROM {}
+                )
+                "#,
+                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG, TABLE_RECORDING_MP4
+            );
+            sqlx::query(&query)
+                .bind(cam_id)
+                .execute(&self.pool)
+                .await?
+        } else {
+            // Delete unused sessions for all cameras
+            let query = format!(
+                r#"
+                DELETE FROM {} 
+                WHERE end_time IS NOT NULL
+                AND id NOT IN (
+                    SELECT DISTINCT session_id FROM {}
+                )
+                AND id NOT IN (
+                    SELECT DISTINCT session_id FROM {}
+                )
+                "#,
+                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG, TABLE_RECORDING_MP4
+            );
+            sqlx::query(&query)
+                .execute(&self.pool)
+                .await?
+        };
+        
+        let deleted_sessions = result.rows_affected();
+        let elapsed = start_time.elapsed();
+        
+        if deleted_sessions > 0 {
+            tracing::info!(
+                "Deleted {} unused sessions in {:.3}ms{}",
+                deleted_sessions,
+                elapsed.as_secs_f64() * 1000.0,
+                if let Some(cam_id) = camera_id {
+                    format!(" for camera '{}'", cam_id)
+                } else {
+                    String::new()
+                }
+            );
+        } else {
+            tracing::info!(
+                "No unused sessions to delete (query took {:.3}ms)",
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
+        
+        Ok(deleted_sessions as usize)
     }
     
     async fn get_frame_at_timestamp(
@@ -1093,17 +1193,41 @@ impl DatabaseProvider for SqliteDatabase {
 
     async fn delete_old_video_segments(
         &self,
+        camera_id: Option<&str>,
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
+        let start_time = std::time::Instant::now();
+        
         // First, select the file paths of the segments to be deleted
-        let query = format!(
-            "SELECT session_id, start_time, end_time, file_path, size_bytes, mp4_data FROM {} WHERE end_time < ?",
-            TABLE_RECORDING_MP4
-        );
-        let segments_to_delete = sqlx::query_as::<_, VideoSegment>(&query)
-        .bind(older_than)
-        .fetch_all(&self.pool)
-        .await?;
+        let (_query, segments_to_delete) = if let Some(cam_id) = camera_id {
+            // Delete segments for a specific camera
+            let query = format!(
+                r#"
+                SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
+                FROM {} vs
+                JOIN {} rs ON vs.session_id = rs.id
+                WHERE rs.camera_id = ? AND vs.end_time < ?
+                "#,
+                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+            );
+            let segments = sqlx::query_as::<_, VideoSegment>(&query)
+                .bind(cam_id)
+                .bind(older_than)
+                .fetch_all(&self.pool)
+                .await?;
+            (query, segments)
+        } else {
+            // Delete segments for all cameras
+            let query = format!(
+                "SELECT session_id, start_time, end_time, file_path, size_bytes, mp4_data FROM {} WHERE end_time < ?",
+                TABLE_RECORDING_MP4
+            );
+            let segments = sqlx::query_as::<_, VideoSegment>(&query)
+                .bind(older_than)
+                .fetch_all(&self.pool)
+                .await?;
+            (query, segments)
+        };
 
         // Delete the files from the filesystem (only if they have file_path set)
         for segment in &segments_to_delete {
@@ -1116,48 +1240,133 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         // Then, delete the records from the database
-        let delete_query = format!("DELETE FROM {} WHERE end_time < ?", TABLE_RECORDING_MP4);
-        let result = sqlx::query(&delete_query)
-            .bind(older_than)
-            .execute(&self.pool)
-            .await?;
+        let delete_result = if let Some(cam_id) = camera_id {
+            let delete_query = format!(
+                r#"
+                DELETE FROM {} 
+                WHERE session_id IN (
+                    SELECT vs.session_id 
+                    FROM {} vs
+                    JOIN {} rs ON vs.session_id = rs.id
+                    WHERE rs.camera_id = ? AND vs.end_time < ?
+                )
+                "#,
+                TABLE_RECORDING_MP4, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query(&delete_query)
+                .bind(cam_id)
+                .bind(older_than)
+                .execute(&self.pool)
+                .await?
+        } else {
+            let delete_query = format!("DELETE FROM {} WHERE end_time < ?", TABLE_RECORDING_MP4);
+            sqlx::query(&delete_query)
+                .bind(older_than)
+                .execute(&self.pool)
+                .await?
+        };
 
-        Ok(result.rows_affected() as usize)
+        let deleted_count = delete_result.rows_affected() as usize;
+        let elapsed = start_time.elapsed();
+        
+        if deleted_count > 0 {
+            tracing::info!(
+                "Deleted {} video segments in {:.3}ms{}",
+                deleted_count,
+                elapsed.as_secs_f64() * 1000.0,
+                if let Some(cam_id) = camera_id {
+                    format!(" for camera '{}'", cam_id)
+                } else {
+                    String::new()
+                }
+            );
+        } else {
+            tracing::info!(
+                "No video segments to delete (query took {:.3}ms)",
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
+
+        Ok(deleted_count)
     }
 
-    async fn cleanup_database(&self, config: &crate::config::RecordingConfig) -> Result<()> {
-        // Cleanup frames
+    async fn cleanup_database(
+        &self,
+        config: &crate::config::RecordingConfig,
+        camera_configs: &std::collections::HashMap<String, crate::config::CameraConfig>,
+    ) -> Result<()> {
+        // Extract camera_id from the database path if this is a per-camera database
+        // The path format is typically "recordings/{camera_id}.db"
+        let camera_id = if let Ok(mut connection) = self.pool.acquire().await {
+            // Try to get the camera_id from the first recording session in this database
+            let query = format!("SELECT DISTINCT camera_id FROM {} LIMIT 1", TABLE_RECORDING_SESSIONS);
+            if let Ok(row) = sqlx::query(&query).fetch_optional(connection.as_mut()).await {
+                row.and_then(|r| r.try_get::<String, _>("camera_id").ok())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Get camera-specific config or use global config
+        let (frame_retention, video_retention, video_storage_type) = if let Some(cam_id) = &camera_id {
+            if let Some(camera_config) = camera_configs.get(cam_id) {
+                // Use camera-specific retention settings if available, otherwise fall back to global
+                let frame_retention = camera_config.frame_storage_retention
+                    .as_ref()
+                    .unwrap_or(&config.frame_storage_retention);
+                let video_retention = camera_config.video_storage_retention
+                    .as_ref()
+                    .unwrap_or(&config.video_storage_retention);
+                let video_type = camera_config.video_storage_type
+                    .as_ref()
+                    .unwrap_or(&config.video_storage_type);
+                (frame_retention.clone(), video_retention.clone(), video_type.clone())
+            } else {
+                // Camera not found in configs, use global settings
+                (config.frame_storage_retention.clone(), 
+                 config.video_storage_retention.clone(),
+                 config.video_storage_type.clone())
+            }
+        } else {
+            // No camera_id found, use global settings
+            (config.frame_storage_retention.clone(), 
+             config.video_storage_retention.clone(),
+             config.video_storage_type.clone())
+        };
+
+        // Cleanup frames with camera-specific or global retention
         if config.frame_storage_enabled {
-            if let Ok(duration) = humantime::parse_duration(&config.frame_storage_retention) {
+            if let Ok(duration) = humantime::parse_duration(&frame_retention) {
                 if duration.as_secs() > 0 {
                     let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    match self.delete_old_frames(None, older_than).await {
-                        Ok(deleted_count) => {
-                            if deleted_count > 0 {
-                                tracing::info!("Deleted {} old frames.", deleted_count);
-                            }
-                        }
-                        Err(e) => tracing::error!("Error deleting old frames: {}", e),
+                    tracing::info!("Starting frame cleanup (retention: {})", frame_retention);
+                    if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
+                        tracing::error!("Error deleting old frames: {}", e);
                     }
                 }
             }
         }
 
-        // Cleanup video segments
-        if config.video_storage_type != crate::config::Mp4StorageType::Disabled {
-            if let Ok(duration) = humantime::parse_duration(&config.video_storage_retention) {
+        // Cleanup video segments with camera-specific or global retention
+        if video_storage_type != crate::config::Mp4StorageType::Disabled {
+            if let Ok(duration) = humantime::parse_duration(&video_retention) {
                 if duration.as_secs() > 0 {
                     let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    match self.delete_old_video_segments(older_than).await {
-                        Ok(deleted_count) => {
-                            if deleted_count > 0 {
-                                tracing::info!("Deleted {} old video segments.", deleted_count);
-                            }
-                        }
-                        Err(e) => tracing::error!("Error deleting old video segments: {}", e),
+                    tracing::info!("Starting video segment cleanup (retention: {})", video_retention);
+                    if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
+                        tracing::error!("Error deleting old video segments: {}", e);
                     }
                 }
             }
+        }
+
+        // Finally, cleanup unused sessions (sessions with no frames or videos)
+        // This should be done after deleting frames and videos to catch newly orphaned sessions
+        tracing::info!("Starting unused session cleanup");
+        if let Err(e) = self.delete_unused_sessions(camera_id.as_deref()).await {
+            tracing::error!("Error deleting unused sessions: {}", e);
         }
 
         Ok(())

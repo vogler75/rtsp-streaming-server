@@ -16,6 +16,11 @@ impl AppState {
         {
             let mut camera_configs = self.camera_configs.write().await;
             camera_configs.insert(camera_id.clone(), camera_config.clone());
+            
+            // Update recording manager with new camera configs
+            if let Some(ref recording_manager) = self.recording_manager {
+                recording_manager.update_camera_configs(camera_configs.clone()).await;
+            }
         }
         
         if !is_enabled {
@@ -116,6 +121,11 @@ impl AppState {
         {
             let mut camera_configs = self.camera_configs.write().await;
             camera_configs.remove(camera_id);
+            
+            // Update recording manager with updated camera configs
+            if let Some(ref recording_manager) = self.recording_manager {
+                recording_manager.update_camera_configs(camera_configs.clone()).await;
+            }
         }
         
         // Remove from camera streams and get the camera info for cleanup

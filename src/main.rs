@@ -202,9 +202,11 @@ async fn main() -> Result<()> {
                 match RecordingManager::new(Arc::new(recording_config.clone())).await {
                     Ok(manager) => {
                         info!("Recording system initialized successfully");
+                        // Initialize with camera configs for cleanup purposes
+                        manager.update_camera_configs(config.cameras.clone()).await;
                         let manager = Arc::new(manager);
                             
-                            // Start cleanup task if max_recording_age is configured
+                            // Start cleanup task if frame_storage_retention is configured
                             if !recording_config.frame_storage_retention.is_empty() && recording_config.frame_storage_retention != "0" {
                                     let manager_clone = manager.clone();
                                     let cleanup_interval = recording_config.cleanup_interval_hours;

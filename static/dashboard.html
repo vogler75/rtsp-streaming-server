@@ -626,11 +626,6 @@
                                 <input type="text" id="token" name="token" placeholder="Optional auth token">
                                 <span class="help-text">Token for WebSocket auth</span>
                             </div>
-                            <div class="form-group">
-                                <label>Frame Retention Period</label>
-                                <input type="text" id="max_recording_age" name="max_recording_age" placeholder="7d">
-                                <span class="help-text">e.g., 10m, 5h, 7d</span>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -648,6 +643,11 @@
                                     <option value="false">Disabled</option>
                                 </select>
                                 <span class="help-text">Override global frame-by-frame recording setting</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Frame Retention Period</label>
+                                <input type="text" id="frame_storage_retention" name="frame_storage_retention" placeholder="Use Global">
+                                <span class="help-text">e.g., 10m, 5h, 7d - overrides global setting</span>
                             </div>
                             <div class="form-group">
                                 <label>MP4 Video Storage Override</label>
@@ -1357,10 +1357,10 @@
             document.getElementById('transport').value = config.transport || 'tcp';
             document.getElementById('reconnect_interval').value = config.reconnect_interval || 5;
             document.getElementById('token').value = config.token || '';
-            document.getElementById('max_recording_age').value = config.max_recording_age || '';
             
             // Per-camera MP4 recording settings
             document.getElementById('frame_storage_enabled').value = (config.frame_storage_enabled !== undefined && config.frame_storage_enabled !== null) ? config.frame_storage_enabled.toString() : '';
+            document.getElementById('frame_storage_retention').value = config.frame_storage_retention || '';
             document.getElementById('video_storage_type').value = config.video_storage_type || '';
             document.getElementById('video_storage_retention').value = config.video_storage_retention || '';
             document.getElementById('video_segment_minutes').value = config.video_segment_minutes || '';
@@ -1732,18 +1732,21 @@
                 url: formData.get('url'),
                 transport: formData.get('transport'),
                 reconnect_interval: parseInt(formData.get('reconnect_interval')),
-                token: formData.get('token') || null,
-                max_recording_age: formData.get('max_recording_age') || null
+                token: formData.get('token') || null
             };
             
             // Add per-camera MP4 recording settings if configured
             const frameStorageEnabled = formData.get('frame_storage_enabled');
+            const frameStorageRetention = formData.get('frame_storage_retention');
             const videoStorageType = formData.get('video_storage_type');
             const videoStorageRetention = formData.get('video_storage_retention');
             const videoSegmentMinutes = formData.get('video_segment_minutes');
             
             if (frameStorageEnabled !== '' && frameStorageEnabled !== null) {
                 config.frame_storage_enabled = frameStorageEnabled === 'true';
+            }
+            if (frameStorageRetention) {
+                config.frame_storage_retention = frameStorageRetention;
             }
             if (videoStorageType !== '' && videoStorageType !== null) {
                 config.video_storage_type = videoStorageType;

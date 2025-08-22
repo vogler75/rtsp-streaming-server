@@ -31,8 +31,8 @@
     "publish_interval": 5,
     "topic_name": null
   },
-  "max_recording_age": null,
   "frame_storage_enabled": null,
+  "frame_storage_retention": null,
   "video_storage_type": null,
   "video_storage_retention": null,
   "video_segment_minutes": null,

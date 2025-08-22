@@ -52,10 +52,10 @@ pub struct CameraConfig {
     pub token: Option<String>,
     pub ffmpeg: Option<FfmpegConfig>,
     pub mqtt: Option<CameraMqttConfig>,
-    pub max_recording_age: Option<String>, // Override max age for this camera (e.g., "10m", "5h", "7d")
     
     // Per-camera frame storage settings
     pub frame_storage_enabled: Option<bool>, // Override global frame storage setting
+    pub frame_storage_retention: Option<String>, // Override global frame retention (e.g., "10m", "5h", "24h")
     
     // Per-camera MP4 recording settings (NEW)
     pub video_storage_type: Option<Mp4StorageType>, // Override global video storage type

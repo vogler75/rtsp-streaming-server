@@ -283,7 +283,7 @@ Create a JSON file for each camera in the `cameras/` directory:
 - **`reconnect_interval`** (number): Seconds between reconnection attempts (default: `5`)
 - **`chunk_read_size`** (number|null): Bytes to read at once from FFmpeg
 - **`token`** (string|null): Optional token required for WebSocket authentication
-- **`max_recording_age`** (string|null): Override max recording age (e.g., `"10m"`, `"5h"`, `"7d"`)
+- **`frame_storage_retention`** (string|null): Override max recording age (e.g., `"10m"`, `"5h"`, `"7d"`)
 
 ##### FFmpeg Settings (`ffmpeg` object)
 - **`command`** (string|null): Custom FFmpeg command override. If set, replaces all other FFmpeg options
@@ -769,8 +769,6 @@ You can override global recording settings for individual cameras in their confi
   "video_storage_retention": "14d"
 }
 ```
-
-Note: The legacy `max_recording_age` setting is still supported and will apply to both storage types if the new specific settings are not provided.
 
 ### Automatic Cleanup
 
