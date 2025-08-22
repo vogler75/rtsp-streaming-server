@@ -22,6 +22,12 @@ pub async fn debug_handler() -> axum::response::Html<String> {
     axum::response::Html(html)
 }
 
+pub async fn hlsjs_handler() -> axum::response::Html<String> {
+    trace!("Debug HTML requested");
+    let html = include_str!("../static/hls.js").to_string();
+    axum::response::Html(html)
+}
+
 pub async fn serve_control_page() -> axum::response::Html<String> {
     let html = include_str!("../static/control.html").to_string();
     axum::response::Html(html)

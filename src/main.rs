@@ -382,11 +382,12 @@ async fn main() -> Result<()> {
 
     // Build router with camera paths
     let mut app = axum::Router::new()
+        //.nest_service("/static", tower_http::services::ServeDir::new("static"))
         .route("/dashboard", axum::routing::get(handlers::dashboard_handler))
         .route("/debug", axum::routing::get(handlers::debug_handler))
-        .nest_service("/static", tower_http::services::ServeDir::new("static"))
+        .route("/hls.js", axum::routing::get(handlers::hlsjs_handler))
+        .route("/api/recordings/:camera_id/hls/timerange", axum::routing::get(mp4::serve_hls_playlist))    
         .route("/api/recordings/:camera_id/mp4/segments/:filename", axum::routing::get(mp4::stream_mp4_recording))
-        .route("/api/recordings/:camera_id/hls/timerange", axum::routing::get(mp4::serve_hls_playlist))
         .route("/api/recordings/:camera_id/hls/segments/:playlist_id/:segment_name", axum::routing::get(mp4::serve_hls_segment))
         .nest_service("/recordings", tower_http::services::ServeDir::new(app_state.recording_config.as_ref().map_or("recordings", |c| &c.database_path)));
     
