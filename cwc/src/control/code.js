@@ -12,9 +12,9 @@ let hls = null;
 let statusElement = null;
 let versionElement = null;
 let isConnected = false;
-let currentURL = '';
-let currentToken = '';
-let shouldConnect = false;
+let currentCameraUrl = '';
+let currentCameraAuthToken = '';
+let enableConnection = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let reconnectInterval = 3000;
@@ -27,17 +27,17 @@ let bytesReceived = 0;
 let lastBitrateTime = Date.now();
 
 // Control mode variables
-let isControlMode = false;
+let useControlStream = false;
 let controlWebSocket = null;
-let currentPlayFrom = '';
-let currentPlayTo = '';
-let currentPlay = false;
-let currentSpeed = 1.0;
-let currentLive = false;
+let currentEnablePlaybackbackStartTime = '';
+let currentEnablePlaybackbackEndTime = '';
+let currentEnablePlayback = false;
+let currentEnablePlaybackbackSpeed = 1.0;
+let currentEnableLivestream = false;
 let currentRecordingReason = '';
-let currentRecordingActive = false;
-let currentGoto = '';
-let debugEnabled = false;
+let currentEnableRecording = false;
+let currentSeekToTime = '';
+let enableDebug = false;
 
 // PTZ control variables
 let currentPtzMove = '';
@@ -46,24 +46,24 @@ let currentPtzGotoPreset = '';
 let currentPtzSetPreset = '';
 
 // HLS mode variables
-let currentPlayHls = false;
+let currentUseHlsStreaming = false;
 
 ////////////////////////////////////////////
 // Debug helper function
 function debugLog(...args) {
-  if (debugEnabled) {
+  if (enableDebug) {
     console.log('[DEBUG]', ...args);
   }
 }
 
 function debugError(...args) {
-  if (debugEnabled) {
+  if (enableDebug) {
     console.error('[DEBUG]', ...args);
   }
 }
 
 function debugWarn(...args) {
-  if (debugEnabled) {
+  if (enableDebug) {
     console.warn('[DEBUG]', ...args);
   }
 }
@@ -100,7 +100,7 @@ function initializeVideoPlayer() {
 
 function updateConnectionStatus(connected) {
   isConnected = connected;
-  WebCC.Properties.connected = connected;
+  WebCC.Properties.status_connected = connected;
   
   // Reset statistics when disconnected
   if (!connected) {
@@ -109,8 +109,8 @@ function updateConnectionStatus(connected) {
     lastFpsTime = Date.now();
     bytesReceived = 0;
     lastBitrateTime = Date.now();
-    WebCC.Properties.fps = 0;
-    WebCC.Properties.kbs = 0;
+    WebCC.Properties.status_fps = 0;
+    WebCC.Properties.status_bitrate_kbps = 0;
   }
   
   if (statusElement) {
@@ -118,7 +118,7 @@ function updateConnectionStatus(connected) {
       // Hide status when connected
       statusElement.style.display = 'none';
       reconnectAttempts = 0;
-    } else if (shouldConnect) {
+    } else if (enableConnection) {
       // Show status when disconnected but trying to connect
       statusElement.style.display = 'block';
       const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts})` : '';
@@ -140,20 +140,20 @@ function scheduleReconnect() {
     clearTimeout(reconnectTimer);
   }
   
-  // Only reconnect if shouldConnect is true AND not in HLS mode
-  if (shouldConnect && currentURL && !currentPlayHls) {
+  // Only reconnect if enableConnection is true AND not in HLS mode
+  if (enableConnection && currentCameraUrl && !currentUseHlsStreaming) {
     reconnectAttempts++;
     debugLog(`Scheduling reconnect attempt ${reconnectAttempts} in ${reconnectInterval}ms`);
     updateConnectionStatus(false);
     
     reconnectTimer = setTimeout(() => {
-      if (shouldConnect && !currentPlayHls) { // Check again in case it changed during timeout
+      if (enableConnection && !currentUseHlsStreaming) { // Check again in case it changed during timeout
         debugLog(`Attempting to reconnect (${reconnectAttempts})`);
-        connectToWebSocket(currentURL);
+        connectToWebSocket(currentCameraUrl);
       }
     }, reconnectInterval);
   } else {
-    debugLog('Not reconnecting: shouldConnect =', shouldConnect, 'currentURL =', currentURL, 'currentPlayHls =', currentPlayHls);
+    debugLog('Not reconnecting: enableConnection =', enableConnection, 'currentCameraUrl =', currentCameraUrl, 'currentUseHlsStreaming =', currentUseHlsStreaming);
   }
 }
 
@@ -177,7 +177,7 @@ function showBlankScreen() {
 }
 
 function switchPlayerMode() {
-  if (currentPlayHls) {
+  if (currentUseHlsStreaming) {
     // Show HLS player, hide WebSocket player
     videoElement.style.display = 'none';
     hlsElement.style.display = 'block';
@@ -223,14 +223,14 @@ function switchPlayerMode() {
     reconnectAttempts = 0;
     
     // Reconnect WebSocket if needed
-    if (shouldConnect && currentURL) {
-      connectToWebSocket(currentURL);
+    if (enableConnection && currentCameraUrl) {
+      connectToWebSocket(currentCameraUrl);
     }
   }
 }
 
 function connectToWebSocket(url) {
-  if (!url || url.trim() === '' || !shouldConnect || currentPlayHls) {
+  if (!url || url.trim() === '' || !enableConnection || currentUseHlsStreaming) {
     debugLog('No URL provided, connection disabled, or in HLS mode');
     updateConnectionStatus(false);
     return;
@@ -246,7 +246,7 @@ function connectToWebSocket(url) {
   }
   
   // Check if we're in control mode and need to connect to control endpoint
-  if (isControlMode) {
+  if (useControlStream) {
     fullUrl = fullUrl + '/control';
     connectToControlWebSocket(fullUrl);
     return;
@@ -271,9 +271,9 @@ function connectToWebSocket(url) {
     
     // Add token to URL if provided
     let connectUrl = fullUrl;
-    if (currentToken && currentToken.trim() !== '') {
+    if (currentCameraAuthToken && currentCameraAuthToken.trim() !== '') {
       const separator = fullUrl.includes('?') ? '&' : '?';
-      connectUrl = fullUrl + separator + 'token=' + encodeURIComponent(currentToken);
+      connectUrl = fullUrl + separator + 'token=' + encodeURIComponent(currentCameraAuthToken);
       debugLog('Using authentication token');
     }
     
@@ -347,7 +347,7 @@ function connectToWebSocket(url) {
         // FPS calculation - update every second
         if (now - lastFpsTime >= 1000) {
           const fps = Math.round(fpsCounter * 1000 / (now - lastFpsTime));
-          WebCC.Properties.fps = fps;
+          WebCC.Properties.status_fps = fps;
           fpsCounter = 0;
           lastFpsTime = now;
         }
@@ -355,7 +355,7 @@ function connectToWebSocket(url) {
         // Bitrate calculation - update every second
         if (now - lastBitrateTime >= 1000) {
           const kbs = Math.round(bytesReceived / 1024); // KB/s
-          WebCC.Properties.kbs = kbs;
+          WebCC.Properties.status_bitrate_kbps = kbs;
           bytesReceived = 0;
           lastBitrateTime = now;
         }
@@ -366,29 +366,8 @@ function connectToWebSocket(url) {
           setTimeout(() => {
             URL.revokeObjectURL(blobUrl);
           }, 100);
-        };
-        
-      } else if (typeof event.data === 'string') {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'stream_url' && data.url) {
-            // Handle video URL (show video element, hide img)
-            videoElement.style.display = 'block';
-            videoElement.src = data.url;
-            
-            const imgElement = document.getElementById('mjpegFrame');
-            if (imgElement) {
-              imgElement.style.display = 'none';
-              // Clean up any remaining blob URL
-              if (imgElement.src && imgElement.src.startsWith('blob:')) {
-                URL.revokeObjectURL(imgElement.src);
-              }
-            }
-          }
-        } catch (e) {
-          debugLog('Received text data:', event.data);
-        }
-      }
+        };        
+      } 
     };
     
     websocket.onerror = function(error) {
@@ -471,9 +450,9 @@ function connectToControlWebSocket(url) {
     let controlUrl = url;
     
     // Only add token if provided - no other parameters
-    if (currentToken && currentToken.trim() !== '') {
+    if (currentCameraAuthToken && currentCameraAuthToken.trim() !== '') {
       const separator = controlUrl.includes('?') ? '&' : '?';
-      controlUrl += separator + 'token=' + encodeURIComponent(currentToken);
+      controlUrl += separator + 'token=' + encodeURIComponent(currentCameraAuthToken);
       debugLog('Adding token to control URL');
     }
     
@@ -488,10 +467,10 @@ function connectToControlWebSocket(url) {
       debugLog('📺 Auto-enabling live mode after connection established');
       
       // Update internal state and WebCC properties
-      currentLive = true;
-      currentPlay = false;
-      WebCC.Properties.live = true;
-      WebCC.Properties.play = false;
+      currentEnableLivestream = true;
+      currentEnablePlayback = false;
+      WebCC.Properties.enable_livestream = true;
+      WebCC.Properties.enable_playback = false;
       
       // Send live command to start streaming
       sendControlCommand({ cmd: 'live' });
@@ -525,7 +504,7 @@ function connectToControlWebSocket(url) {
             // Update the timestamp property with the current frame timestamp in ISO format
             const timestampNumber = Number(timestampMs);
             const timestampISO = new Date(timestampNumber).toISOString();
-            WebCC.Properties.timestamp = timestampISO;
+            WebCC.Properties.status_timestamp = timestampISO;
             
             // Video frame received and timestamp property updated (removed verbose logging)
             
@@ -565,7 +544,7 @@ function connectToControlWebSocket(url) {
             // FPS calculation
             if (now - lastFpsTime >= 1000) {
               const fps = Math.round(fpsCounter * 1000 / (now - lastFpsTime));
-              WebCC.Properties.fps = fps;
+              WebCC.Properties.status_fps = fps;
               fpsCounter = 0;
               lastFpsTime = now;
             }
@@ -573,7 +552,7 @@ function connectToControlWebSocket(url) {
             // Bitrate calculation
             if (now - lastBitrateTime >= 1000) {
               const kbs = Math.round(bytesReceived / 1024);
-              WebCC.Properties.kbs = kbs;
+              WebCC.Properties.status_bitrate_kbps = kbs;
               bytesReceived = 0;
               lastBitrateTime = now;
             }
@@ -674,15 +653,15 @@ function sendControlCommand(command) {
 }
 
 function handleRecordingControl(active, reason) {
-  if (!isControlMode || !currentURL) {
+  if (!useControlStream || !currentCameraUrl) {
     debugLog('Recording control only available in control mode');
     return;
   }
   
   // Use HTTP API for recording control
   // Convert WebSocket URL to HTTP URL
-  // currentURL is now just the base path like /cam1
-  let baseUrl = currentURL.replace(/^ws(s?):\/\//, 'http$1://');
+  // currentCameraUrl is now just the base path like /cam1
+  let baseUrl = currentCameraUrl.replace(/^ws(s?):\/\//, 'http$1://');
   
   // Build the full endpoint URL
   const endpoint = active ? '/control/recording/start' : '/control/recording/stop';
@@ -695,8 +674,8 @@ function handleRecordingControl(active, reason) {
     }
   };
   
-  if (currentToken) {
-    requestOptions.headers['Authorization'] = 'Bearer ' + currentToken;
+  if (currentCameraAuthToken) {
+    requestOptions.headers['Authorization'] = 'Bearer ' + currentCameraAuthToken;
     debugLog('Using token authentication for HTTP request');
   }
   
@@ -726,14 +705,14 @@ function handleRecordingControl(active, reason) {
 }
 
 function handlePtzControl(endpoint, jsonData) {
-  if (!currentURL) {
+  if (!currentCameraUrl) {
     debugLog('PTZ control requires URL to be set');
     return;
   }
   
   // Convert WebSocket URL to HTTP URL
-  // currentURL is now just the base path like /cam1
-  let baseUrl = currentURL.replace(/^ws(s?):\/\//, 'http$1://');
+  // currentCameraUrl is now just the base path like /cam1
+  let baseUrl = currentCameraUrl.replace(/^ws(s?):\/\//, 'http$1://');
   
   // Build the full PTZ endpoint URL
   const fullUrl = baseUrl + '/control/ptz/' + endpoint;
@@ -745,8 +724,8 @@ function handlePtzControl(endpoint, jsonData) {
     }
   };
   
-  if (currentToken) {
-    requestOptions.headers['Authorization'] = 'Bearer ' + currentToken;
+  if (currentCameraAuthToken) {
+    requestOptions.headers['Authorization'] = 'Bearer ' + currentCameraAuthToken;
     debugLog('Using token authentication for PTZ request');
   }
   
@@ -825,7 +804,7 @@ function playHlsStream(url) {
   if (Hls.isSupported()) {
     // Use HLS.js for browsers that don't support HLS natively
     hls = new Hls({
-      debug: debugEnabled,
+      debug: enableDebug,
       enableWorker: true
     });
     
@@ -878,17 +857,17 @@ function playHlsStream(url) {
 
 function setProperty(data) {  
   switch (data.key) {
-    case 'URL':
-      if (data.value !== currentURL) {
-        const oldURL = currentURL;
-        currentURL = data.value;
+    case 'camera_stream_url':
+      if (data.value !== currentCameraUrl) {
+        const oldURL = currentCameraUrl;
+        currentCameraUrl = data.value;
         reconnectAttempts = 0;
         
         // If we're connected or trying to connect, disconnect first then reconnect
-        if (shouldConnect) {
+        if (enableConnection) {
           // Disconnect from old URL if connected
           if (websocket) {
-            debugLog('URL changed from', oldURL, 'to', currentURL, '- reconnecting...');
+            debugLog('URL changed from', oldURL, 'to', currentCameraUrl, '- reconnecting...');
             websocket.close();
             websocket = null;
           }
@@ -900,8 +879,8 @@ function setProperty(data) {
           }
           
           // Connect to new URL
-          if (currentURL) {
-            connectToWebSocket(currentURL);
+          if (currentCameraUrl) {
+            connectToWebSocket(currentCameraUrl);
           } else {
             // No URL provided, just update status
             updateConnectionStatus(false);
@@ -910,17 +889,17 @@ function setProperty(data) {
         }
       }
       break;
-    case 'connect':
-      shouldConnect = data.value;
-      if (shouldConnect && !currentPlayHls) {
+    case 'enable_connection':
+      enableConnection = data.value;
+      if (enableConnection && !currentUseHlsStreaming) {
         // Start connecting (only if not in HLS mode)
         reconnectAttempts = 0;
-        if (currentURL) {
-          connectToWebSocket(currentURL);
+        if (currentCameraUrl) {
+          connectToWebSocket(currentCameraUrl);
           
           // Live mode will be auto-enabled after connection is established
         }
-      } else if (shouldConnect && currentPlayHls) {
+      } else if (enableConnection && currentUseHlsStreaming) {
         debugLog('Connect requested but in HLS mode - ignoring WebSocket connection');
       } else {
         // Disconnect and show blank screen
@@ -940,18 +919,18 @@ function setProperty(data) {
         showBlankScreen();
       }
       break;
-    case 'version':
+    case 'show_version':
       if (versionElement) {
         versionElement.style.display = data.value ? 'block' : 'none';
       }
       break;
-    case 'token':
-      if (data.value !== currentToken) {
-        currentToken = data.value;
+    case 'camera_auth_token':
+      if (data.value !== currentCameraAuthToken) {
+        currentCameraAuthToken = data.value;
         debugLog('Token updated');
         
         // If we're connected and token changed, reconnect with new token
-        if (shouldConnect && currentURL) {
+        if (enableConnection && currentCameraUrl) {
           if (websocket) {
             debugLog('Token changed - reconnecting with new authentication...');
             websocket.close();
@@ -965,16 +944,16 @@ function setProperty(data) {
           }
           
           // Reconnect with new token
-          connectToWebSocket(currentURL);
+          connectToWebSocket(currentCameraUrl);
         }
       }
       break;
-    case 'control':
-      isControlMode = data.value;
-      debugLog('🔧 Control mode changed to:', isControlMode);
+    case 'use_control_stream':
+      useControlStream = data.value;
+      debugLog('🔧 Control mode changed to:', useControlStream);
       
       // Reconnect if URL is available and we're supposed to be connected
-      if (shouldConnect && currentURL) {
+      if (enableConnection && currentCameraUrl) {
         debugLog('Reconnecting due to control mode change...');
         if (websocket) {
           websocket.close();
@@ -984,29 +963,29 @@ function setProperty(data) {
           controlWebSocket.close();
           controlWebSocket = null;
         }
-        connectToWebSocket(currentURL);
+        connectToWebSocket(currentCameraUrl);
       }
       break;
-    case 'play_from':
-      currentPlayFrom = data.value;
-      debugLog('🔧 Play from timestamp changed to:', currentPlayFrom);
+    case 'playback_start_time':
+      currentEnablePlaybackbackStartTime = data.value;
+      debugLog('🔧 Play from timestamp changed to:', currentEnablePlaybackbackStartTime);
       break;
-    case 'play_to':
-      currentPlayTo = data.value;
-      debugLog('🔧 Play to timestamp changed to:', currentPlayTo);
+    case 'playback_end_time':
+      currentEnablePlaybackbackEndTime = data.value;
+      debugLog('🔧 Play to timestamp changed to:', currentEnablePlaybackbackEndTime);
       break;
-    case 'play':
-      currentPlay = data.value;
-      debugLog('🔧 Play control changed to:', currentPlay);
+    case 'enable_playback':
+      currentEnablePlayback = data.value;
+      debugLog('🔧 Play control changed to:', currentEnablePlayback);
       
-      if (currentPlayHls) {
+      if (currentUseHlsStreaming) {
         // HLS mode playback
-        if (currentPlay && currentPlayFrom && currentURL) {
-          const toTime = currentPlayTo || new Date().toISOString();
-          const hlsUrl = buildHlsUrl(currentURL, currentPlayFrom, toTime);
-          debugLog('🎬 Starting HLS playback from:', currentPlayFrom, 'to:', toTime);
+        if (currentEnablePlayback && currentEnablePlaybackbackStartTime && currentCameraUrl) {
+          const toTime = currentEnablePlaybackbackEndTime || new Date().toISOString();
+          const hlsUrl = buildHlsUrl(currentCameraUrl, currentEnablePlaybackbackStartTime, toTime);
+          debugLog('🎬 Starting HLS playback from:', currentEnablePlaybackbackStartTime, 'to:', toTime);
           playHlsStream(hlsUrl);
-        } else if (!currentPlay) {
+        } else if (!currentEnablePlayback) {
           debugLog('⏹️ Stopping HLS playback');
           if (hls) {
             hls.destroy();
@@ -1017,20 +996,20 @@ function setProperty(data) {
             hlsElement.currentTime = 0;
           }
         } else {
-          debugWarn('⚠️ HLS playback ignored - missing required parameters (play_from or URL)');
+          debugWarn('⚠️ HLS playback ignored - missing required parameters (playback_start_time or URL)');
         }
-      } else if (isControlMode && controlWebSocket) {
+      } else if (useControlStream && controlWebSocket) {
         // WebSocket control mode playback
-        if (currentPlay) {
+        if (currentEnablePlayback) {
           // Start playback
           const command = {
             cmd: 'start',
-            from: currentPlayFrom
+            from: currentEnablePlaybackbackStartTime
           };
-          if (currentPlayTo) {
-            command.to = currentPlayTo;
+          if (currentEnablePlaybackbackEndTime) {
+            command.to = currentEnablePlaybackbackEndTime;
           }
-          debugLog('🎬 Triggering playback start with timestamps from:', currentPlayFrom, 'to:', currentPlayTo || '(end)');
+          debugLog('🎬 Triggering playback start with timestamps from:', currentEnablePlaybackbackStartTime, 'to:', currentEnablePlaybackbackEndTime || '(end)');
           sendControlCommand(command);
         } else {
           // Stop playback
@@ -1041,26 +1020,26 @@ function setProperty(data) {
         debugWarn('⚠️ Play command ignored - not in control mode or WebSocket not connected');
       }
       break;
-    case 'speed':
-      currentSpeed = data.value;
-      debugLog('🔧 Playback speed changed to:', currentSpeed);
+    case 'playback_speed':
+      currentPlaybackSpeed = data.value;
+      debugLog('🔧 Playback speed changed to:', currentPlaybackSpeed);
       
-      if (isControlMode && controlWebSocket) {
+      if (useControlStream && controlWebSocket) {
         debugLog('⚡ Triggering speed change');
         sendControlCommand({
           cmd: 'speed',
-          speed: currentSpeed
+          speed: currentPlaybackSpeed
         });
       } else {
         debugWarn('⚠️ Speed command ignored - not in control mode or WebSocket not connected');
       }
       break;
-    case 'live':
-      currentLive = data.value;
-      debugLog('🔧 Live stream control changed to:', currentLive);
+    case 'enable_livestream':
+      currentEnableLivestream = data.value;
+      debugLog('🔧 Live stream control changed to:', currentEnableLivestream);
       
-      if (isControlMode && controlWebSocket) {
-        if (currentLive) {
+      if (useControlStream && controlWebSocket) {
+        if (currentEnableLivestream) {
           debugLog('📺 Triggering live stream start');
           sendControlCommand({ cmd: 'live' });
         } else {
@@ -1075,36 +1054,36 @@ function setProperty(data) {
       currentRecordingReason = data.value;
       debugLog('🔧 Recording reason changed to:', currentRecordingReason);
       break;
-    case 'recording_active':
-      currentRecordingActive = data.value;
-      debugLog('🔧 Recording active changed to:', currentRecordingActive);
+    case 'enable_recording':
+      currentEnableRecording = data.value;
+      debugLog('🔧 Recording active changed to:', currentEnableRecording);
       
-      if (isControlMode) {
-        debugLog('🔴 Triggering recording control - active:', currentRecordingActive, 'reason:', currentRecordingReason);
-        handleRecordingControl(currentRecordingActive, currentRecordingReason);
+      if (useControlStream) {
+        debugLog('🔴 Triggering recording control - active:', currentEnableRecording, 'reason:', currentRecordingReason);
+        handleRecordingControl(currentEnableRecording, currentRecordingReason);
       } else {
         debugWarn('⚠️ Recording command ignored - not in control mode');
       }
       break;
-    case 'goto':
-      currentGoto = data.value;
-      debugLog('🔧 Goto timestamp changed to:', currentGoto);
+    case 'seek_to_time':
+      currentSeekToTime = data.value;
+      debugLog('🔧 Goto timestamp changed to:', currentSeekToTime);
       
-      if (isControlMode && controlWebSocket && currentGoto) {
-        debugLog('🎯 Triggering goto command to timestamp:', currentGoto);
+      if (useControlStream && controlWebSocket && currentSeekToTime) {
+        debugLog('🎯 Triggering goto command to timestamp:', currentSeekToTime);
         sendControlCommand({
           cmd: 'goto',
-          timestamp: currentGoto
+          timestamp: currentSeekToTime
         });
-      } else if (!currentGoto) {
+      } else if (!currentSeekToTime) {
         debugWarn('⚠️ Goto command ignored - empty timestamp');
       } else {
         debugWarn('⚠️ Goto command ignored - not in control mode or WebSocket not connected');
       }
       break;
-    case 'debug':
-      debugEnabled = data.value;
-      console.log('Debug logging:', debugEnabled ? 'enabled' : 'disabled');
+    case 'enable_debug':
+      enableDebug = data.value;
+      console.log('Debug logging:', enableDebug ? 'enabled' : 'disabled');
       break;
     case 'ptz_move':
       currentPtzMove = data.value;
@@ -1168,9 +1147,9 @@ function setProperty(data) {
         debugWarn('⚠️ PTZ set preset command ignored - empty value');
       }
       break;
-    case 'play_hls':
-      currentPlayHls = data.value;
-      debugLog('🎬 HLS mode changed to:', currentPlayHls);
+    case 'use_hls_streaming':
+      currentUseHlsStreaming = data.value;
+      debugLog('🎬 HLS mode changed to:', currentUseHlsStreaming);
       switchPlayerMode();
       break;
   }
@@ -1180,7 +1159,7 @@ function setProperty(data) {
 // Initialize the custom control
 // Debug function to fetch and log HLS playlist content
 function debugHlsPlaylist(url) {
-  if (!debugEnabled) return;
+  if (!enableDebug) return;
   
   debugLog('🔍 Fetching HLS playlist for debugging:', url);
   
@@ -1235,19 +1214,19 @@ WebCC.start(
       initializeVideoPlayer();
       
       // Set initial properties
-      currentURL = WebCC.Properties.URL || '';
-      currentToken = WebCC.Properties.token || '';
-      shouldConnect = WebCC.Properties.connect || false;
-      isControlMode = WebCC.Properties.control || false;
-      currentPlayFrom = WebCC.Properties.play_from || '';
-      currentPlayTo = WebCC.Properties.play_to || '';
-      currentPlay = WebCC.Properties.play || false;
-      currentSpeed = WebCC.Properties.speed || 1.0;
-      currentLive = WebCC.Properties.live || false;
+      currentCameraUrl = WebCC.Properties.camera_stream_url || '';
+      currentCameraAuthToken = WebCC.Properties.camera_auth_token || '';
+      enableConnection = WebCC.Properties.enable_connection || false;
+      useControlStream = WebCC.Properties.use_control_stream || false;
+      currentPlaybackStartTime = WebCC.Properties.playback_start_time || '';
+      currentPlaybackEndTime = WebCC.Properties.playback_end_time || '';
+      currentEnablePlayback = WebCC.Properties.enable_playback || false;
+      currentPlaybackSpeed = WebCC.Properties.playback_speed || 1.0;
+      currentEnableLivestream = WebCC.Properties.enable_livestream || false;
       currentRecordingReason = WebCC.Properties.recording_reason || '';
-      currentRecordingActive = WebCC.Properties.recording_active || false;
-      currentGoto = WebCC.Properties.goto || '';
-      debugEnabled = WebCC.Properties.debug || false;
+      currentEnableRecording = WebCC.Properties.enable_recording || false;
+      currentSeekToTime = WebCC.Properties.seek_to_time || '';
+      enableDebug = WebCC.Properties.enable_debug || false;
       
       // Initialize PTZ properties
       currentPtzMove = WebCC.Properties.ptz_move || '';
@@ -1256,10 +1235,10 @@ WebCC.start(
       currentPtzSetPreset = WebCC.Properties.ptz_set_preset || '';
       
       // Initialize HLS property
-      currentPlayHls = WebCC.Properties.play_hls || false;
+      currentUseHlsStreaming = WebCC.Properties.use_hls_streaming || false;
       
       // Check version property at startup
-      if (versionElement && WebCC.Properties.version) {
+      if (versionElement && WebCC.Properties.show_version) {
         versionElement.style.display = 'block';
       }
       
@@ -1267,8 +1246,8 @@ WebCC.start(
       switchPlayerMode();
       
       // Connect if both URL and connect are set
-      if (shouldConnect && currentURL && !currentPlayHls) {
-        connectToWebSocket(currentURL);
+      if (enableConnection && currentCameraUrl && !currentUseHlsStreaming) {
+        connectToWebSocket(currentCameraUrl);
       } else {
         showBlankScreen();
         updateConnectionStatus(false);
@@ -1286,29 +1265,29 @@ WebCC.start(
     methods: {},
     events: [],
     properties: {
-      URL: '',
-      connect: false,
-      connected: false,
-      fps: 0,
-      kbs: 0,
-      version: false,
-      token: '',
-      control: false,
-      play_from: '',
-      play_to: '',
-      play: false,
-      speed: 1.0,
-      live: false,
+      camera_stream_url: '',
+      enable_connection: false,
+      status_connected: false,
+      status_fps: 0,
+      status_bitrate_kbps: 0,
+      show_version: false,
+      camera_auth_token: '',
+      use_control_stream: false,
+      playback_start_time: '',
+      playback_end_time: '',
+      enable_playback: false,
+      playback_speed: 1.0,
+      enable_livestream: false,
       recording_reason: '',
-      recording_active: false,
-      goto: '',
-      timestamp: '',
-      debug: false,
+      enable_recording: false,
+      seek_to_time: '',
+      status_timestamp: '',
+      enable_debug: false,
       ptz_move: '',
       ptz_stop: false,
       ptz_goto_preset: '',
       ptz_set_preset: '',
-      play_hls: false
+      use_hls_streaming: false
     }
   },
   // placeholder to include additional Unified dependencies

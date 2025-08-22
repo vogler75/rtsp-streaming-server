@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.32",
+			"version": "1.0.40",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -23,67 +23,67 @@
 				"methods": {},
 				"events": {},
 				"properties": {
-					"URL": {
+					"camera_stream_url": {
 						"type": "string",
 						"default": "",
 						"description": "WebSocket connection URL for the video stream"
 					},
-					"connect": {
+					"enable_connection": {
 						"type": "boolean",
 						"default": false,
 						"description": "Enable/disable video connection"
 					},
-					"connected": {
+					"status_connected": {
 						"type": "boolean",
 						"default": false,
-						"description": "Indicates the connection state"
+						"description": "Indicates the connection state (read-only)"
 					},
-					"fps": {
+					"status_fps": {
 						"type": "number",
 						"default": 0,
-						"description": "Current frames per second of the video stream"
+						"description": "Current frames per second of the video stream (read-only)"
 					},
-					"kbs": {
+					"status_bitrate_kbps": {
 						"type": "number",
 						"default": 0,
-						"description": "Current kilobytes per second of the video stream"
+						"description": "Current bitrate in kilobits per second (read-only)"
 					},
-					"version": {
+					"show_version": {
 						"type": "boolean",
 						"default": false,
 						"description": "Show build version number"
 					},
-					"token": {
+					"camera_auth_token": {
 						"type": "string",
 						"default": "",
 						"description": "Authentication token for WebSocket connection (Bearer token)"
 					},
-					"control": {
+					"use_control_stream": {
 						"type": "boolean",
 						"default": false,
 						"description": "Enable control mode instead of normal video streaming"
 					},
-					"play_from": {
+					"playback_start_time": {
 						"type": "string",
 						"default": "",
 						"description": "Start timestamp for playback as ISO string (e.g., '2025-08-15T10:00:00.000Z')"
 					},
-					"play_to": {
+					"playback_end_time": {
 						"type": "string",
 						"default": "",
 						"description": "End timestamp for playback as ISO string (optional, plays until end if empty)"
 					},
-					"play": {
+					"enable_playback": {
 						"type": "boolean",
 						"default": false,
 						"description": "Start/stop playback with the specified time range"
 					},
-					"speed": {
+					"playback_speed": {
 						"type": "number",
 						"default": 1.0,
 						"description": "Playback speed multiplier (e.g., 1.0 = normal, 2.0 = 2x speed)"
 					},
-					"live": {
+					"enable_livestream": {
 						"type": "boolean",
 						"default": false,
 						"description": "Enable/disable live stream mode"
@@ -93,22 +93,22 @@
 						"default": "",
 						"description": "Reason for starting a recording session"
 					},
-					"recording_active": {
+					"enable_recording": {
 						"type": "boolean",
 						"default": false,
 						"description": "Start or stop recording (true=start, false=stop)"
 					},
-					"goto": {
+					"seek_to_time": {
 						"type": "string",
 						"default": "",
 						"description": "Go to specific timestamp in ISO format (e.g., '2025-08-15T10:30:00.000Z')"
 					},
-					"timestamp": {
+					"status_timestamp": {
 						"type": "string",
 						"default": "",
 						"description": "Current video frame timestamp in ISO format (read-only, e.g., '2025-08-15T10:30:00.000Z')"
 					},
-					"debug": {
+					"enable_debug": {
 						"type": "boolean",
 						"default": false,
 						"description": "Enable debug logging for troubleshooting"
@@ -133,7 +133,7 @@
 						"default": "",
 						"description": "Set PTZ preset as JSON string (e.g., '{\"preset\": 1, \"name\": \"Entrance\"}')"
 					},
-					"play_hls": {
+					"use_hls_streaming": {
 						"type": "boolean",
 						"default": false,
 						"description": "Enable HLS player mode instead of WebSocket streaming"
