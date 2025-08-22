@@ -31,11 +31,7 @@
     "publish_interval": 0,
     "topic_name": "surveillance/cameras/cam2/image"
   },
-  "frame_storage_retention": null,
-  "frame_storage_enabled": null,
-  "video_storage_type": null,
-  "video_storage_retention": null,
-  "video_segment_minutes": null,
+  "recording": null,
   "ptz": {
     "enabled": false,
     "protocol": "onvif",

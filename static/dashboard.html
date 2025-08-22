@@ -1359,11 +1359,19 @@
             document.getElementById('token').value = config.token || '';
             
             // Per-camera MP4 recording settings
-            document.getElementById('frame_storage_enabled').value = (config.frame_storage_enabled !== undefined && config.frame_storage_enabled !== null) ? config.frame_storage_enabled.toString() : '';
-            document.getElementById('frame_storage_retention').value = config.frame_storage_retention || '';
-            document.getElementById('video_storage_type').value = config.video_storage_type || '';
-            document.getElementById('video_storage_retention').value = config.video_storage_retention || '';
-            document.getElementById('video_segment_minutes').value = config.video_segment_minutes || '';
+            if (config.recording) {
+                document.getElementById('frame_storage_enabled').value = (config.recording.frame_storage_enabled !== undefined && config.recording.frame_storage_enabled !== null) ? config.recording.frame_storage_enabled.toString() : '';
+                document.getElementById('frame_storage_retention').value = config.recording.frame_storage_retention || '';
+                document.getElementById('video_storage_type').value = config.recording.video_storage_type || '';
+                document.getElementById('video_storage_retention').value = config.recording.video_storage_retention || '';
+                document.getElementById('video_segment_minutes').value = config.recording.video_segment_minutes || '';
+            } else {
+                document.getElementById('frame_storage_enabled').value = '';
+                document.getElementById('frame_storage_retention').value = '';
+                document.getElementById('video_storage_type').value = '';
+                document.getElementById('video_storage_retention').value = '';
+                document.getElementById('video_segment_minutes').value = '';
+            }
             
             // MQTT settings
             if (config.mqtt) {
@@ -1735,27 +1743,33 @@
                 token: formData.get('token') || null
             };
             
-            // Add per-camera MP4 recording settings if configured
+            // Add per-camera recording settings if configured
             const frameStorageEnabled = formData.get('frame_storage_enabled');
             const frameStorageRetention = formData.get('frame_storage_retention');
             const videoStorageType = formData.get('video_storage_type');
             const videoStorageRetention = formData.get('video_storage_retention');
             const videoSegmentMinutes = formData.get('video_segment_minutes');
             
-            if (frameStorageEnabled !== '' && frameStorageEnabled !== null) {
-                config.frame_storage_enabled = frameStorageEnabled === 'true';
-            }
-            if (frameStorageRetention) {
-                config.frame_storage_retention = frameStorageRetention;
-            }
-            if (videoStorageType !== '' && videoStorageType !== null) {
-                config.video_storage_type = videoStorageType;
-            }
-            if (videoStorageRetention) {
-                config.video_storage_retention = videoStorageRetention;
-            }
-            if (videoSegmentMinutes) {
-                config.video_segment_minutes = parseInt(videoSegmentMinutes);
+            // Only add recording section if at least one setting is configured
+            if ((frameStorageEnabled !== '' && frameStorageEnabled !== null) ||
+                frameStorageRetention || videoStorageType || videoStorageRetention || videoSegmentMinutes) {
+                config.recording = {};
+                
+                if (frameStorageEnabled !== '' && frameStorageEnabled !== null) {
+                    config.recording.frame_storage_enabled = frameStorageEnabled === 'true';
+                }
+                if (frameStorageRetention) {
+                    config.recording.frame_storage_retention = frameStorageRetention;
+                }
+                if (videoStorageType !== '' && videoStorageType !== null) {
+                    config.recording.video_storage_type = videoStorageType;
+                }
+                if (videoStorageRetention) {
+                    config.recording.video_storage_retention = videoStorageRetention;
+                }
+                if (videoSegmentMinutes) {
+                    config.recording.video_segment_minutes = parseInt(videoSegmentMinutes);
+                }
             }
             
             // Add MQTT config if configured

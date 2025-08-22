@@ -78,8 +78,8 @@ impl RecordingManager {
 
     /// Get the effective storage type for a camera
     pub fn get_storage_type_for_camera(&self, camera_config: &crate::config::CameraConfig) -> crate::config::Mp4StorageType {
-        camera_config.video_storage_type
-            .clone()
+        camera_config.get_video_storage_type()
+            .cloned()
             .unwrap_or(self.config.video_storage_type.clone())
     }
 

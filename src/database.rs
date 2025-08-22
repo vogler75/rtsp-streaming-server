@@ -1313,14 +1313,11 @@ impl DatabaseProvider for SqliteDatabase {
         let (frame_retention, video_retention, video_storage_type) = if let Some(cam_id) = &camera_id {
             if let Some(camera_config) = camera_configs.get(cam_id) {
                 // Use camera-specific retention settings if available, otherwise fall back to global
-                let frame_retention = camera_config.frame_storage_retention
-                    .as_ref()
+                let frame_retention = camera_config.get_frame_storage_retention()
                     .unwrap_or(&config.frame_storage_retention);
-                let video_retention = camera_config.video_storage_retention
-                    .as_ref()
+                let video_retention = camera_config.get_video_storage_retention()
                     .unwrap_or(&config.video_storage_retention);
-                let video_type = camera_config.video_storage_type
-                    .as_ref()
+                let video_type = camera_config.get_video_storage_type()
                     .unwrap_or(&config.video_storage_type);
                 (frame_retention.clone(), video_retention.clone(), video_type.clone())
             } else {

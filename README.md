@@ -230,7 +230,6 @@ Create a JSON file for each camera in the `cameras/` directory:
   "reconnect_interval": 5,
   "chunk_read_size": 8192,
   "token": "secure-cam1-token",
-  "max_recording_age": "7d",
   
   "ffmpeg": {
     "command": null,
@@ -256,6 +255,14 @@ Create a JSON file for each camera in the `cameras/` directory:
   "mqtt": {
     "publish_interval": 5,
     "topic_name": "surveillance/cameras/cam1/image"
+  },
+  
+  "recording": {
+    "frame_storage_enabled": true,
+    "frame_storage_retention": "24h",
+    "video_storage_type": "filesystem",
+    "video_storage_retention": "7d",
+    "video_segment_minutes": 5
   },
   
   "transcoding_override": {
@@ -410,7 +417,6 @@ All changes are applied without server restart. WebSocket connections and FFmpeg
 - **reconnect_interval**: Seconds between reconnection attempts
 - **chunk_read_size**: Bytes to read at once from FFmpeg
 - **ffmpeg_buffer_size**: FFmpeg RTSP buffer size in bytes
-- **max_recording_age**: Override max recording age for this camera (e.g., "10m", "5h", "7d")
 
 #### Transcoding Options
 - **output_format**: Output format - currently "mjpeg"
@@ -759,14 +765,19 @@ cleanup_interval_hours = 1  # How often to run the cleanup process
 
 ### Per-Camera Recording Settings
 
-You can override global recording settings for individual cameras in their configuration files:
+You can override global recording settings for individual cameras in their configuration files using the `recording` section:
 
 ```json
 {
   "path": "/cam1",
   "url": "rtsp://...",
-  "frame_storage_retention": "1d",
-  "video_storage_retention": "14d"
+  "recording": {
+    "frame_storage_enabled": true,
+    "frame_storage_retention": "1d",
+    "video_storage_type": "filesystem",
+    "video_storage_retention": "14d",
+    "video_segment_minutes": 10
+  }
 }
 ```
 

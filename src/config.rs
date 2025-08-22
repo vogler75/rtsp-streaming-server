@@ -52,19 +52,7 @@ pub struct CameraConfig {
     pub token: Option<String>,
     pub ffmpeg: Option<FfmpegConfig>,
     pub mqtt: Option<CameraMqttConfig>,
-    
-    // Per-camera frame storage settings
-    pub frame_storage_enabled: Option<bool>, // Override global frame storage setting
-    pub frame_storage_retention: Option<String>, // Override global frame retention (e.g., "10m", "5h", "24h")
-    
-    // Per-camera MP4 recording settings (NEW)
-    pub video_storage_type: Option<Mp4StorageType>, // Override global video storage type
-    pub video_storage_retention: Option<String>, // Override global video retention (e.g., "30d")
-    pub video_segment_minutes: Option<u64>, // Override global segment duration
-    
-    // BACKWARD COMPATIBILITY: Handle old video_storage_enabled field
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub video_storage_enabled: Option<bool>, // For migration only
+    pub recording: Option<CameraRecordingConfig>,
     
     #[serde(flatten)]
     pub transcoding_override: Option<TranscodingConfig>,
@@ -72,6 +60,33 @@ pub struct CameraConfig {
     // PTZ control configuration (optional)
     #[serde(default)]
     pub ptz: Option<PtzConfig>,
+}
+
+impl CameraConfig {
+    /// Get the effective frame storage enabled setting
+    pub fn get_frame_storage_enabled(&self) -> Option<bool> {
+        self.recording.as_ref()?.frame_storage_enabled
+    }
+    
+    /// Get the effective frame storage retention setting
+    pub fn get_frame_storage_retention(&self) -> Option<&String> {
+        self.recording.as_ref()?.frame_storage_retention.as_ref()
+    }
+    
+    /// Get the effective video storage type
+    pub fn get_video_storage_type(&self) -> Option<&Mp4StorageType> {
+        self.recording.as_ref()?.video_storage_type.as_ref()
+    }
+    
+    /// Get the effective video storage retention setting
+    pub fn get_video_storage_retention(&self) -> Option<&String> {
+        self.recording.as_ref()?.video_storage_retention.as_ref()
+    }
+    
+    /// Get the effective video segment minutes setting
+    pub fn get_video_segment_minutes(&self) -> Option<u64> {
+        self.recording.as_ref()?.video_segment_minutes
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +201,18 @@ pub struct CameraMqttConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraRecordingConfig {
+    // Frame storage settings
+    pub frame_storage_enabled: Option<bool>, // Override global frame storage setting
+    pub frame_storage_retention: Option<String>, // Override global frame retention (e.g., "10m", "5h", "24h")
+    
+    // MP4 recording settings
+    pub video_storage_type: Option<Mp4StorageType>, // Override global video storage type
+    pub video_storage_retention: Option<String>, // Override global video retention (e.g., "30d")
+    pub video_segment_minutes: Option<u64>, // Override global segment duration
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
     // Frame storage settings (unchanged)
     #[serde(default)]
@@ -209,10 +236,6 @@ pub struct RecordingConfig {
     // Cleanup settings
     #[serde(default = "default_cleanup_interval_hours")]
     pub cleanup_interval_hours: u64, // How often to run cleanup (default: 1 hour)
-    
-    // BACKWARD COMPATIBILITY: Handle old video_storage_enabled field
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub video_storage_enabled: Option<bool>, // For migration only
 }
 
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
@@ -276,49 +299,11 @@ impl Default for Config {
                 video_segment_minutes: default_video_segment_minutes(),
                 mp4_framerate: default_mp4_framerate(),
                 cleanup_interval_hours: default_cleanup_interval_hours(),
-                video_storage_enabled: None, // For migration only
             }),
         }
     }
 }
 
-impl CameraConfig {
-    // Get the effective video storage type for this camera
-    #[allow(dead_code)]
-    pub fn get_effective_video_storage_type(&self, global_config: &RecordingConfig) -> Mp4StorageType {
-        self.video_storage_type
-            .clone()
-            .unwrap_or(global_config.video_storage_type.clone())
-    }
-    
-    // Handle backward compatibility for video storage settings
-    pub fn migrate_video_storage_config(&mut self) {
-        if let Some(enabled) = self.video_storage_enabled.take() {
-            if self.video_storage_type.is_none() {
-                self.video_storage_type = Some(if enabled {
-                    Mp4StorageType::Filesystem
-                } else {
-                    Mp4StorageType::Disabled
-                });
-            }
-        }
-    }
-}
-
-impl RecordingConfig {
-    // Handle backward compatibility for video storage settings
-    pub fn migrate_video_storage_config(&mut self) {
-        if let Some(enabled) = self.video_storage_enabled.take() {
-            if self.video_storage_type == Mp4StorageType::default() {
-                self.video_storage_type = if enabled {
-                    Mp4StorageType::Filesystem
-                } else {
-                    Mp4StorageType::Disabled
-                };
-            }
-        }
-    }
-}
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
@@ -329,10 +314,6 @@ impl Config {
             toml::from_str(&content)?
         };
         
-        // Handle backward compatibility migration
-        if let Some(ref mut recording) = config.recording {
-            recording.migrate_video_storage_config();
-        }
         
         // Substitute environment variables in MQTT config
         if let Some(ref mut mqtt) = config.mqtt {
@@ -368,9 +349,7 @@ impl Config {
                         match fs::read_to_string(&path) {
                             Ok(content) => {
                                 match serde_json::from_str::<CameraConfig>(&content) {
-                                    Ok(mut camera_config) => {
-                                        // Handle migration for this camera
-                                        camera_config.migrate_video_storage_config();
+                                    Ok(camera_config) => {
                                         info!("Loaded camera configuration: {} (JSON)", file_stem);
                                         cameras.insert(file_stem.to_string(), camera_config);
                                     }
@@ -389,9 +368,7 @@ impl Config {
                         match fs::read_to_string(&path) {
                             Ok(content) => {
                                 match toml::from_str::<CameraConfig>(&content) {
-                                    Ok(mut camera_config) => {
-                                        // Handle migration for this camera
-                                        camera_config.migrate_video_storage_config();
+                                    Ok(camera_config) => {
                                         info!("Loaded camera configuration: {} (TOML)", file_stem);
                                         cameras.insert(file_stem.to_string(), camera_config);
                                     }
