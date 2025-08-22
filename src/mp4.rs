@@ -95,15 +95,6 @@ pub async fn serve_hls_playlist(
     let camera_id = path.0;
     info!("Serving HLS playlist: camera_id={}, from={}, to={}", camera_id, query.t1, query.t2);
     
-    // Get camera path from app_state for correct URL generation
-    let camera_configs = app_state.camera_configs.read().await;
-    let camera_path = match camera_configs.get(&camera_id) {
-        Some(config) => config.path.clone(),
-        None => {
-            return (axum::http::StatusCode::NOT_FOUND, "Camera configuration not found").into_response();
-        }
-    };
-    drop(camera_configs);
     
     let recording_manager = match app_state.recording_manager {
         Some(ref rm) => rm,
@@ -301,8 +292,8 @@ pub async fn serve_hls_playlist(
                     
                     segments.push(hls_segment);
                     
-                    // Update playlist to reference our API endpoint
-                    final_playlist_content.push_str(&format!("{}/control/recordings/hls/segments/{}/{}\n", camera_path, playlist_id, line));
+                    // Use relative URLs in playlist for better compatibility with reverse proxies
+                    final_playlist_content.push_str(&format!("segments/{}/{}\n", playlist_id, line));
                     segment_index += 1;
                 },
                 Err(e) => {
