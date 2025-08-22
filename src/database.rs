@@ -147,7 +147,7 @@ pub trait DatabaseProvider: Send + Sync {
         to: Option<DateTime<Utc>>,
     ) -> Result<Vec<RecordedFrame>>;
     
-    async fn delete_old_frames_and_sessions(
+    async fn delete_old_frames(
         &self,
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
@@ -818,52 +818,12 @@ impl DatabaseProvider for SqliteDatabase {
         Ok(frames)
     }
 
-    async fn delete_old_frames_and_sessions(
+    async fn delete_old_frames(
         &self,
         camera_id: Option<&str>,
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
-        // Start a transaction
-        let mut tx = self.pool.begin().await?;
-        
-        // Step 1: Delete old video segments that reference sessions we want to delete
-        // This prevents foreign key constraint violations
-        let delete_segments_result = if let Some(cam_id) = camera_id {
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE session_id IN (
-                    SELECT id FROM {} 
-                    WHERE camera_id = ? 
-                    AND end_time IS NOT NULL 
-                    AND end_time < ?
-                )
-                "#,
-                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
-            );
-            sqlx::query(&query)
-            .bind(cam_id)
-            .bind(older_than)
-            .execute(&mut *tx).await?
-        } else {
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE session_id IN (
-                    SELECT id FROM {} 
-                    WHERE end_time IS NOT NULL 
-                    AND end_time < ?
-                )
-                "#,
-                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
-            );
-            sqlx::query(&query)
-            .bind(older_than)
-            .execute(&mut *tx).await?
-        };
-        let deleted_segments = delete_segments_result.rows_affected();
-        
-        // Step 2: Delete old frames based on their timestamp
+        // Delete old frames based on their timestamp
         let frames_result = if let Some(cam_id) = camera_id {
             // Delete frames for a specific camera
             let query = format!(
@@ -879,92 +839,25 @@ impl DatabaseProvider for SqliteDatabase {
             sqlx::query(&query)
             .bind(older_than)
             .bind(cam_id)
-            .execute(&mut *tx).await?
+            .execute(&self.pool).await?
         } else {
             // Delete frames for all cameras
             let query = format!("DELETE FROM {} WHERE timestamp < ?", TABLE_RECORDING_MJPEG);
             sqlx::query(&query)
                 .bind(older_than)
-                .execute(&mut *tx).await?
+                .execute(&self.pool).await?
         };
         let deleted_frames = frames_result.rows_affected();
         
-        // Step 3: Delete completed sessions based on end_time
-        // Only delete sessions that have ended (end_time is not NULL) and ended before the cutoff
-        let sessions_result = if let Some(cam_id) = camera_id {
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE end_time IS NOT NULL 
-                AND end_time < ? 
-                AND camera_id = ?
-                "#,
-                TABLE_RECORDING_SESSIONS
-            );
-            sqlx::query(&query)
-            .bind(older_than)
-            .bind(cam_id)
-            .execute(&mut *tx).await?
-        } else {
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE end_time IS NOT NULL 
-                AND end_time < ?
-                "#,
-                TABLE_RECORDING_SESSIONS
-            );
-            sqlx::query(&query)
-            .bind(older_than)
-            .execute(&mut *tx).await?
-        };
-        let deleted_sessions = sessions_result.rows_affected();
-        
-        // Step 4: Clean up orphaned sessions (sessions with no frames left)
-        // This handles cases where all frames of a session were deleted but session is still active
-        let orphaned_result = if let Some(cam_id) = camera_id {
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE camera_id = ?
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
-                )
-                AND end_time IS NOT NULL
-                "#,
-                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG
-            );
-            sqlx::query(&query)
-            .bind(cam_id)
-            .execute(&mut *tx).await?
-        } else {
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
-                )
-                AND end_time IS NOT NULL
-                "#,
-                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG
-            );
-            sqlx::query(&query)
-            .execute(&mut *tx).await?
-        };
-        let deleted_orphaned = orphaned_result.rows_affected();
-        
-        // Commit the transaction
-        tx.commit().await?;
-        
-        if deleted_segments > 0 || deleted_frames > 0 || deleted_sessions > 0 || deleted_orphaned > 0 {
+        if deleted_frames > 0 {
             tracing::info!(
-                "Cleanup complete: {} video segments deleted, {} frames deleted, {} completed sessions deleted, {} orphaned sessions deleted",
-                deleted_segments, deleted_frames, deleted_sessions, deleted_orphaned
+                "Cleanup complete: {} frames deleted",
+                deleted_frames
             );
         }
         
-        // Return total number of sessions deleted
-        Ok((deleted_sessions + deleted_orphaned) as usize)
+        // Return number of frames deleted
+        Ok(deleted_frames as usize)
     }
     
     async fn get_frame_at_timestamp(
@@ -1238,10 +1131,10 @@ impl DatabaseProvider for SqliteDatabase {
             if let Ok(duration) = humantime::parse_duration(&config.frame_storage_retention) {
                 if duration.as_secs() > 0 {
                     let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    match self.delete_old_frames_and_sessions(None, older_than).await {
+                    match self.delete_old_frames(None, older_than).await {
                         Ok(deleted_count) => {
                             if deleted_count > 0 {
-                                tracing::info!("Deleted {} old frame recording sessions.", deleted_count);
+                                tracing::info!("Deleted {} old frames.", deleted_count);
                             }
                         }
                         Err(e) => tracing::error!("Error deleting old frames: {}", e),
