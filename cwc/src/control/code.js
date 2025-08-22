@@ -813,6 +813,9 @@ function playHlsStream(url) {
   
   debugLog('Playing HLS stream:', url);
   
+  // Debug: Fetch and log the HLS playlist content
+  debugHlsPlaylist(url);
+  
   // Clean up any existing HLS instance
   if (hls) {
     hls.destroy();
@@ -1175,6 +1178,56 @@ function setProperty(data) {
 
 ////////////////////////////////////////////
 // Initialize the custom control
+// Debug function to fetch and log HLS playlist content
+function debugHlsPlaylist(url) {
+  if (!debugEnabled) return;
+  
+  debugLog('🔍 Fetching HLS playlist for debugging:', url);
+  
+  fetch(url)
+    .then(response => {
+      debugLog('📥 HLS Playlist Response:', response.status, response.statusText);
+      debugLog('📋 HLS Content-Type:', response.headers.get('content-type'));
+      
+      if (response.ok) {
+        return response.text();
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+    })
+    .then(playlistContent => {
+      debugLog('📄 HLS Playlist Content:');
+      debugLog('════════════════════════════════════════');
+      debugLog(playlistContent);
+      debugLog('════════════════════════════════════════');
+      
+      // Parse and analyze the playlist
+      const lines = playlistContent.split('\n');
+      const segments = lines.filter(line => line.trim().endsWith('.ts'));
+      const duration = lines.find(line => line.startsWith('#EXT-X-TARGETDURATION:'));
+      
+      debugLog('📊 HLS Playlist Analysis:');
+      debugLog('- Total segments:', segments.length);
+      debugLog('- Target duration:', duration || 'Not found');
+      debugLog('- Playlist size:', playlistContent.length, 'characters');
+      
+      // Log first few segment URLs for debugging
+      if (segments.length > 0) {
+        debugLog('🎬 Segment URLs:');
+        segments.slice(0, 3).forEach((segment, index) => {
+          debugLog(`  ${index + 1}. ${segment}`);
+        });
+        if (segments.length > 3) {
+          debugLog(`  ... and ${segments.length - 3} more segments`);
+        }
+      }
+    })
+    .catch(error => {
+      debugError('❌ Failed to fetch HLS playlist:', error.message);
+      debugError('   URL was:', url);
+    });
+}
+
 WebCC.start(
   function (result) {
     if (result) {

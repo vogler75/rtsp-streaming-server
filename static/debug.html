@@ -387,6 +387,7 @@
                         </div>
                     </div>
                     <button onclick="buildAndPlayHlsUrl()">📺 Build & Play HLS</button>
+                    <button onclick="debugHlsPlaylist()">🔍 Debug HLS Playlist</button>
                 </div>
             </div>
             
@@ -399,6 +400,12 @@
                     <div>Duration: <span id="videoDuration">-</span></div>
                     <div>Current Time: <span id="videoCurrentTime">-</span></div>
                     <div>Video Dimensions: <span id="videoDimensions">-</span></div>
+                </div>
+                
+                <div class="test-section">
+                    <h3>🔍 HLS Playlist Debug</h3>
+                    <div id="hlsPlaylistContent" style="background: #000; padding: 10px; font-family: 'Courier New', monospace; font-size: 11px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; color: #00ff00; border: 1px solid #555; margin-top: 5px; display: none;"></div>
+                    <div id="hlsPlaylistStatus" style="font-size: 11px; color: #999; margin-top: 5px;">Click "Debug HLS Playlist" to fetch and display playlist content</div>
                 </div>
                 
                 <div class="test-section">
@@ -1154,6 +1161,77 @@
                     resultDiv.innerHTML = `❌ Network error<br>${error.message}`;
                     resultDiv.style.color = '#F44336';
                     log(`URL test error: ${error.message}`, 'error');
+                });
+        }
+
+        function debugHlsPlaylist() {
+            const cameraId = document.getElementById('quickCameraId').value.trim();
+            const startTime = document.getElementById('quickStartTime').value;
+            const endTime = document.getElementById('quickEndTime').value;
+
+            if (!cameraId || !startTime || !endTime) {
+                log('Please fill in all fields before debugging HLS playlist', 'error');
+                return;
+            }
+
+            const t1 = new Date(startTime).toISOString();
+            const t2 = new Date(endTime).toISOString();
+            const url = `/${cameraId}/control/recordings/hls/timerange?t1=${encodeURIComponent(t1)}&t2=${encodeURIComponent(t2)}`;
+
+            const statusDiv = document.getElementById('hlsPlaylistStatus');
+            const contentDiv = document.getElementById('hlsPlaylistContent');
+            
+            statusDiv.textContent = 'Fetching HLS playlist...';
+            statusDiv.style.color = '#FFB74D';
+            contentDiv.style.display = 'none';
+
+            log('🔍 Fetching HLS playlist: ' + url, 'info');
+
+            fetch(url)
+                .then(response => {
+                    const status = response.status;
+                    const contentType = response.headers.get('content-type') || 'unknown';
+                    
+                    log(`HLS Response: ${status} - ${contentType}`, response.ok ? 'info' : 'error');
+                    
+                    if (response.ok) {
+                        return response.text();
+                    } else {
+                        throw new Error(`HTTP ${status}`);
+                    }
+                })
+                .then(playlistContent => {
+                    contentDiv.textContent = playlistContent;
+                    contentDiv.style.display = 'block';
+                    
+                    // Parse playlist to count segments and show details
+                    const lines = playlistContent.split('\n');
+                    const segments = lines.filter(line => line.trim().endsWith('.ts'));
+                    const duration = lines.find(line => line.startsWith('#EXT-X-TARGETDURATION:'));
+                    
+                    statusDiv.innerHTML = `✅ Playlist loaded successfully<br>` +
+                        `📊 ${segments.length} segments found<br>` +
+                        `⏱️ ${duration || 'Duration not found'}<br>` +
+                        `📏 Total size: ${playlistContent.length} characters`;
+                    statusDiv.style.color = '#4CAF50';
+                    
+                    log(`HLS Playlist parsed: ${segments.length} segments`, 'info');
+                    
+                    // Debug segment URLs
+                    segments.forEach((segment, index) => {
+                        if (index < 3) { // Show first 3 segments for debugging
+                            log(`📺 Segment ${index + 1}: ${segment}`, 'info');
+                        }
+                    });
+                    if (segments.length > 3) {
+                        log(`... and ${segments.length - 3} more segments`, 'info');
+                    }
+                })
+                .catch(error => {
+                    statusDiv.innerHTML = `❌ Failed to fetch playlist<br>${error.message}`;
+                    statusDiv.style.color = '#F44336';
+                    contentDiv.style.display = 'none';
+                    log(`HLS Playlist error: ${error.message}`, 'error');
                 });
         }
     </script>
