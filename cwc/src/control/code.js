@@ -114,18 +114,33 @@ function updateConnectionStatus(connected) {
   }
   
   if (statusElement) {
-    if (connected) {
-      // Hide status when connected
-      statusElement.style.display = 'none';
+    // In HLS mode, hide status completely unless debug mode is on
+    if (currentUseHlsStreaming) {
+      if (enableDebug) {
+        statusElement.style.display = 'block';
+        statusElement.textContent = 'HLS Stream';
+        statusElement.style.backgroundColor = 'rgba(0,128,0,0.7)';
+      } else {
+        statusElement.style.display = 'none';
+      }
+    } else if (connected) {
+      // WebSocket mode - hide status when connected unless debug mode is on
+      if (enableDebug) {
+        statusElement.style.display = 'block';
+        statusElement.textContent = 'Live Stream';
+        statusElement.style.backgroundColor = 'rgba(0,128,0,0.7)';
+      } else {
+        statusElement.style.display = 'none';
+      }
       reconnectAttempts = 0;
     } else if (enableConnection) {
-      // Show status when disconnected but trying to connect
+      // WebSocket mode - show status when disconnected but trying to connect
       statusElement.style.display = 'block';
       const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts})` : '';
       statusElement.textContent = 'Disconnected' + reconnectText;
       statusElement.style.backgroundColor = 'rgba(128,0,0,0.7)';
     } else {
-      // Show status when stopped
+      // WebSocket mode - show status when stopped
       statusElement.style.display = 'block';
       statusElement.textContent = 'Stopped';
       statusElement.style.backgroundColor = 'rgba(64,64,64,0.7)';
@@ -462,18 +477,6 @@ function connectToControlWebSocket(url) {
     controlWebSocket.onopen = function() {
       debugLog('✅ Control WebSocket connected successfully');
       updateConnectionStatus(true);
-      
-      // Auto-enable live mode when connection is established
-      debugLog('📺 Auto-enabling live mode after connection established');
-      
-      // Update internal state and WebCC properties
-      currentEnableLivestream = true;
-      currentEnablePlayback = false;
-      WebCC.Properties.enable_livestream = true;
-      WebCC.Properties.enable_playback = false;
-      
-      // Send live command to start streaming
-      sendControlCommand({ cmd: 'live' });
     };
     
     controlWebSocket.onmessage = function(event) {
@@ -896,8 +899,6 @@ function setProperty(data) {
         reconnectAttempts = 0;
         if (currentCameraUrl) {
           connectToWebSocket(currentCameraUrl);
-          
-          // Live mode will be auto-enabled after connection is established
         }
       } else if (enableConnection && currentUseHlsStreaming) {
         debugLog('Connect requested but in HLS mode - ignoring WebSocket connection');
@@ -1084,6 +1085,8 @@ function setProperty(data) {
     case 'enable_debug':
       enableDebug = data.value;
       console.log('Debug logging:', enableDebug ? 'enabled' : 'disabled');
+      // Update status display based on debug mode change
+      updateConnectionStatus(isConnected);
       break;
     case 'ptz_move':
       currentPtzMove = data.value;
@@ -1151,6 +1154,8 @@ function setProperty(data) {
       currentUseHlsStreaming = data.value;
       debugLog('🎬 HLS mode changed to:', currentUseHlsStreaming);
       switchPlayerMode();
+      // Update status display based on new mode
+      updateConnectionStatus(isConnected);
       break;
   }
 }
@@ -1236,13 +1241,15 @@ WebCC.start(
       
       // Initialize HLS property
       currentUseHlsStreaming = WebCC.Properties.use_hls_streaming || false;
+      debugLog('🔧 Initial HLS streaming value:', WebCC.Properties.use_hls_streaming, '-> currentUseHlsStreaming:', currentUseHlsStreaming);
       
       // Check version property at startup
       if (versionElement && WebCC.Properties.show_version) {
         versionElement.style.display = 'block';
       }
       
-      // Initialize player mode
+      // Initialize player mode - ensure correct video element is visible
+      debugLog('🔧 About to call switchPlayerMode with currentUseHlsStreaming:', currentUseHlsStreaming);
       switchPlayerMode();
       
       // Connect if both URL and connect are set
