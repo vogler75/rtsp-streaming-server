@@ -356,7 +356,7 @@
                         <input type="text" id="testVideoUrl" placeholder="Enter HLS URL to test" style="font-size: 11px;">
                         <div style="margin-top: 5px; font-size: 11px; color: #999;">
                             Examples:
-                            <br>• /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
+                            <br>• /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
                         </div>
                     </div>
                     <div style="display: flex; gap: 10px; margin-bottom: 10px;">
@@ -1089,7 +1089,7 @@
 
             const t1 = new Date(startTime).toISOString();
             const t2 = new Date(endTime).toISOString();
-            const url = `/api/recordings/${cameraId}/hls/timerange?t1=${encodeURIComponent(t1)}&t2=${encodeURIComponent(t2)}`;
+            const url = `/${cameraId}/control/recordings/hls/timerange?t1=${encodeURIComponent(t1)}&t2=${encodeURIComponent(t2)}`;
             
             document.getElementById('testVideoUrl').value = url;
             

@@ -6,13 +6,13 @@ This document provides a comprehensive overview of all available REST API endpoi
 
 | Endpoint | Purpose | Format | Parameters |
 |----------|---------|---------|------------|
-| `/api/recordings/{camera_id}/mp4/segments/{filename}` | Single MP4 recording | MP4 | - |
-| `/api/recordings/{camera_id}/hls/timerange` | HLS playlist for time range | M3U8 | `t1`, `t2`, `segment_duration` |
+| `{camera_path}/control/recordings/mp4/segments/{filename}` | Single MP4 recording | MP4 | - |
+| `{camera_path}/control/recordings/hls/timerange` | HLS playlist for time range | M3U8 | `t1`, `t2`, `segment_duration` |
 
 **Example:**
 ```bash
 # HLS playlist for a time range
-GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
+GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
 ```
 
 ---
@@ -26,16 +26,6 @@ GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:
 └── api/
     ├── status                                # Server status
     ├── cameras                               # List cameras
-    ├── recordings/
-    │   └── {camera_id}/
-    │       ├── mp4/
-    │       │   └── segments/
-    │       │       └── {filename}            # Stream single MP4
-    │       └── hls/
-    │           ├── timerange                 # Generate HLS playlist
-    │           └── segments/
-    │               └── {playlist_id}/
-    │                   └── {segment_name}    # Serve HLS segments
     └── admin/
         ├── cameras/
         │   ├── POST /                        # Create camera
@@ -62,8 +52,12 @@ GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:
     ├── recordings/
     │   ├── GET /                             # List recordings
     │   ├── GET /{session_id}/frames          # Frame metadata
-    │   └── mp4/
-    │       └── segments                      # List MP4 segments
+    │   ├── mp4/
+    │   │   ├── GET segments                  # List MP4 segments
+    │   │   └── GET segments/{filename}       # Stream single MP4
+    │   └── hls/
+    │       ├── GET timerange                 # Generate HLS playlist
+    │       └── GET segments/{playlist_id}/{segment_name} # Serve HLS segments
     └── ptz/                                  # PTZ controls (if enabled)
         ├── POST move                         # Pan/tilt/zoom
         ├── POST stop                         # Stop movement
@@ -92,36 +86,41 @@ The server provides two main ways to access recorded video content:
 
 ### Single MP4 Recording
 
-**Endpoint:** `GET /api/recordings/{camera_id}/mp4/segments/{filename}`
+**Endpoint:** `GET {camera_path}/control/recordings/mp4/segments/{filename}`
 
 Stream an individual MP4 recording file for playback.
 
-- **Authentication**: None required (public endpoint)
+- **Authentication**: Bearer token if camera has token configured
 - **Headers**:
   - `Range` (optional): Byte-range requests for seeking (e.g., `bytes=0-1024`)
+  - `Authorization` (optional): `Bearer <camera_token>` if camera requires authentication
 - **Response**: 
   - `200 OK`: Full video file
   - `206 Partial Content`: When Range header provided
   - `404 Not Found`: Recording not found
+  - `401 Unauthorized`: Missing or invalid authentication
   - Headers: `Content-Type: video/mp4`, `Accept-Ranges: bytes`, `Cache-Control: public, max-age=3600`
 
 **Examples:**
 ```bash
 # Stream full MP4 file
-GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
+GET /cam1/control/recordings/mp4/segments/2025-08-21T05-39-14Z.mp4
 
-# Stream with byte range for seeking
-GET /api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4
+# Stream with byte range for seeking and authentication
+GET /cam1/control/recordings/mp4/segments/2025-08-21T05-39-14Z.mp4
 Range: bytes=1024-2048
+Authorization: Bearer your-camera-token
 ```
 
 ### HLS Time Range Playlist
 
-**Endpoint:** `GET /api/recordings/{camera_id}/hls/timerange`
+**Endpoint:** `GET {camera_path}/control/recordings/hls/timerange`
 
 Generate an HLS (HTTP Live Streaming) playlist for recordings within a time range.
 
-- **Authentication**: None required (public endpoint)
+- **Authentication**: Bearer token if camera has token configured
+- **Headers**:
+  - `Authorization` (optional): `Bearer <camera_token>` if camera requires authentication
 - **Query Parameters**:
   - `t1` (required): Start time in ISO 8601 format
   - `t2` (required): End time in ISO 8601 format  
@@ -129,6 +128,7 @@ Generate an HLS (HTTP Live Streaming) playlist for recordings within a time rang
 - **Response**: 
   - `200 OK`: M3U8 playlist content
   - `404 Not Found`: No recordings in time range
+  - `401 Unauthorized`: Missing or invalid authentication
   - Headers: `Content-Type: application/vnd.apple.mpegurl`, `Access-Control-Allow-Origin: *`
 
 **Features:**
@@ -140,10 +140,11 @@ Generate an HLS (HTTP Live Streaming) playlist for recordings within a time rang
 **Examples:**
 ```bash
 # Basic HLS playlist
-GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
+GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z
 
-# Custom segment duration
-GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z&segment_duration=5
+# Custom segment duration with authentication
+GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z&segment_duration=5
+Authorization: Bearer your-camera-token
 ```
 
 **HTML5 Usage:**
@@ -153,9 +154,14 @@ GET /api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:
 <script>
   const video = document.getElementById('video');
   const hls = new Hls();
-  hls.loadSource('/api/recordings/cam1/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z');
+  hls.loadSource('/cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21T05:30:00Z');
   hls.attachMedia(video);
 </script>
+```
+
+The playlist will reference segments available at:
+```
+GET {camera_path}/control/recordings/hls/segments/{playlist_id}/{segment_name}
 ```
 
 ---
@@ -310,7 +316,7 @@ GET /cam1/control/recordings?from=2025-08-21T00:00:00Z&reason=Manual&sort_order=
 **Response:** List of frame metadata objects (timestamp, size)
 
 #### List MP4 Segments
-**Endpoint:** `GET /{camera_path}/recordings/mp4/segments`
+**Endpoint:** `GET {camera_path}/control/recordings/mp4/segments`
 
 Advanced filtering for MP4 video segments.
 
@@ -333,7 +339,7 @@ Advanced filtering for MP4 video segments.
         "start_time": "2025-08-21T05:39:14.610108Z",
         "end_time": "2025-08-21T06:00:00.084373Z",
         "duration_seconds": 1245,
-        "url": "/api/recordings/cam1/mp4/segments/2025-08-21T05-39-14Z.mp4",
+        "url": "/cam1/control/recordings/mp4/segments/2025-08-21T05-39-14Z.mp4",
         "size_bytes": 25653248,
         "recording_reason": "Manual recording started from dashboard",
         "camera_id": "cam1"
@@ -355,13 +361,13 @@ Advanced filtering for MP4 video segments.
 **Examples:**
 ```bash
 # Get all segments
-GET /cam1/recordings/mp4/segments
+GET /cam1/control/recordings/mp4/segments
 
 # Date range and reason filter
-GET /cam1/recordings/mp4/segments?from=2025-08-21T00:00:00Z&to=2025-08-21T23:59:59Z&reason=Manual&limit=100
+GET /cam1/control/recordings/mp4/segments?from=2025-08-21T00:00:00Z&to=2025-08-21T23:59:59Z&reason=Manual&limit=100
 
 # Search for alarm segments
-GET /cam1/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
+GET /cam1/control/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
 ```
 
 ---

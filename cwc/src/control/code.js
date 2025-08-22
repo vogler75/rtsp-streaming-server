@@ -7,6 +7,8 @@
 
 let websocket = null;
 let videoElement = null;
+let hlsElement = null;
+let hls = null;
 let statusElement = null;
 let versionElement = null;
 let isConnected = false;
@@ -43,6 +45,9 @@ let currentPtzStop = false;
 let currentPtzGotoPreset = '';
 let currentPtzSetPreset = '';
 
+// HLS mode variables
+let currentPlayHls = false;
+
 ////////////////////////////////////////////
 // Debug helper function
 function debugLog(...args) {
@@ -68,6 +73,7 @@ function debugWarn(...args) {
 
 function initializeVideoPlayer() {
   videoElement = document.getElementById('videoPlayer');
+  hlsElement = document.getElementById('hlsPlayer');
   statusElement = document.getElementById('status');
   versionElement = document.getElementById('versionDisplay');
   
@@ -134,26 +140,27 @@ function scheduleReconnect() {
     clearTimeout(reconnectTimer);
   }
   
-  // Only reconnect if shouldConnect is true (endless reconnection)
-  if (shouldConnect && currentURL) {
+  // Only reconnect if shouldConnect is true AND not in HLS mode
+  if (shouldConnect && currentURL && !currentPlayHls) {
     reconnectAttempts++;
     debugLog(`Scheduling reconnect attempt ${reconnectAttempts} in ${reconnectInterval}ms`);
     updateConnectionStatus(false);
     
     reconnectTimer = setTimeout(() => {
-      if (shouldConnect) { // Check again in case it changed during timeout
+      if (shouldConnect && !currentPlayHls) { // Check again in case it changed during timeout
         debugLog(`Attempting to reconnect (${reconnectAttempts})`);
         connectToWebSocket(currentURL);
       }
     }, reconnectInterval);
   } else {
-    debugLog('Not reconnecting: shouldConnect =', shouldConnect, 'currentURL =', currentURL);
+    debugLog('Not reconnecting: shouldConnect =', shouldConnect, 'currentURL =', currentURL, 'currentPlayHls =', currentPlayHls);
   }
 }
 
 function showBlankScreen() {
   // Hide video/image elements
   videoElement.style.display = 'none';
+  hlsElement.style.display = 'none';
   const imgElement = document.getElementById('mjpegFrame');
   if (imgElement) {
     imgElement.style.display = 'none';
@@ -162,11 +169,69 @@ function showBlankScreen() {
       URL.revokeObjectURL(imgElement.src);
     }
   }
+  // Clean up HLS instance
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+}
+
+function switchPlayerMode() {
+  if (currentPlayHls) {
+    // Show HLS player, hide WebSocket player
+    videoElement.style.display = 'none';
+    hlsElement.style.display = 'block';
+    const imgElement = document.getElementById('mjpegFrame');
+    if (imgElement) {
+      imgElement.style.display = 'none';
+    }
+    
+    // Cancel any pending reconnect attempts
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      debugLog('Cancelled pending reconnect timer for HLS mode');
+    }
+    
+    // Disconnect WebSocket if connected
+    if (websocket) {
+      websocket.close();
+      websocket = null;
+    }
+    if (controlWebSocket) {
+      controlWebSocket.close();
+      controlWebSocket = null;
+    }
+    
+    // Reset connection status without triggering reconnect
+    updateConnectionStatus(false);
+    debugLog('Switched to HLS player mode');
+  } else {
+    // Show WebSocket player, hide HLS player
+    videoElement.style.display = 'block';
+    hlsElement.style.display = 'none';
+    
+    // Clean up HLS
+    if (hls) {
+      hls.destroy();
+      hls = null;
+    }
+    
+    debugLog('Switched to WebSocket player mode');
+    
+    // Reset reconnect attempts when switching back to WebSocket mode
+    reconnectAttempts = 0;
+    
+    // Reconnect WebSocket if needed
+    if (shouldConnect && currentURL) {
+      connectToWebSocket(currentURL);
+    }
+  }
 }
 
 function connectToWebSocket(url) {
-  if (!url || url.trim() === '' || !shouldConnect) {
-    debugLog('No URL provided or connection disabled');
+  if (!url || url.trim() === '' || !shouldConnect || currentPlayHls) {
+    debugLog('No URL provided, connection disabled, or in HLS mode');
     updateConnectionStatus(false);
     return;
   }
@@ -723,6 +788,91 @@ function handlePtzControl(endpoint, jsonData) {
     });
 }
 
+function buildHlsUrl(cameraPath, fromTimestamp, toTimestamp) {
+  // Build HLS URL using the new camera path structure
+  const t1 = encodeURIComponent(fromTimestamp);
+  const t2 = encodeURIComponent(toTimestamp);
+  
+  // Use the camera path directly for the new endpoint structure
+  let cleanPath = cameraPath;
+  if (cameraPath.startsWith('http')) {
+    // Extract just the path from full URL
+    const url = new URL(cameraPath);
+    cleanPath = url.pathname;
+  }
+  
+  debugLog('Building HLS URL for camera path:', cleanPath, 'from:', fromTimestamp, 'to:', toTimestamp);
+  return `${cleanPath}/control/recordings/hls/timerange?t1=${t1}&t2=${t2}`;
+}
+
+function playHlsStream(url) {
+  if (!hlsElement) {
+    debugError('HLS element not found');
+    return;
+  }
+  
+  debugLog('Playing HLS stream:', url);
+  
+  // Clean up any existing HLS instance
+  if (hls) {
+    hls.destroy();
+    hls = null;
+  }
+  
+  if (Hls.isSupported()) {
+    // Use HLS.js for browsers that don't support HLS natively
+    hls = new Hls({
+      debug: debugEnabled,
+      enableWorker: true
+    });
+    
+    hls.loadSource(url);
+    hls.attachMedia(hlsElement);
+    
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      debugLog('HLS: Manifest parsed successfully');
+      hlsElement.play().catch(function(error) {
+        debugError('Failed to play HLS:', error.message);
+      });
+    });
+    
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      debugError('HLS Error:', data.type, '-', data.details);
+      if (data.fatal) {
+        switch(data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            debugError('HLS: Fatal network error - trying to recover');
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            debugError('HLS: Fatal media error - trying to recover');
+            hls.recoverMediaError();
+            break;
+          default:
+            debugError('HLS: Fatal error, destroying HLS instance');
+            hls.destroy();
+            hls = null;
+            break;
+        }
+      }
+    });
+    
+    hls.on(Hls.Events.LEVEL_LOADED, function(event, data) {
+      debugLog('HLS: Level loaded -', data.details, 'segments');
+    });
+    
+  } else if (hlsElement.canPlayType('application/vnd.apple.mpegurl')) {
+    // Native HLS support (Safari)
+    debugLog('Using native HLS support');
+    hlsElement.src = url;
+    hlsElement.play().catch(function(error) {
+      debugError('Failed to play HLS natively:', error.message);
+    });
+  } else {
+    debugError('HLS not supported in this browser');
+  }
+}
+
 function setProperty(data) {  
   switch (data.key) {
     case 'URL':
@@ -759,14 +909,16 @@ function setProperty(data) {
       break;
     case 'connect':
       shouldConnect = data.value;
-      if (shouldConnect) {
-        // Start connecting
+      if (shouldConnect && !currentPlayHls) {
+        // Start connecting (only if not in HLS mode)
         reconnectAttempts = 0;
         if (currentURL) {
           connectToWebSocket(currentURL);
           
           // Live mode will be auto-enabled after connection is established
         }
+      } else if (shouldConnect && currentPlayHls) {
+        debugLog('Connect requested but in HLS mode - ignoring WebSocket connection');
       } else {
         // Disconnect and show blank screen
         if (websocket) {
@@ -844,7 +996,28 @@ function setProperty(data) {
       currentPlay = data.value;
       debugLog('🔧 Play control changed to:', currentPlay);
       
-      if (isControlMode && controlWebSocket) {
+      if (currentPlayHls) {
+        // HLS mode playback
+        if (currentPlay && currentPlayFrom && currentURL) {
+          const toTime = currentPlayTo || new Date().toISOString();
+          const hlsUrl = buildHlsUrl(currentURL, currentPlayFrom, toTime);
+          debugLog('🎬 Starting HLS playback from:', currentPlayFrom, 'to:', toTime);
+          playHlsStream(hlsUrl);
+        } else if (!currentPlay) {
+          debugLog('⏹️ Stopping HLS playback');
+          if (hls) {
+            hls.destroy();
+            hls = null;
+          }
+          if (hlsElement) {
+            hlsElement.pause();
+            hlsElement.currentTime = 0;
+          }
+        } else {
+          debugWarn('⚠️ HLS playback ignored - missing required parameters (play_from or URL)');
+        }
+      } else if (isControlMode && controlWebSocket) {
+        // WebSocket control mode playback
         if (currentPlay) {
           // Start playback
           const command = {
@@ -992,6 +1165,11 @@ function setProperty(data) {
         debugWarn('⚠️ PTZ set preset command ignored - empty value');
       }
       break;
+    case 'play_hls':
+      currentPlayHls = data.value;
+      debugLog('🎬 HLS mode changed to:', currentPlayHls);
+      switchPlayerMode();
+      break;
   }
 }
 
@@ -1024,13 +1202,19 @@ WebCC.start(
       currentPtzGotoPreset = WebCC.Properties.ptz_goto_preset || '';
       currentPtzSetPreset = WebCC.Properties.ptz_set_preset || '';
       
+      // Initialize HLS property
+      currentPlayHls = WebCC.Properties.play_hls || false;
+      
       // Check version property at startup
       if (versionElement && WebCC.Properties.version) {
         versionElement.style.display = 'block';
       }
       
+      // Initialize player mode
+      switchPlayerMode();
+      
       // Connect if both URL and connect are set
-      if (shouldConnect && currentURL) {
+      if (shouldConnect && currentURL && !currentPlayHls) {
         connectToWebSocket(currentURL);
       } else {
         showBlankScreen();
@@ -1070,7 +1254,8 @@ WebCC.start(
       ptz_move: '',
       ptz_stop: false,
       ptz_goto_preset: '',
-      ptz_set_preset: ''
+      ptz_set_preset: '',
+      play_hls: false
     }
   },
   // placeholder to include additional Unified dependencies

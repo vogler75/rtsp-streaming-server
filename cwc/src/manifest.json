@@ -4,7 +4,7 @@
 	"control": {
 		"identity": {
 			"name": "VideoPlayer",
-			"version": "1.0.26",
+			"version": "1.0.31",
 			"displayname": "VideoPlayer",
 			"icon": "./assets/logo.ico",
 			"type": "guid://551BF148-3F0D-4293-99C2-C9C3A1A6A073",
@@ -132,6 +132,11 @@
 						"type": "string",
 						"default": "",
 						"description": "Set PTZ preset as JSON string (e.g., '{\"preset\": 1, \"name\": \"Entrance\"}')"
+					},
+					"play_hls": {
+						"type": "boolean",
+						"default": false,
+						"description": "Enable HLS player mode instead of WebSocket streaming"
 					}
 				}
 			}

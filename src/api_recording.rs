@@ -8,6 +8,7 @@ use bytes::Bytes;
 
 use crate::config;
 use crate::recording::RecordingManager;
+use crate::mp4::HlsTimeRangeQuery;
 
 #[derive(Debug, Deserialize)]
 pub struct StartRecordingRequest {
@@ -328,6 +329,8 @@ pub async fn api_list_mp4_segments(
         return response;
     }
 
+    let camera_path = &camera_config.path;
+
     match recording_manager.list_video_segments_filtered(
         &camera_id,
         query.from,
@@ -367,7 +370,7 @@ pub async fn api_list_mp4_segments(
                         "start_time": s.start_time,
                         "end_time": s.end_time,
                         "duration_seconds": duration_seconds,
-                        "url": format!("/api/recordings/{}/mp4/segments/{}", camera_id, filename),
+                        "url": format!("{}/control/recordings/mp4/segments/{}", camera_path, filename),
                         "size_bytes": s.size_bytes,
                         "recording_reason": s.recording_reason.unwrap_or_else(|| "Unknown".to_string()),
                         "camera_id": s.camera_id
@@ -395,4 +398,107 @@ pub async fn api_list_mp4_segments(
              .into_response()
         }
     }
+}
+
+pub async fn api_stream_mp4_segment(
+    headers: axum::http::HeaderMap,
+    AxumPath(filename): AxumPath<String>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    // Parse Range header using the existing function
+    let range = crate::mp4::parse_range_header(headers.get("range"));
+
+    // Call the core logic in mp4.rs
+    crate::mp4::stream_mp4_segment(&camera_id, &filename, range, &camera_config, &recording_manager).await
+}
+
+pub async fn api_serve_hls_timerange(
+    headers: axum::http::HeaderMap,
+    Query(query): Query<HlsTimeRangeQuery>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    // Create a mock app state for the existing HLS function
+    let app_state = crate::AppState {
+        camera_streams: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        camera_configs: {
+            let mut configs = std::collections::HashMap::new();
+            configs.insert(camera_id.clone(), camera_config);
+            Arc::new(tokio::sync::RwLock::new(configs))
+        },
+        mqtt_handle: None,
+        recording_manager: Some(recording_manager),
+        transcoding_config: Arc::new(crate::config::TranscodingConfig {
+            output_format: "mjpeg".to_string(),
+            capture_framerate: 30,
+            output_framerate: None,
+            channel_buffer_size: Some(1024),
+            debug_capture: Some(false),
+            debug_duplicate_frames: Some(false),
+        }),
+        recording_config: None,
+        admin_token: None,
+        cameras_directory: "cameras".to_string(),
+        start_time: std::time::Instant::now(),
+    };
+
+    // Call the existing HLS playlist function
+    crate::mp4::serve_hls_playlist(
+        axum::extract::Path(camera_id),
+        axum::extract::Query(query),
+        axum::extract::State(app_state),
+    ).await
+}
+
+pub async fn api_serve_hls_segment(
+    headers: axum::http::HeaderMap,
+    AxumPath((playlist_id, segment_name)): AxumPath<(String, String)>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    // Create a mock app state for the existing HLS function
+    let app_state = crate::AppState {
+        camera_streams: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        camera_configs: {
+            let mut configs = std::collections::HashMap::new();
+            configs.insert(camera_id.clone(), camera_config);
+            Arc::new(tokio::sync::RwLock::new(configs))
+        },
+        mqtt_handle: None,
+        recording_manager: Some(recording_manager),
+        transcoding_config: Arc::new(crate::config::TranscodingConfig {
+            output_format: "mjpeg".to_string(),
+            capture_framerate: 30,
+            output_framerate: None,
+            channel_buffer_size: Some(1024),
+            debug_capture: Some(false),
+            debug_duplicate_frames: Some(false),
+        }),
+        recording_config: None,
+        admin_token: None,
+        cameras_directory: "cameras".to_string(),
+        start_time: std::time::Instant::now(),
+    };
+
+    // Call the existing HLS segment function
+    crate::mp4::serve_hls_segment(
+        axum::extract::Path((camera_id, playlist_id, segment_name)),
+        axum::extract::State(app_state),
+    ).await
 }

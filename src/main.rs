@@ -386,9 +386,6 @@ async fn main() -> Result<()> {
         .route("/dashboard", axum::routing::get(handlers::dashboard_handler))
         .route("/debug", axum::routing::get(handlers::debug_handler))
         .route("/hls.js", axum::routing::get(handlers::hlsjs_handler))
-        .route("/api/recordings/:camera_id/hls/timerange", axum::routing::get(mp4::serve_hls_playlist))    
-        .route("/api/recordings/:camera_id/mp4/segments/:filename", axum::routing::get(mp4::stream_mp4_recording))
-        .route("/api/recordings/:camera_id/hls/segments/:playlist_id/:segment_name", axum::routing::get(mp4::serve_hls_segment))
         .nest_service("/recordings", tower_http::services::ServeDir::new(app_state.recording_config.as_ref().map_or("recordings", |c| &c.database_path)));
     
     // Add routes for each camera (both stream and control endpoints)
@@ -534,6 +531,45 @@ async fn main() -> Result<()> {
                     segments_info.camera_id.clone(),
                     segments_info.camera_config.clone(),
                     segments_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // Stream individual MP4 segments
+            let stream_mp4_path = format!("{}/control/recordings/mp4/segments/:filename", path);
+            let stream_info = api_info.clone();
+            app = app.route(&stream_mp4_path, axum::routing::get(
+                move |headers, path| api_recording::api_stream_mp4_segment(
+                    headers,
+                    path,
+                    stream_info.camera_id.clone(),
+                    stream_info.camera_config.clone(),
+                    stream_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // HLS timerange playlist
+            let hls_timerange_path = format!("{}/control/recordings/hls/timerange", path);
+            let hls_info = api_info.clone();
+            app = app.route(&hls_timerange_path, axum::routing::get(
+                move |headers, query| api_recording::api_serve_hls_timerange(
+                    headers,
+                    query,
+                    hls_info.camera_id.clone(),
+                    hls_info.camera_config.clone(),
+                    hls_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // HLS segments
+            let hls_segments_path = format!("{}/control/recordings/hls/segments/:playlist_id/:segment_name", path);
+            let hls_segment_info = api_info.clone();
+            app = app.route(&hls_segments_path, axum::routing::get(
+                move |headers, path| api_recording::api_serve_hls_segment(
+                    headers,
+                    path,
+                    hls_segment_info.camera_id.clone(),
+                    hls_segment_info.camera_config.clone(),
+                    hls_segment_info.recording_manager.clone().unwrap()
                 )
             ));
         }

@@ -45,6 +45,11 @@ impl RecordingManager {
         *camera_configs = configs;
     }
 
+    /// Get the recording configuration
+    pub fn get_recording_config(&self) -> &RecordingConfig {
+        &self.config
+    }
+
     /// Add a database for a specific camera
     pub async fn add_camera_database(
         &self,
