@@ -182,20 +182,11 @@ pub async fn api_get_config(
 
     match std::fs::read_to_string(config_path) {
         Ok(content) => {
-            if config_path.ends_with(".json") {
-                match serde_json::from_str::<serde_json::Value>(&content) {
-                    Ok(json_value) => Json(ApiResponse::success(json_value)).into_response(),
-                    Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                              Json(ApiResponse::<()>::error(&format!("Failed to parse config JSON: {}", e), 500)))
-                             .into_response()
-                }
-            } else {
-                match toml::from_str::<serde_json::Value>(&content) {
-                    Ok(toml_value) => Json(ApiResponse::success(toml_value)).into_response(),
-                    Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                              Json(ApiResponse::<()>::error(&format!("Failed to parse config TOML: {}", e), 500)))
-                             .into_response()
-                }
+            match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(json_value) => Json(ApiResponse::success(json_value)).into_response(),
+                Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                          Json(ApiResponse::<()>::error(&format!("Failed to parse config JSON: {}", e), 500)))
+                         .into_response()
             }
         }
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -261,23 +252,12 @@ pub async fn api_update_config(
 
     match serde_json::from_value::<config::Config>(current_config_value.clone()) {
         Ok(_) => {
-            let content = if config_path.ends_with(".json") {
-                match serde_json::to_string_pretty(&current_config_value) {
-                    Ok(json) => json,
-                    Err(e) => {
-                        return (axum::http::StatusCode::BAD_REQUEST,
-                               Json(ApiResponse::<()>::error(&format!("Failed to serialize JSON: {}", e), 400)))
-                              .into_response();
-                    }
-                }
-            } else {
-                match toml::to_string_pretty(&current_config_value) {
-                    Ok(toml) => toml,
-                    Err(e) => {
-                        return (axum::http::StatusCode::BAD_REQUEST,
-                               Json(ApiResponse::<()>::error(&format!("Failed to serialize TOML: {}", e), 400)))
-                              .into_response();
-                    }
+            let content = match serde_json::to_string_pretty(&current_config_value) {
+                Ok(json) => json,
+                Err(e) => {
+                    return (axum::http::StatusCode::BAD_REQUEST,
+                           Json(ApiResponse::<()>::error(&format!("Failed to serialize JSON: {}", e), 400)))
+                          .into_response();
                 }
             };
 

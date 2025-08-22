@@ -31,11 +31,6 @@ pub enum StreamError {
         source: url::ParseError,
     },
     
-    #[error("TOML parse error: {source}")]
-    TomlParse {
-        #[from]
-        source: toml::de::Error,
-    },
     
     #[error("JSON error: {source}")]
     Json {

@@ -129,26 +129,10 @@ fn get_camera_id_from_path(path: &Path) -> Option<String> {
 
 fn load_camera_config(camera_id: &str, cameras_dir: &str) -> Result<config::CameraConfig> {
     let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-    let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
     
-    // Try JSON first, then TOML for backward compatibility
-    if let Ok(content) = fs::read_to_string(&json_path) {
-        match serde_json::from_str::<config::CameraConfig>(&content) {
-            Ok(camera_config) => return Ok(camera_config),
-            Err(e) => {
-                error!("Failed to parse JSON camera config file {}: {}", json_path, e);
-            }
-        }
-    }
+    let content = fs::read_to_string(&json_path)
+        .map_err(|e| StreamError::config(&format!("Failed to read camera config file {}: {}", json_path, e)))?;
     
-    if let Ok(content) = fs::read_to_string(&toml_path) {
-        match toml::from_str::<config::CameraConfig>(&content) {
-            Ok(camera_config) => return Ok(camera_config),
-            Err(e) => {
-                error!("Failed to parse TOML camera config file {}: {}", toml_path, e);
-            }
-        }
-    }
-    
-    Err(StreamError::config(&format!("Camera configuration file not found: {}", camera_id)))
+    serde_json::from_str::<config::CameraConfig>(&content)
+        .map_err(|e| StreamError::config(&format!("Failed to parse JSON camera config file {}: {}", json_path, e)))
 }

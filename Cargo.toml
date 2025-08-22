@@ -28,7 +28,6 @@ bytes = "1"
 # Configuration
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.9"
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
@@ -63,9 +62,6 @@ socket2 = "0.6"
 
 # File watching
 notify = "8.1"
-
-# YAML support for config files (optional, keeping TOML as well)
-serde_yaml = "0.9"
 
 # System information
 gethostname = "1.0"

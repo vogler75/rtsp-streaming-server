@@ -308,11 +308,7 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let mut config: Config = if path.ends_with(".json") {
-            serde_json::from_str(&content)?
-        } else {
-            toml::from_str(&content)?
-        };
+        let mut config: Config = serde_json::from_str(&content)?;
         
         
         // Substitute environment variables in MQTT config
@@ -336,7 +332,7 @@ impl Config {
             return Ok(cameras);
         }
         
-        // Read all .json and .toml files in the cameras directory (for backward compatibility)
+        // Read all .json files in the cameras directory
         let entries = fs::read_dir(cameras_dir)?;
         
         for entry in entries {
@@ -355,25 +351,6 @@ impl Config {
                                     }
                                     Err(e) => {
                                         eprintln!("Error parsing JSON camera config file {}: {}", path.display(), e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error reading camera config file {}: {}", path.display(), e);
-                            }
-                        }
-                    }
-                    Some("toml") => {
-                        // Backward compatibility with TOML files
-                        match fs::read_to_string(&path) {
-                            Ok(content) => {
-                                match toml::from_str::<CameraConfig>(&content) {
-                                    Ok(camera_config) => {
-                                        info!("Loaded camera configuration: {} (TOML)", file_stem);
-                                        cameras.insert(file_stem.to_string(), camera_config);
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Error parsing TOML camera config file {}: {}", path.display(), e);
                                     }
                                 }
                             }
@@ -411,29 +388,15 @@ impl Config {
     pub fn delete_camera_config(camera_id: &str, cameras_dir: Option<&str>) -> Result<()> {
         let cameras_dir = cameras_dir.unwrap_or("cameras");
         
-        // Try to delete both JSON and TOML files for backward compatibility
         let json_path = format!("{}/{}.json", cameras_dir, camera_id);
-        let toml_path = format!("{}/{}.toml", cameras_dir, camera_id);
-        
-        let mut deleted = false;
         
         if Path::new(&json_path).exists() {
             fs::remove_file(&json_path)?;
-            deleted = true;
             info!("Deleted camera configuration: {} (JSON)", camera_id);
+            Ok(())
+        } else {
+            Err(crate::errors::StreamError::config(&format!("Camera configuration file not found: {}", camera_id)).into())
         }
-        
-        if Path::new(&toml_path).exists() {
-            fs::remove_file(&toml_path)?;
-            deleted = true;
-            info!("Deleted camera configuration: {} (TOML)", camera_id);
-        }
-        
-        if !deleted {
-            return Err(crate::errors::StreamError::config(&format!("Camera configuration file not found: {}", camera_id)).into());
-        }
-        
-        Ok(())
     }
 
 }

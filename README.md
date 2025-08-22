@@ -730,25 +730,6 @@ The recording system supports two storage formats with independent configuration
 }
 ```
 
-Or using TOML format:
-
-```toml
-[recording]
-# Frame-by-frame recording for high-granularity, short-term playback
-frame_storage_enabled = true
-database_path = "recordings"
-max_frame_size = 10485760
-frame_storage_retention = "7d"  # Delete frame recordings older than this
-
-# MP4 video segment recording for efficient, long-term storage  
-video_storage_enabled = true
-video_storage_retention = "30d"  # Delete video segments older than this
-video_segment_minutes = 5        # Duration of each MP4 video segment in minutes
-
-# Global cleanup settings
-cleanup_interval_hours = 1  # How often to run the cleanup process
-```
-
 #### Recording Options
 - **frame_storage_enabled**: Enable/disable frame-by-frame SQLite storage
 - **video_storage_enabled**: Enable/disable MP4 video segment creation
