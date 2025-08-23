@@ -744,10 +744,14 @@ async fn main() -> Result<()> {
                 data
             };
             
-            // Get active stream IDs separately to avoid holding both locks
-            let active_stream_ids = {
+            // Get active stream IDs and their receiver counts separately to avoid holding both locks
+            let (active_stream_ids, stream_receiver_counts) = {
                 let camera_streams = state.camera_streams.read().await;
-                camera_streams.keys().cloned().collect::<std::collections::HashSet<String>>()
+                let ids = camera_streams.keys().cloned().collect::<std::collections::HashSet<String>>();
+                let counts: std::collections::HashMap<String, usize> = camera_streams.iter()
+                    .map(|(id, info)| (id.clone(), info.frame_sender.receiver_count()))
+                    .collect();
+                (ids, counts)
             };
             
             trace!("[API] Got {} total configs, {} active streams", 
@@ -770,6 +774,7 @@ async fn main() -> Result<()> {
                 let camera_status = if is_active && is_enabled {
                     // Camera is enabled and has an active stream
                     if let Some(real_status) = all_camera_statuses.get(&camera_id) {
+                        // We have MQTT status data
                         serde_json::json!({
                             "id": real_status.id,
                             "path": camera_config.path,
@@ -783,15 +788,19 @@ async fn main() -> Result<()> {
                             "token_required": token_required
                         })
                     } else {
+                        // No MQTT status, but camera stream is active - get basic info
+                        let clients_connected = stream_receiver_counts.get(&camera_id).copied().unwrap_or(0);
+                        
+                        // Camera is active (streaming) even without MQTT
                         serde_json::json!({
                             "id": camera_id,
                             "path": camera_config.path,
                             "enabled": is_enabled,
-                            "connected": false,
-                            "capture_fps": 0.0,
-                            "clients_connected": 0,
+                            "connected": true,  // Stream is active, so it's connected
+                            "capture_fps": 0.0,  // Unknown without MQTT
+                            "clients_connected": clients_connected,
                             "last_frame_time": null,
-                            "ffmpeg_running": false,
+                            "ffmpeg_running": true,  // If stream is active, FFmpeg must be running
                             "duplicate_frames": 0,
                             "token_required": token_required
                         })
