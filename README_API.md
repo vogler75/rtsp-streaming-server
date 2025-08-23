@@ -53,6 +53,7 @@ GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21
     ├── recordings/
     │   ├── GET /                             # List recordings
     │   ├── GET /{session_id}/frames          # Frame metadata
+    │   ├── PUT /{session_id}/keep            # Set session keep/protect flag
     │   ├── GET frames/{timestamp}            # Get single frame by timestamp
     │   ├── mp4/
     │   │   ├── GET segments                  # List MP4 segments
@@ -290,7 +291,7 @@ These endpoints control individual cameras using their configured path. Authenti
 - `reason` (optional): Filter by recording reason using SQL wildcards (e.g., `Manual` or `%alarm%`)
 - `sort_order` (optional): Sort order: `newest` (default) or `oldest`
 
-**Response:** List of recording session objects
+**Response:** List of recording session objects with `keep_session` flag indicating protection status
 
 **Examples:**
 ```bash
@@ -306,6 +307,37 @@ GET /cam1/control/recordings?reason=%alarm%
 
 # Combined filters with sorting
 GET /cam1/control/recordings?from=2025-08-21T00:00:00Z&reason=Manual&sort_order=oldest
+```
+
+#### Set Session Keep/Protection Flag
+**Endpoint:** `PUT /{camera_path}/control/recordings/{session_id}/keep`
+
+This endpoint allows you to mark a recording session as protected from automatic purging. Protected sessions will not be deleted by the cleanup process, ensuring important recordings are preserved.
+
+**Query Parameters:**
+- `keep` (optional): Set to `false` to remove protection. If omitted or any other value, protection is enabled.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "session_id": 123,
+    "keep_session": true,
+    "message": "Session 123 is now protected from purging"
+  }
+}
+```
+
+**Examples:**
+```bash
+# Protect a recording session (default behavior)
+PUT /cam1/control/recordings/123/keep
+Authorization: Bearer your-camera-token
+
+# Remove protection from a session
+PUT /cam1/control/recordings/123/keep?keep=false
+Authorization: Bearer your-camera-token
 ```
 
 #### Get Frame Metadata

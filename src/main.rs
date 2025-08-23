@@ -628,6 +628,20 @@ async fn main() -> Result<()> {
                 )
             ));
 
+            // Set session keep flag
+            let keep_flag_path = format!("{}/control/recordings/:session_id/keep", path);
+            let keep_info = api_info.clone();
+            app = app.route(&keep_flag_path, axum::routing::put(
+                move |headers, path, query| api_recording::api_set_session_keep_flag(
+                    headers,
+                    path,
+                    query,
+                    keep_info.camera_id.clone(),
+                    keep_info.camera_config.clone(),
+                    keep_info.recording_manager.clone().unwrap()
+                )
+            ));
+
             // List MP4 segments
             let segments_path = format!("{}/control/recordings/mp4/segments", path);
             let segments_info = api_info.clone();

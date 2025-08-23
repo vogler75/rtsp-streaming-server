@@ -16,6 +16,16 @@ pub struct StartRecordingRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SetKeepSessionQuery {
+    #[serde(default = "default_true")]
+    pub keep: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
 pub struct GetRecordingsQuery {
     pub from: Option<chrono::DateTime<chrono::Utc>>,
     pub to: Option<chrono::DateTime<chrono::Utc>>,
@@ -210,7 +220,8 @@ pub async fn api_list_recordings(
                     "reason": r.reason,
                     "status": format!("{:?}", r.status).to_lowercase(),
                     "duration_seconds": r.end_time
-                        .map(|end| end.signed_duration_since(r.start_time).num_seconds())
+                        .map(|end| end.signed_duration_since(r.start_time).num_seconds()),
+                    "keep_session": r.keep_session
                 }))
                 .collect();
 
@@ -614,6 +625,46 @@ pub async fn api_get_frame_by_timestamp(
         }
         Err(e) => {
             Json(ApiResponse::<()>::error(&format!("Database error: {}", e), 500)).into_response()
+        }
+    }
+}
+
+pub async fn api_set_session_keep_flag(
+    headers: axum::http::HeaderMap,
+    AxumPath(session_id): AxumPath<i64>,
+    Query(query): Query<SetKeepSessionQuery>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    // Get the database for this specific camera
+    let databases = recording_manager.databases.read().await;
+    let database = match databases.get(&camera_id) {
+        Some(db) => db,
+        None => {
+            return (axum::http::StatusCode::NOT_FOUND,
+                    Json(ApiResponse::<()>::error(&format!("Database not found for camera {}", camera_id), 404)))
+                    .into_response();
+        }
+    };
+    
+    match database.set_session_keep_flag(session_id, query.keep).await {
+        Ok(_) => {
+            let data = serde_json::json!({
+                "session_id": session_id,
+                "keep_session": query.keep,
+                "message": format!("Session {} is now {}", session_id, if query.keep { "protected from purging" } else { "eligible for purging" })
+            });
+            Json(ApiResponse::success(data)).into_response()
+        }
+        Err(e) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+             Json(ApiResponse::<()>::error(&format!("Database error: {}", e), 500)))
+             .into_response()
         }
     }
 }

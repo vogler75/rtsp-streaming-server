@@ -553,6 +553,15 @@
                 document.getElementById('sortOrder').addEventListener('change', () => {
                     this.fetchRecordings();
                 });
+
+                // Add event listener for keep toggle buttons (using event delegation)
+                document.addEventListener('click', (event) => {
+                    if (event.target.classList.contains('keep-toggle-btn')) {
+                        const sessionId = parseInt(event.target.dataset.sessionId);
+                        const currentKeepSession = event.target.dataset.keepSession === 'true';
+                        this.toggleKeepSession(sessionId, !currentKeepSession);
+                    }
+                });
             }
             
             formatDateLocal(date) {
@@ -841,8 +850,32 @@
                     }
                     
                     const reasonText = rec.reason && rec.reason !== 'null' ? `<br>📝 <em>${rec.reason}</em>` : '';
-                    item.innerHTML = `<strong>Session ${rec.id}</strong>${reasonText}<br>Start: ${startTime}<br>End: ${endTime}${durationText}`;
-                    item.addEventListener('click', () => {
+                    const keepFlag = rec.keep_session ? '<span style="color: #4CAF50; font-weight: bold;">🔒 PROTECTED</span>' : '<span style="color: #666;">📄 Normal</span>';
+                    
+                    item.innerHTML = `
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <strong>Session ${rec.id}</strong>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    ${keepFlag}
+                                    <button class="keep-toggle-btn" data-session-id="${rec.id}" data-keep-session="${rec.keep_session}" 
+                                            style="padding: 2px 6px; font-size: 10px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); color: white; border-radius: 3px; cursor: pointer;"
+                                            title="${rec.keep_session ? 'Remove protection' : 'Protect from purging'}">
+                                        ${rec.keep_session ? '🔓' : '🔒'}
+                                    </button>
+                                </div>
+                            </div>
+                            ${reasonText}<br>Start: ${startTime}<br>End: ${endTime}${durationText}
+                        </div>
+                    `;
+                    
+                    // Add click handler for the main item (excluding the button)
+                    item.addEventListener('click', (event) => {
+                        // Don't select recording if clicking on the keep toggle button
+                        if (event.target.classList.contains('keep-toggle-btn')) {
+                            return;
+                        }
+                        
                         this.selectedRecording = rec;
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
                         item.classList.add('selected');
@@ -1438,6 +1471,35 @@
                     indicator.style.display = 'block';
                 } else {
                     indicator.style.display = 'none';
+                }
+            }
+
+            async toggleKeepSession(sessionId, keepSession) {
+                const queryParam = keepSession ? '' : '?keep=false';
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings/${sessionId}/keep${queryParam}`;
+                
+                try {
+                    const headers = {};
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+                    
+                    const response = await fetch(url, {
+                        method: 'PUT',
+                        headers
+                    });
+                    
+                    const result = await response.json();
+                    this.logJson({ toggleKeepSession: result });
+                    
+                    if (result.status === 'success') {
+                        // Refresh recordings list to show updated status
+                        this.fetchRecordings();
+                    } else {
+                        alert(`Failed to update session: ${result.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    this.logJson({ error: 'Network error toggling keep session', details: error.message });
+                    alert(`Network error: ${error.message}`);
                 }
             }
         }

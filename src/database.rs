@@ -20,6 +20,7 @@ pub struct RecordingSession {
     pub end_time: Option<DateTime<Utc>>,
     pub reason: Option<String>,
     pub status: RecordingStatus,
+    pub keep_session: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -262,6 +263,12 @@ pub trait DatabaseProvider: Send + Sync {
         &self,
         session_id: i64,
     ) -> Result<Option<i32>>;
+    
+    async fn set_session_keep_flag(
+        &self,
+        session_id: i64,
+        keep_session: bool,
+    ) -> Result<()>;
 }
 
 pub struct SqliteDatabase {
@@ -434,7 +441,8 @@ impl DatabaseProvider for SqliteDatabase {
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP,
                 reason TEXT,
-                status TEXT NOT NULL DEFAULT 'active'
+                status TEXT NOT NULL DEFAULT 'active',
+                keep_session BOOLEAN NOT NULL DEFAULT 0
             )
             "#,
             TABLE_RECORDING_SESSIONS
@@ -656,7 +664,7 @@ impl DatabaseProvider for SqliteDatabase {
 
     async fn get_active_recordings(&self, camera_id: &str) -> Result<Vec<RecordingSession>> {
         let query = format!(
-            "SELECT * FROM {} WHERE camera_id = ? AND status = 'active'",
+            "SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {} WHERE camera_id = ? AND status = 'active'",
             TABLE_RECORDING_SESSIONS
         );
         let rows = sqlx::query(&query)
@@ -673,6 +681,7 @@ impl DatabaseProvider for SqliteDatabase {
                 end_time: row.get("end_time"),
                 reason: row.get("reason"),
                 status: RecordingStatus::from(row.get::<String, _>("status")),
+                keep_session: row.get("keep_session"),
             });
         }
 
@@ -730,7 +739,7 @@ impl DatabaseProvider for SqliteDatabase {
             format!(" WHERE {}", conditions.join(" AND "))
         };
         
-        let sql = format!("SELECT * FROM {}{} ORDER BY start_time DESC", TABLE_RECORDING_SESSIONS, where_clause);
+        let sql = format!("SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {}{} ORDER BY start_time DESC", TABLE_RECORDING_SESSIONS, where_clause);
         
         tracing::debug!(
             "Executing SQL query for list_recordings:\n{}\nParameters: {:?}",
@@ -762,6 +771,7 @@ impl DatabaseProvider for SqliteDatabase {
                 end_time: row.get("end_time"),
                 reason: row.get("reason"),
                 status: RecordingStatus::from(row.get::<String, _>("status")),
+                keep_session: row.get("keep_session"),
             });
         }
 
@@ -790,7 +800,7 @@ impl DatabaseProvider for SqliteDatabase {
         let where_clause = format!("WHERE {}", conditions.join(" AND "));
         
         let sql = format!(
-            "SELECT id, camera_id, start_time, end_time, reason, status FROM {} {} ORDER BY start_time DESC",
+            "SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {} {} ORDER BY start_time DESC",
             TABLE_RECORDING_SESSIONS, where_clause
         );
         
@@ -832,6 +842,7 @@ impl DatabaseProvider for SqliteDatabase {
                 end_time: row.get("end_time"),
                 reason: row.get("reason"),
                 status: RecordingStatus::from(row.get::<String, _>("status")),
+                keep_session: row.get("keep_session"),
             });
         }
 
@@ -900,7 +911,7 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
         
-        // Delete old frames based on their timestamp
+        // Delete old frames based on their timestamp, but only for sessions that aren't marked to keep
         let frames_result = if let Some(cam_id) = camera_id {
             // Delete frames for a specific camera
             let query = format!(
@@ -908,7 +919,7 @@ impl DatabaseProvider for SqliteDatabase {
                 DELETE FROM {} 
                 WHERE timestamp < ? 
                 AND session_id IN (
-                    SELECT id FROM {} WHERE camera_id = ?
+                    SELECT id FROM {} WHERE camera_id = ? AND keep_session = 0
                 )
                 "#,
                 TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
@@ -918,8 +929,17 @@ impl DatabaseProvider for SqliteDatabase {
             .bind(cam_id)
             .execute(&self.pool).await?
         } else {
-            // Delete frames for all cameras
-            let query = format!("DELETE FROM {} WHERE timestamp < ?", TABLE_RECORDING_MJPEG);
+            // Delete frames for all cameras, but only for sessions not marked to keep
+            let query = format!(
+                r#"
+                DELETE FROM {} 
+                WHERE timestamp < ? 
+                AND session_id IN (
+                    SELECT id FROM {} WHERE keep_session = 0
+                )
+                "#,
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            );
             sqlx::query(&query)
                 .bind(older_than)
                 .execute(&self.pool).await?
@@ -962,12 +982,13 @@ impl DatabaseProvider for SqliteDatabase {
         let start_time = std::time::Instant::now();
         
         let result = if let Some(cam_id) = camera_id {
-            // Delete unused sessions for a specific camera
+            // Delete unused sessions for a specific camera, but don't delete sessions marked to keep
             let query = format!(
                 r#"
                 DELETE FROM {} 
                 WHERE camera_id = ?
                 AND end_time IS NOT NULL
+                AND keep_session = 0
                 AND id NOT IN (
                     SELECT DISTINCT session_id FROM {}
                 )
@@ -982,11 +1003,12 @@ impl DatabaseProvider for SqliteDatabase {
                 .execute(&self.pool)
                 .await?
         } else {
-            // Delete unused sessions for all cameras
+            // Delete unused sessions for all cameras, but don't delete sessions marked to keep
             let query = format!(
                 r#"
                 DELETE FROM {} 
                 WHERE end_time IS NOT NULL
+                AND keep_session = 0
                 AND id NOT IN (
                     SELECT DISTINCT session_id FROM {}
                 )
@@ -1296,15 +1318,15 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
         
-        // First, select the file paths of the segments to be deleted
+        // First, select the file paths of the segments to be deleted, excluding sessions marked to keep
         let (_query, segments_to_delete) = if let Some(cam_id) = camera_id {
-            // Delete segments for a specific camera
+            // Delete segments for a specific camera, but not for sessions marked to keep
             let query = format!(
                 r#"
                 SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.id
-                WHERE rs.camera_id = ? AND vs.end_time < ?
+                WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
             );
@@ -1315,10 +1337,15 @@ impl DatabaseProvider for SqliteDatabase {
                 .await?;
             (query, segments)
         } else {
-            // Delete segments for all cameras
+            // Delete segments for all cameras, but not for sessions marked to keep
             let query = format!(
-                "SELECT session_id, start_time, end_time, file_path, size_bytes, mp4_data FROM {} WHERE end_time < ?",
-                TABLE_RECORDING_MP4
+                r#"
+                SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
+                FROM {} vs
+                JOIN {} rs ON vs.session_id = rs.id
+                WHERE vs.end_time < ? AND rs.keep_session = 0
+                "#,
+                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
             );
             let segments = sqlx::query_as::<_, VideoSegment>(&query)
                 .bind(older_than)
@@ -1337,7 +1364,7 @@ impl DatabaseProvider for SqliteDatabase {
             // No action needed for database-stored segments - they'll be deleted with the record
         }
 
-        // Then, delete the records from the database
+        // Then, delete the records from the database, but only for sessions not marked to keep
         let delete_result = if let Some(cam_id) = camera_id {
             let delete_query = format!(
                 r#"
@@ -1346,7 +1373,7 @@ impl DatabaseProvider for SqliteDatabase {
                     SELECT vs.session_id 
                     FROM {} vs
                     JOIN {} rs ON vs.session_id = rs.id
-                    WHERE rs.camera_id = ? AND vs.end_time < ?
+                    WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0
                 )
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -1357,7 +1384,15 @@ impl DatabaseProvider for SqliteDatabase {
                 .execute(&self.pool)
                 .await?
         } else {
-            let delete_query = format!("DELETE FROM {} WHERE end_time < ?", TABLE_RECORDING_MP4);
+            let delete_query = format!(
+                r#"
+                DELETE FROM {} 
+                WHERE session_id IN (
+                    SELECT id FROM {} WHERE keep_session = 0
+                ) AND end_time < ?
+                "#,
+                TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+            );
             sqlx::query(&delete_query)
                 .bind(older_than)
                 .execute(&self.pool)
@@ -1873,7 +1908,7 @@ impl DatabaseProvider for SqliteDatabase {
                 DELETE FROM {} 
                 WHERE session_id IN (
                     SELECT rs.id FROM {} rs 
-                    WHERE rs.camera_id = ? AND rs.start_time < ?
+                    WHERE rs.camera_id = ? AND rs.start_time < ? AND rs.keep_session = 0
                 )
                 "#,
                 TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -1885,8 +1920,13 @@ impl DatabaseProvider for SqliteDatabase {
                 .await?
         } else {
             let query = format!(
-                "DELETE FROM {} WHERE created_at < ?",
-                TABLE_RECORDING_HLS
+                r#"
+                DELETE FROM {} 
+                WHERE session_id IN (
+                    SELECT id FROM {} WHERE keep_session = 0
+                ) AND created_at < ?
+                "#,
+                TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
             );
             sqlx::query(&query)
                 .bind(cutoff_time)
@@ -1935,5 +1975,24 @@ impl DatabaseProvider for SqliteDatabase {
             .await?;
         
         Ok(result.and_then(|(max_index,)| max_index))
+    }
+
+    async fn set_session_keep_flag(
+        &self,
+        session_id: i64,
+        keep_session: bool,
+    ) -> Result<()> {
+        let query = format!(
+            "UPDATE {} SET keep_session = ? WHERE id = ?",
+            TABLE_RECORDING_SESSIONS
+        );
+        
+        sqlx::query(&query)
+            .bind(keep_session)
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        
+        Ok(())
     }
 }

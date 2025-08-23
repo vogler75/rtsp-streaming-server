@@ -17,7 +17,7 @@
     "cleanup_interval_hours": 1,
     "database_path": "recordings",
     "frame_storage_enabled": true,
-    "frame_storage_retention": "1h",
+    "frame_storage_retention": "4h",
     "hls_segment_seconds": 6,
     "hls_storage_enabled": true,
     "hls_storage_retention": "30d",
@@ -26,7 +26,7 @@
     "mp4_segment_minutes": 5,
     "mp4_storage_retention": "30d",
     "mp4_storage_type": "database",
-    "session_segment_minutes": 60
+    "session_segment_minutes": 10
   },
   "server": {
     "admin_token": "test",
