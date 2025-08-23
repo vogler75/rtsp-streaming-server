@@ -1232,7 +1232,7 @@ impl DatabaseProvider for SqliteDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            LEFT JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.id
             WHERE rs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
             ORDER BY vs.start_time ASC
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
@@ -1315,7 +1315,7 @@ impl DatabaseProvider for SqliteDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            LEFT JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.id
             {}
             ORDER BY vs.start_time {}
             LIMIT ?
@@ -3082,7 +3082,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            LEFT JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.id
             WHERE rs.camera_id = $1 AND vs.start_time < $2 AND vs.end_time > $3
             ORDER BY vs.start_time ASC
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
@@ -3166,7 +3166,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            LEFT JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.id
             {}
             ORDER BY vs.start_time {}
             LIMIT ${}
