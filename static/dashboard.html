@@ -651,10 +651,13 @@
                     </div>
                 </div>
 
-                <!-- Per-Camera MP4 Recording Settings -->
+                <!-- Per-Camera Recording Settings -->
                 <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📹 Camera MP4 Recording</h3>
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📹 Camera Recording Settings</h3>
                     <div class="collapsible-content collapsed">
+                        
+                        <!-- Frame Storage Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🖼️ Frame Storage</h4>
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Frame Storage</label>
@@ -670,6 +673,11 @@
                                 <input type="text" id="frame_storage_retention" name="frame_storage_retention" placeholder="Use Global">
                                 <span class="help-text">e.g., 10m, 5h, 7d - overrides global setting</span>
                             </div>
+                        </div>
+                        
+                        <!-- MP4 Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🎬 MP4</h4>
+                        <div class="form-grid">
                             <div class="form-group">
                                 <label>MP4 Video Storage Override</label>
                                 <select id="mp4_storage_type" name="mp4_storage_type">
@@ -690,6 +698,11 @@
                                 <input type="number" id="mp4_segment_minutes" name="mp4_segment_minutes" placeholder="5" min="1" max="60">
                                 <span class="help-text">Override global segment length (1-60 minutes)</span>
                             </div>
+                        </div>
+                        
+                        <!-- HLS Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">📺 HLS</h4>
+                        <div class="form-grid">
                             <div class="form-group">
                                 <label>HLS Storage Override</label>
                                 <select id="hls_storage_enabled" name="hls_storage_enabled">
@@ -710,6 +723,7 @@
                                 <span class="help-text">Duration of each HLS segment (1-30 seconds, default 6)</span>
                             </div>
                         </div>
+                        
                     </div>
                 </div>
 
@@ -1033,6 +1047,24 @@
                 <div class="form-section">
                     <h3 class="collapsible" onclick="toggleSection(this)">🎥 Recording Settings</h3>
                     <div class="collapsible-content">
+                        
+                        <!-- General Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">⚙️ General</h4>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Database Path</label>
+                                <input type="text" id="config_recording_database_path" placeholder="recordings">
+                                <span class="help-text">Directory for recording database storage</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Cleanup Interval (hours)</label>
+                                <input type="number" id="config_recording_cleanup_interval_hours" placeholder="1" min="1">
+                                <span class="help-text">How often to run cleanup of old recordings</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Frame Storage Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🖼️ Frame Storage</h4>
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Enable Frame Storage</label>
@@ -1042,6 +1074,21 @@
                                 </select>
                                 <span class="help-text">Enable frame-by-frame recording to database</span>
                             </div>
+                            <div class="form-group">
+                                <label>Max Frame Size (bytes)</label>
+                                <input type="number" id="config_recording_max_frame_size" placeholder="10485760" min="1024">
+                                <span class="help-text">Maximum size for a single frame (10MB default)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Frame Storage Retention</label>
+                                <input type="text" id="config_recording_frame_storage_retention" placeholder="7d">
+                                <span class="help-text">Auto-delete frame recordings older than this (e.g., 7d, 24h, 30m)</span>
+                            </div>
+                        </div>
+                        
+                        <!-- MP4 Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🎬 MP4</h4>
+                        <div class="form-grid">
                             <div class="form-group">
                                 <label>MP4 Video Storage</label>
                                 <select id="config_recording_mp4_storage_type">
@@ -1057,21 +1104,6 @@
                                 <span class="help-text">Framerate for MP4 recordings (e.g., 5.0, 15.0, 30.0)</span>
                             </div>
                             <div class="form-group">
-                                <label>Database Path</label>
-                                <input type="text" id="config_recording_database_path" placeholder="recordings">
-                                <span class="help-text">Directory for recording database storage</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Max Frame Size (bytes)</label>
-                                <input type="number" id="config_recording_max_frame_size" placeholder="10485760" min="1024">
-                                <span class="help-text">Maximum size for a single frame (10MB default)</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Frame Storage Retention</label>
-                                <input type="text" id="config_recording_frame_storage_retention" placeholder="7d">
-                                <span class="help-text">Auto-delete frame recordings older than this (e.g., 7d, 24h, 30m)</span>
-                            </div>
-                            <div class="form-group">
                                 <label>MP4 Storage Retention</label>
                                 <input type="text" id="config_recording_mp4_storage_retention" placeholder="30d">
                                 <span class="help-text">Auto-delete MP4 videos older than this (e.g., 30d, 7d, 24h)</span>
@@ -1081,11 +1113,11 @@
                                 <input type="number" id="config_recording_mp4_segment_minutes" placeholder="5" min="1" max="60">
                                 <span class="help-text">Duration of each MP4 video segment (1-60 minutes)</span>
                             </div>
-                            <div class="form-group">
-                                <label>Cleanup Interval (hours)</label>
-                                <input type="number" id="config_recording_cleanup_interval_hours" placeholder="1" min="1">
-                                <span class="help-text">How often to run cleanup of old recordings</span>
-                            </div>
+                        </div>
+                        
+                        <!-- HLS Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">📺 HLS</h4>
+                        <div class="form-grid">
                             <div class="form-group">
                                 <label>Enable HLS Storage</label>
                                 <select id="config_recording_hls_storage_enabled">
@@ -1105,6 +1137,7 @@
                                 <span class="help-text">Duration of each HLS segment (1-30 seconds, default 6)</span>
                             </div>
                         </div>
+                        
                     </div>
                 </div>
 
