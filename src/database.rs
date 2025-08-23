@@ -12,6 +12,7 @@ const TABLE_RECORDING_MP4: &str = "recording_mp4";      // formerly video_segmen
 const TABLE_HLS_PLAYLISTS: &str = "hls_playlists";
 const TABLE_HLS_SEGMENTS: &str = "hls_segments";
 const TABLE_RECORDING_HLS: &str = "recording_hls";
+const TABLE_THROUGHPUT_STATS: &str = "throughput_stats";
 
 #[derive(Debug, Clone)]
 pub struct RecordingSession {
@@ -77,6 +78,16 @@ pub struct RecordingHlsSegment {
     pub segment_data: Vec<u8>,     // MPEG-TS segment data
     pub size_bytes: i64,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct ThroughputStats {
+    pub camera_id: String,
+    pub timestamp: DateTime<Utc>,
+    pub bytes_per_second: i64,  // Amount of data streamed in this second
+    pub frame_count: i32,       // Number of frames processed in this second
+    pub ffmpeg_fps: f32,        // FFmpeg reported FPS
+    pub connection_count: i32,  // Number of active WebSocket connections
 }
 
 
@@ -279,6 +290,29 @@ pub trait DatabaseProvider: Send + Sync {
         session_id: i64,
         keep_session: bool,
     ) -> Result<()>;
+    
+    // Throughput tracking methods
+    async fn record_throughput_stats(
+        &self,
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+        bytes_per_second: i64,
+        frame_count: i32,
+        ffmpeg_fps: f32,
+        connection_count: i32,
+    ) -> Result<()>;
+    
+    async fn get_throughput_stats(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ThroughputStats>>;
+    
+    async fn cleanup_old_throughput_stats(
+        &self,
+        older_than: DateTime<Utc>,
+    ) -> Result<u64>;
 }
 
 pub struct SqliteDatabase {
@@ -630,6 +664,34 @@ impl DatabaseProvider for SqliteDatabase {
             TABLE_RECORDING_SESSIONS
         );
         sqlx::query(&idx_camera_status)
+            .execute(&self.pool)
+            .await?;
+
+        // Create throughput stats table
+        let create_throughput_stats_query = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {} (
+                camera_id TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                bytes_per_second INTEGER NOT NULL,
+                frame_count INTEGER NOT NULL,
+                ffmpeg_fps REAL NOT NULL,
+                connection_count INTEGER NOT NULL,
+                PRIMARY KEY (camera_id, timestamp)
+            )
+            "#,
+            TABLE_THROUGHPUT_STATS
+        );
+        sqlx::query(&create_throughput_stats_query)
+            .execute(&self.pool)
+            .await?;
+
+        // Add index for throughput stats queries
+        let idx_throughput_camera_time = format!(
+            "CREATE INDEX IF NOT EXISTS idx_throughput_camera_time ON {}(camera_id, timestamp)",
+            TABLE_THROUGHPUT_STATS
+        );
+        sqlx::query(&idx_throughput_camera_time)
             .execute(&self.pool)
             .await?;
 
@@ -2045,6 +2107,85 @@ impl DatabaseProvider for SqliteDatabase {
         
         Ok(())
     }
+
+    async fn record_throughput_stats(
+        &self,
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+        bytes_per_second: i64,
+        frame_count: i32,
+        ffmpeg_fps: f32,
+        connection_count: i32,
+    ) -> Result<()> {
+        let query = format!(
+            r#"
+            INSERT OR REPLACE INTO {} (camera_id, timestamp, bytes_per_second, frame_count, ffmpeg_fps, connection_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            TABLE_THROUGHPUT_STATS
+        );
+        sqlx::query(&query)
+            .bind(camera_id)
+            .bind(timestamp)
+            .bind(bytes_per_second)
+            .bind(frame_count)
+            .bind(ffmpeg_fps)
+            .bind(connection_count)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn get_throughput_stats(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ThroughputStats>> {
+        let query = format!(
+            r#"
+            SELECT camera_id, timestamp, bytes_per_second, frame_count, ffmpeg_fps, connection_count
+            FROM {} 
+            WHERE camera_id = ? AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+            "#,
+            TABLE_THROUGHPUT_STATS
+        );
+        let rows = sqlx::query(&query)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut stats = Vec::new();
+        for row in rows {
+            stats.push(ThroughputStats {
+                camera_id: row.get("camera_id"),
+                timestamp: row.get("timestamp"),
+                bytes_per_second: row.get("bytes_per_second"),
+                frame_count: row.get("frame_count"),
+                ffmpeg_fps: row.get("ffmpeg_fps"),
+                connection_count: row.get("connection_count"),
+            });
+        }
+
+        Ok(stats)
+    }
+
+    async fn cleanup_old_throughput_stats(&self, older_than: DateTime<Utc>) -> Result<u64> {
+        let query = format!(
+            "DELETE FROM {} WHERE timestamp < ?",
+            TABLE_THROUGHPUT_STATS
+        );
+        let result = sqlx::query(&query)
+            .bind(older_than)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
+    }
 }
 
 // PostgreSQL Database Implementation
@@ -2475,6 +2616,34 @@ impl DatabaseProvider for PostgreSqlDatabase {
             TABLE_RECORDING_SESSIONS
         );
         sqlx::query(&idx_camera_status)
+            .execute(&self.pool)
+            .await?;
+
+        // Create throughput stats table
+        let create_throughput_stats_query = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {} (
+                camera_id TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                bytes_per_second INTEGER NOT NULL,
+                frame_count INTEGER NOT NULL,
+                ffmpeg_fps REAL NOT NULL,
+                connection_count INTEGER NOT NULL,
+                PRIMARY KEY (camera_id, timestamp)
+            )
+            "#,
+            TABLE_THROUGHPUT_STATS
+        );
+        sqlx::query(&create_throughput_stats_query)
+            .execute(&self.pool)
+            .await?;
+
+        // Add index for throughput stats queries
+        let idx_throughput_camera_time = format!(
+            "CREATE INDEX IF NOT EXISTS idx_throughput_camera_time ON {}(camera_id, timestamp)",
+            TABLE_THROUGHPUT_STATS
+        );
+        sqlx::query(&idx_throughput_camera_time)
             .execute(&self.pool)
             .await?;
 
@@ -3922,6 +4091,90 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .await?;
         
         Ok(())
+    }
+
+    async fn record_throughput_stats(
+        &self,
+        camera_id: &str,
+        timestamp: DateTime<Utc>,
+        bytes_per_second: i64,
+        frame_count: i32,
+        ffmpeg_fps: f32,
+        connection_count: i32,
+    ) -> Result<()> {
+        let query = format!(
+            r#"
+            INSERT INTO {} (camera_id, timestamp, bytes_per_second, frame_count, ffmpeg_fps, connection_count)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (camera_id, timestamp) DO UPDATE SET
+                bytes_per_second = EXCLUDED.bytes_per_second,
+                frame_count = EXCLUDED.frame_count,
+                ffmpeg_fps = EXCLUDED.ffmpeg_fps,
+                connection_count = EXCLUDED.connection_count
+            "#,
+            TABLE_THROUGHPUT_STATS
+        );
+        sqlx::query(&query)
+            .bind(camera_id)
+            .bind(timestamp)
+            .bind(bytes_per_second)
+            .bind(frame_count)
+            .bind(ffmpeg_fps)
+            .bind(connection_count)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn get_throughput_stats(
+        &self,
+        camera_id: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ThroughputStats>> {
+        let query = format!(
+            r#"
+            SELECT camera_id, timestamp, bytes_per_second, frame_count, ffmpeg_fps, connection_count
+            FROM {} 
+            WHERE camera_id = $1 AND timestamp >= $2 AND timestamp <= $3
+            ORDER BY timestamp ASC
+            "#,
+            TABLE_THROUGHPUT_STATS
+        );
+        let rows = sqlx::query(&query)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut stats = Vec::new();
+        for row in rows {
+            stats.push(ThroughputStats {
+                camera_id: row.get("camera_id"),
+                timestamp: row.get("timestamp"),
+                bytes_per_second: row.get("bytes_per_second"),
+                frame_count: row.get("frame_count"),
+                ffmpeg_fps: row.get("ffmpeg_fps"),
+                connection_count: row.get("connection_count"),
+            });
+        }
+
+        Ok(stats)
+    }
+
+    async fn cleanup_old_throughput_stats(&self, older_than: DateTime<Utc>) -> Result<u64> {
+        let query = format!(
+            "DELETE FROM {} WHERE timestamp < $1",
+            TABLE_THROUGHPUT_STATS
+        );
+        let result = sqlx::query(&query)
+            .bind(older_than)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
     }
 }
 

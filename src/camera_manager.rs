@@ -97,6 +97,11 @@ impl AppState {
                     recording_manager_ref.register_mp4_buffer_stats(&camera_id, mp4_buffer_stats.clone()).await;
                 }
                 
+                // Register camera with throughput tracker if available
+                if let Some(throughput_tracker) = crate::throughput_tracker::get_global_tracker() {
+                    throughput_tracker.register_camera(&camera_id).await;
+                }
+                
                 // Store the camera stream info
                 let camera_stream_info = CameraStreamInfo {
                     camera_id: camera_id.clone(),

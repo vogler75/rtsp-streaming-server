@@ -31,20 +31,7 @@
     "publish_interval": 5,
     "topic_name": null
   },
-  "recording": {
-    "session_segment_minutes": 10,
-    "pre_recording_enabled": null,
-    "pre_recording_buffer_minutes": null,
-    "pre_recording_cleanup_interval_seconds": null,
-    "frame_storage_enabled": null,
-    "frame_storage_retention": null,
-    "mp4_storage_type": null,
-    "mp4_storage_retention": null,
-    "mp4_segment_minutes": null,
-    "hls_storage_enabled": null,
-    "hls_storage_retention": null,
-    "hls_segment_seconds": null
-  },
+  "recording": null,
   "ptz": {
     "enabled": true,
     "protocol": "onvif",

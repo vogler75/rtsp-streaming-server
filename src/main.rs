@@ -29,6 +29,7 @@ mod camera_manager;
 mod mp4;
 mod handlers;
 mod pre_recording_buffer;
+mod throughput_tracker;
 mod ptz;
 mod api_ptz;
 
@@ -92,6 +93,10 @@ pub struct Args {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
+    
+    /// Enable throughput tracking and database logging
+    #[arg(long)]
+    throughput: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -353,6 +358,32 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize throughput tracker if MQTT is enabled (always publish to MQTT) or --throughput flag is set (database logging)
+    let throughput_tracker: Option<Arc<throughput_tracker::ThroughputTracker>> = 
+        if mqtt_handle.is_some() || args.throughput {
+            let tracker = Arc::new(throughput_tracker::ThroughputTracker::new_with_mqtt(mqtt_handle.clone(), args.throughput));
+            
+            // Start the throughput tracking task
+            let tracker_clone = tracker.clone();
+            tokio::spawn(async move {
+                let _ = tracker_clone.start_tracking_task().await;
+            });
+            
+            match (mqtt_handle.is_some(), args.throughput) {
+                (true, true) => info!("Throughput tracker initialized: MQTT publishing + database logging enabled"),
+                (true, false) => info!("Throughput tracker initialized: MQTT publishing enabled, database logging disabled"),
+                (false, true) => info!("Throughput tracker initialized: Database logging enabled, MQTT publishing disabled"),
+                (false, false) => info!("Throughput tracker initialized: No publishing/logging enabled"), // This shouldn't happen
+            }
+            
+            // Set as global tracker for easy access throughout the application
+            throughput_tracker::set_global_tracker(tracker.clone());
+            
+            Some(tracker)
+        } else {
+            None
+        };
+
     // Store all camera configurations (enabled and disabled)
     let all_camera_configs = config.cameras.clone();
     
@@ -384,10 +415,18 @@ async fn main() -> Result<()> {
                         
                         match database::create_database_provider(recording_config, Some(&camera_id)).await {
                             Ok(database) => {
-                                if let Err(e) = recording_manager_ref.add_camera_database(&camera_id, database).await {
+                                if let Err(e) = recording_manager_ref.add_camera_database(&camera_id, database.clone()).await {
                                     error!("Failed to add database for camera '{}': {}", camera_id, e);
                                 } else {
                                     info!("Database created successfully for camera '{}'", camera_id);
+                                    
+                                    // Also add database to throughput tracker if available and throughput flag is set
+                                    if let Some(ref throughput_tracker_ref) = throughput_tracker {
+                                        if args.throughput {
+                                            throughput_tracker_ref.add_camera_database(&camera_id, database.clone()).await;
+                                        }
+                                        throughput_tracker_ref.register_camera(&camera_id).await;
+                                    }
                                 }
                             }
                             Err(e) => {

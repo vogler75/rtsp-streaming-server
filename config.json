@@ -25,13 +25,13 @@
     "hls_storage_retention": "30d",
     "max_frame_size": 10485760,
     "mp4_framerate": 5,
-    "mp4_segment_minutes": 5,
+    "mp4_segment_minutes": 10,
     "mp4_storage_retention": "30d",
     "mp4_storage_type": "database",
     "pre_recording_buffer_minutes": 3,
     "pre_recording_cleanup_interval_seconds": 1,
     "pre_recording_enabled": true,
-    "session_segment_minutes": 10
+    "session_segment_minutes": 60
   },
   "server": {
     "admin_token": "test",

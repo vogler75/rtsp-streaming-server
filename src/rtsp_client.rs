@@ -687,6 +687,9 @@ impl RtspClient {
                             // Send frame directly to broadcast
                             let _ = self.frame_sender.send(Bytes::from(frame_data.clone()));
                             
+                            // Track throughput for this frame
+                            crate::throughput_tracker::record_frame_globally(&self.camera_id, frame_size as i64).await;
+                            
                             // Track picture arrival time for MQTT publishing (non-blocking)
                             if let Some(ref mqtt) = self.mqtt_handle {
                                 let now = std::time::SystemTime::now()
@@ -768,6 +771,11 @@ impl RtspClient {
                             if now.duration_since(last_log_time) >= Duration::from_secs(1) {
                                 let fps = frame_count as f32;
                                 *self.capture_fps.write().await = fps;
+                                
+                                // Update throughput tracking with FPS and connection count
+                                let connection_count = self.frame_sender.receiver_count();
+                                crate::throughput_tracker::update_ffmpeg_fps_globally(&self.camera_id, fps).await;
+                                crate::throughput_tracker::update_connection_count_globally(&self.camera_id, connection_count as i32).await;
                                 
                                 // Update MQTT status
                                 if let Some(ref mqtt) = self.mqtt_handle {

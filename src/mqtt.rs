@@ -45,6 +45,15 @@ pub struct ClientEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ThroughputStats {
+    pub bytes_per_second: i64,
+    pub frame_count: i32,
+    pub ffmpeg_fps: f32,
+    pub connection_count: i32,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ServerStatus {
     pub uptime_secs: u64,
     pub total_clients: usize,
@@ -404,6 +413,31 @@ impl MqttHandle {
             false, // Don't retain image data
             jpeg_data,
         ).await?;
+        
+        Ok(())
+    }
+    
+    pub async fn publish_throughput_stats(&self, camera_id: &str, stats: &ThroughputStats) -> Result<()> {
+        let topic = format!("{}/cameras/{}/throughput", self.config.base_topic, camera_id);
+        
+        let qos = match self.config.qos {
+            0 => QoS::AtMostOnce,
+            1 => QoS::AtLeastOnce,
+            _ => QoS::ExactlyOnce,
+        };
+        
+        let payload = serde_json::to_string(stats).map_err(|e| {
+            StreamError::mqtt(format!("Failed to serialize throughput stats: {}", e))
+        })?;
+        
+        self.client.publish(
+            topic,
+            qos,
+            self.config.retain,
+            payload,
+        ).await.map_err(|e| {
+            StreamError::mqtt(format!("Failed to publish throughput stats: {}", e))
+        })?;
         
         Ok(())
     }
