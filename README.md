@@ -893,6 +893,25 @@ To use PostgreSQL backend:
 - Centralized database management required
 - Advanced querying and analytics needed
 - Enterprise deployment with database administrators
+- **Remote storage for WinCC Unified Panel deployments** - stream and record to central database without consuming local panel storage
+
+#### Industrial Panel Integration
+
+For **WinCC Unified Panel** deployments, PostgreSQL provides significant advantages:
+
+- **Remote Recording**: Cameras connected to panels can stream and record to a central PostgreSQL database, preserving local panel storage
+- **Centralized Playback**: All video streams can be replayed from the central WinCC Unified system without accessing individual panels
+- **Distributed Architecture**: Panels handle live streaming while recordings are stored centrally for enterprise-wide access
+- **Storage Optimization**: Eliminates the need for large storage on individual panels, reducing hardware costs and maintenance
+
+**Example Setup:**
+```
+Panel Location A: Camera → StreamVault → PostgreSQL (Central Server)
+Panel Location B: Camera → StreamVault → PostgreSQL (Central Server)  
+Panel Location C: Camera → StreamVault → PostgreSQL (Central Server)
+
+Central WinCC System: Access all recordings from PostgreSQL database
+```
 
 #### Recording Options
 
