@@ -222,11 +222,12 @@ pub trait DatabaseProvider: Send + Sync {
         camera_configs: &std::collections::HashMap<String, crate::config::CameraConfig>,
     ) -> Result<()>;
     
-    /// Get a specific video segment by filename (for HTTP streaming)
-    async fn get_video_segment_by_filename(
+    
+    /// Get a specific video segment by timestamp (efficient query)
+    async fn get_video_segment_by_time(
         &self,
         camera_id: &str,
-        filename: &str,
+        timestamp: chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<VideoSegment>>;
         
     // HLS-specific methods
@@ -1530,46 +1531,25 @@ impl DatabaseProvider for SqliteDatabase {
         Ok(())
     }
     
-    async fn get_video_segment_by_filename(
+    
+    async fn get_video_segment_by_time(
         &self,
         camera_id: &str,
-        filename: &str,
+        timestamp: chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<VideoSegment>> {
-        let start_time = std::time::Instant::now();
-        
-        let query_str = format!(r#"
+        let query = format!(r#"
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.camera_id
             FROM {} vs
             JOIN {} rs ON vs.session_id = rs.id
-            WHERE rs.camera_id = ? AND (
-                vs.file_path LIKE '%' || ? || '%' OR
-                ? LIKE '%' || strftime('%Y-%m-%dT%H-%M-%SZ', vs.start_time) || '%'
-            )
-            ORDER BY vs.start_time DESC
-            LIMIT 1
+            WHERE rs.camera_id = ? AND vs.start_time = ?
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
-        tracing::debug!(
-            "Executing SQL query for get_video_segment_by_filename:\n{}\nParameters: camera_id='{}', filename='{}'",
-            query_str, camera_id, filename
-        );
-        
-        // Try to find by exact filename match first (for filesystem storage)
-        let row = sqlx::query(&query_str)
-        .bind(camera_id)
-        .bind(filename)
-        .bind(filename)
-        .fetch_optional(&self.pool)
-        .await?;
-        
-        let elapsed = start_time.elapsed();
-        
-        tracing::debug!(
-            "Query completed in {:.3}ms, found: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            row.is_some()
-        );
-        
+        let row = sqlx::query(&query)
+            .bind(camera_id)
+            .bind(timestamp)
+            .fetch_optional(&self.pool)
+            .await?;
+
         if let Some(row) = row {
             Ok(Some(VideoSegment {
                 session_id: row.get("session_id"),
@@ -1578,7 +1558,7 @@ impl DatabaseProvider for SqliteDatabase {
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
-                recording_reason: None, // Not fetched in this query
+                recording_reason: None, // Not needed for segment streaming
                 camera_id: row.get("camera_id"),
             }))
         } else {
@@ -3347,46 +3327,25 @@ impl DatabaseProvider for PostgreSqlDatabase {
         Ok(())
     }
     
-    async fn get_video_segment_by_filename(
+    
+    async fn get_video_segment_by_time(
         &self,
         camera_id: &str,
-        filename: &str,
+        timestamp: chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<VideoSegment>> {
-        let start_time = std::time::Instant::now();
-        
-        let query_str = format!(r#"
+        let query = format!(r#"
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.camera_id
             FROM {} vs
             JOIN {} rs ON vs.session_id = rs.id
-            WHERE rs.camera_id = $1 AND (
-                vs.file_path LIKE '%' || $2 || '%' OR
-                $3 LIKE '%' || to_char(vs.start_time, 'YYYY-MM-DD"T"HH24-MI-SS"Z"') || '%'
-            )
-            ORDER BY vs.start_time DESC
-            LIMIT 1
+            WHERE rs.camera_id = $1 AND vs.start_time = $2
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
-        debug!(
-            "Executing PostgreSQL query for get_video_segment_by_filename: {}",
-            query_str
-        );
-        
-        // Try to find by exact filename match first (for filesystem storage)
-        let row = sqlx::query(&query_str)
-        .bind(camera_id)
-        .bind(filename)
-        .bind(filename)
-        .fetch_optional(&self.pool)
-        .await?;
-        
-        let elapsed = start_time.elapsed();
-        
-        debug!(
-            "Query completed in {:.3}ms, found: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            row.is_some()
-        );
-        
+        let row = sqlx::query(&query)
+            .bind(camera_id)
+            .bind(timestamp)
+            .fetch_optional(&self.pool)
+            .await?;
+            
         if let Some(row) = row {
             Ok(Some(VideoSegment {
                 session_id: row.get("session_id"),
@@ -3395,7 +3354,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 file_path: row.get("file_path"),
                 size_bytes: row.get("size_bytes"),
                 mp4_data: row.get("mp4_data"),
-                recording_reason: None, // Not fetched in this query
+                recording_reason: None, // Not needed for segment streaming
                 camera_id: row.get("camera_id"),
             }))
         } else {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc, Duration};
 use bytes::Bytes;
-use tracing::{debug, trace};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct BufferedFrame {
@@ -57,7 +57,7 @@ impl PreRecordingBuffer {
         let cutoff_time = Utc::now() - Duration::minutes(self.buffer_duration_minutes as i64);
         let mut buffer = self.buffer.write().await;
         
-        let initial_count = buffer.len();
+        let _initial_count = buffer.len();
         
         // Remove frames older than the cutoff time
         while let Some(frame) = buffer.front() {

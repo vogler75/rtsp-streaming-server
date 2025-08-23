@@ -806,13 +806,13 @@ impl ControlHandler {
                                     .and_then(|name| name.to_str())
                                     .map(|s| s.to_string())
                                     .unwrap_or_else(|| {
-                                        // Fallback to generating filename from timestamp
-                                        s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                                        // Fallback to generating filename from exact timestamp
+                                        s.start_time.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
                                     })
                             },
                             None => {
-                                // For database storage, generate a filename based on timestamp
-                                s.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string()
+                                // For database storage, generate a filename based on exact timestamp
+                                s.start_time.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
                             }
                         };
 

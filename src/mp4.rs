@@ -71,6 +71,49 @@ pub fn calculate_range(range: Option<(u64, Option<u64>)>, file_size: u64) -> (u6
     }
 }
 
+/// Extract timestamp from MP4 filename (format: 2025-08-23T17:53:25.522501Z or 2025-08-23T14-30-00Z.mp4)
+fn parse_timestamp_from_filename(filename: &str) -> Option<DateTime<Utc>> {
+    // First try parsing as exact timestamp (new format without .mp4): 2025-08-23T17:53:25.522501Z
+    match DateTime::parse_from_rfc3339(filename) {
+        Ok(dt) => return Some(dt.with_timezone(&Utc)),
+        Err(_) => {
+            // Continue to try other formats
+        }
+    }
+    
+    // Try removing .mp4 extension for backward compatibility
+    let timestamp_str = if let Some(stripped) = filename.strip_suffix(".mp4") {
+        stripped
+    } else {
+        filename
+    };
+    
+    // Try parsing the exact timestamp format: 2025-08-23T17:53:25.522501Z
+    match DateTime::parse_from_rfc3339(timestamp_str) {
+        Ok(dt) => return Some(dt.with_timezone(&Utc)),
+        Err(_) => {
+            // Fallback to legacy format parsing: 2025-08-23T14-30-00Z
+            debug!("Failed to parse as RFC3339, trying legacy format for filename '{}'", filename);
+        }
+    }
+    
+    // Legacy format: Parse the format: 2025-08-23T14-30-00Z
+    let formatted_str = timestamp_str.replace('-', ":");
+    // This gives us: 2025:08:23T14:30:00Z
+    
+    // Convert back to standard ISO format: 2025-08-23T14:30:00Z
+    let iso_str = formatted_str.replacen(':', "-", 2);
+    
+    // Parse as RFC3339
+    match DateTime::parse_from_rfc3339(&iso_str) {
+        Ok(dt) => Some(dt.with_timezone(&Utc)),
+        Err(e) => {
+            debug!("Failed to parse timestamp from filename '{}' in all formats: {}", filename, e);
+            None
+        }
+    }
+}
+
 
 
 // HLS-specific functionality
@@ -275,10 +318,17 @@ pub async fn serve_hls_playlist(
     for (i, segment) in segments.iter().enumerate() {
         match storage_type {
             config::Mp4StorageType::Database => {
-                let filename = segment.start_time.format("%Y-%m-%dT%H-%M-%SZ.mp4").to_string();
-                let db_segment = match database.get_video_segment_by_filename(&camera_id, &filename).await {
+                // Get the full segment data by timestamp (more efficient)
+                let db_segment = match database.get_video_segment_by_time(&camera_id, segment.start_time).await {
                     Ok(Some(seg)) => seg,
-                    _ => continue,
+                    Ok(None) => {
+                        debug!("No MP4 data found for segment at {}", segment.start_time);
+                        continue;
+                    },
+                    Err(e) => {
+                        error!("Failed to get segment by time: {}", e);
+                        continue;
+                    }
                 };
                 
                 if let Some(mp4_data) = db_segment.mp4_data {
@@ -289,6 +339,8 @@ pub async fn serve_hls_playlist(
                     }
                     input_files.push(temp_path.clone());
                     temp_files.push(temp_path);
+                } else {
+                    warn!("MP4 segment has no data for timestamp: {}", segment.start_time);
                 }
             },
             config::Mp4StorageType::Filesystem => {
@@ -594,15 +646,21 @@ async fn stream_segment_from_database(
     };
     drop(camera_streams);
 
-    let segment = match database.get_video_segment_by_filename(camera_id, filename).await {
-        Ok(Some(segment)) => segment,
-        Ok(None) => {
-            return (axum::http::StatusCode::NOT_FOUND, "Recording not found").into_response();
+    // Extract timestamp from filename and use efficient time-based lookup
+    let segment = if let Some(timestamp) = parse_timestamp_from_filename(filename) {
+        match database.get_video_segment_by_time(camera_id, timestamp).await {
+            Ok(Some(segment)) => segment,
+            Ok(None) => {
+                return (axum::http::StatusCode::NOT_FOUND, "Recording not found").into_response();
+            }
+            Err(e) => {
+                error!("Failed to get segment by time: {}", e);
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+            }
         }
-        Err(e) => {
-            error!("Failed to get segment info: {}", e);
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
+    } else {
+        error!("Invalid filename format: {}. Expected format: YYYY-MM-DDTHH:MM:SS.ffffffZ or YYYY-MM-DDTHH-MM-SSZ.mp4", filename);
+        return (axum::http::StatusCode::BAD_REQUEST, "Invalid filename format").into_response();
     };
 
     let file_size = segment.size_bytes as u64;
