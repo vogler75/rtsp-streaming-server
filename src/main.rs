@@ -156,6 +156,32 @@ async fn main() -> Result<()> {
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
     
+    // Check FFmpeg availability
+    match tokio::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .await
+    {
+        Ok(output) => {
+            if output.status.success() {
+                let version_output = String::from_utf8_lossy(&output.stdout);
+                if let Some(first_line) = version_output.lines().next() {
+                    info!("FFmpeg found: {}", first_line);
+                } else {
+                    info!("FFmpeg is available");
+                }
+            } else {
+                error!("FFmpeg is installed but failed to run: {}", String::from_utf8_lossy(&output.stderr));
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            error!("FFmpeg is not available on the system PATH: {}", e);
+            error!("Please install FFmpeg and ensure it's available in your PATH");
+            std::process::exit(1);
+        }
+    }
+    
     // Cleanup old HLS directories from previous runs
     mp4::cleanup_old_hls_directories().await;
 
