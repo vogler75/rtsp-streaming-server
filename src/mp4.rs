@@ -721,32 +721,41 @@ async fn stream_segment_from_filesystem(
     
     let base_path = std::path::PathBuf::from(&recording_config.database_path);
 
-    let mut potential_paths = vec![ base_path.join(camera_id).join(filename) ];
-
-    let now = chrono::Utc::now();
-    for year in (now.year()-1)..=(now.year()) {
-        for month in 1..=12 {
-            for day in 1..=31 {
-                let path = base_path.join(camera_id)
-                    .join(year.to_string())
-                    .join(format!("{:02}", month))
-                    .join(format!("{:02}", day))
-                    .join(filename);
-                potential_paths.push(path);
+    // Extract timestamp from filename to construct the exact path
+    let file_path = if let Some(timestamp) = parse_timestamp_from_filename(filename) {
+        // Construct path based on timestamp: base_path/camera_id/year/month/day/filename
+        let date_path = base_path.join(camera_id)
+            .join(timestamp.year().to_string())           // e.g., "2025"
+            .join(format!("{:02}", timestamp.month()))    // e.g., "08" 
+            .join(format!("{:02}", timestamp.day()))      // e.g., "23"
+            .join(filename);                              // e.g., "2025-08-23T18-31-44Z.mp4"
+        
+        debug!("Constructed filesystem path for '{}': {:?}", filename, date_path);
+        
+        // Check if the date-based path exists first
+        if date_path.exists() {
+            date_path
+        } else {
+            // Fallback: try direct path without date folders
+            let direct_path = base_path.join(camera_id).join(filename);
+            debug!("Date-based path not found, trying direct path: {:?}", direct_path);
+            
+            if direct_path.exists() {
+                direct_path
+            } else {
+                return (axum::http::StatusCode::NOT_FOUND, "Recording file not found").into_response();
             }
         }
-    }
-
-    let mut file_path = None;
-    for path in potential_paths {
-        if path.exists() { file_path = Some(path); break; }
-    }
-
-    let file_path = match file_path { 
-        Some(path) => path, 
-        None => { 
-            return (axum::http::StatusCode::NOT_FOUND, "Recording file not found").into_response(); 
-        } 
+    } else {
+        // If timestamp parsing fails, try direct path only
+        let direct_path = base_path.join(camera_id).join(filename);
+        debug!("Failed to parse timestamp from '{}', trying direct path: {:?}", filename, direct_path);
+        
+        if direct_path.exists() {
+            direct_path
+        } else {
+            return (axum::http::StatusCode::NOT_FOUND, "Recording file not found").into_response();
+        }
     };
 
     let metadata = match tokio::fs::metadata(&file_path).await {
