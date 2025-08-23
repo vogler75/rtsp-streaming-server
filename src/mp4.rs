@@ -75,7 +75,10 @@ pub fn calculate_range(range: Option<(u64, Option<u64>)>, file_size: u64) -> (u6
 fn parse_timestamp_from_filename(filename: &str) -> Option<DateTime<Utc>> {
     // First try parsing as exact timestamp (new format without .mp4): 2025-08-23T17:53:25.522501Z
     match DateTime::parse_from_rfc3339(filename) {
-        Ok(dt) => return Some(dt.with_timezone(&Utc)),
+        Ok(dt) => {
+            debug!("Parsed timestamp from filename '{}' using direct RFC3339 format", filename);
+            return Some(dt.with_timezone(&Utc));
+        },
         Err(_) => {
             // Continue to try other formats
         }
@@ -90,7 +93,10 @@ fn parse_timestamp_from_filename(filename: &str) -> Option<DateTime<Utc>> {
     
     // Try parsing the exact timestamp format: 2025-08-23T17:53:25.522501Z
     match DateTime::parse_from_rfc3339(timestamp_str) {
-        Ok(dt) => return Some(dt.with_timezone(&Utc)),
+        Ok(dt) => {
+            debug!("Parsed timestamp from filename '{}' using RFC3339 format after extension removal", filename);
+            return Some(dt.with_timezone(&Utc));
+        },
         Err(_) => {
             // Fallback to legacy format parsing: 2025-08-23T14-30-00Z
             debug!("Failed to parse as RFC3339, trying legacy format for filename '{}'", filename);
@@ -106,7 +112,10 @@ fn parse_timestamp_from_filename(filename: &str) -> Option<DateTime<Utc>> {
     
     // Parse as RFC3339
     match DateTime::parse_from_rfc3339(&iso_str) {
-        Ok(dt) => Some(dt.with_timezone(&Utc)),
+        Ok(dt) => {
+            debug!("Parsed timestamp from filename '{}' using legacy dash-separated format", filename);
+            Some(dt.with_timezone(&Utc))
+        },
         Err(e) => {
             debug!("Failed to parse timestamp from filename '{}' in all formats: {}", filename, e);
             None

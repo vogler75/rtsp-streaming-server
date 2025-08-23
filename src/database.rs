@@ -1544,11 +1544,24 @@ impl DatabaseProvider for SqliteDatabase {
             WHERE rs.camera_id = ? AND vs.start_time = ?
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
+        debug!(
+            "Executing SQLite query for get_video_segment_by_time:\n{}\nParameters: camera_id='{}', timestamp='{}'",
+            query, camera_id, timestamp
+        );
+        
+        let start_time = std::time::Instant::now();
         let row = sqlx::query(&query)
             .bind(camera_id)
             .bind(timestamp)
             .fetch_optional(&self.pool)
             .await?;
+        
+        let elapsed = start_time.elapsed();
+        debug!(
+            "SQLite query completed in {:.3}ms, found: {}",
+            elapsed.as_secs_f64() * 1000.0,
+            row.is_some()
+        );
 
         if let Some(row) = row {
             Ok(Some(VideoSegment {
@@ -3340,11 +3353,24 @@ impl DatabaseProvider for PostgreSqlDatabase {
             WHERE rs.camera_id = $1 AND vs.start_time = $2
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
+        debug!(
+            "Executing PostgreSQL query for get_video_segment_by_time:\n{}\nParameters: camera_id='{}', timestamp='{}'",
+            query, camera_id, timestamp
+        );
+        
+        let start_time = std::time::Instant::now();
         let row = sqlx::query(&query)
             .bind(camera_id)
             .bind(timestamp)
             .fetch_optional(&self.pool)
             .await?;
+        
+        let elapsed = start_time.elapsed();
+        debug!(
+            "PostgreSQL query completed in {:.3}ms, found: {}",
+            elapsed.as_secs_f64() * 1000.0,
+            row.is_some()
+        );
             
         if let Some(row) = row {
             Ok(Some(VideoSegment {
