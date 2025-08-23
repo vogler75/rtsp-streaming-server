@@ -175,6 +175,7 @@ pub trait DatabaseProvider: Send + Sync {
         &self,
         camera_id: &str,
         timestamp: DateTime<Utc>,
+        tolerance_seconds: Option<i64>,
     ) -> Result<Option<RecordedFrame>>;
     
     /// Create a streaming cursor for frames in the given time range
@@ -1036,29 +1037,62 @@ impl DatabaseProvider for SqliteDatabase {
         &self,
         camera_id: &str,
         timestamp: DateTime<Utc>,
+        tolerance_seconds: Option<i64>,
     ) -> Result<Option<RecordedFrame>> {
-        // Find the nearest frame before or at the given timestamp, within 1 second
-        let one_second_before = timestamp - chrono::Duration::seconds(1);
+        let tolerance = tolerance_seconds.unwrap_or(0);
+        
+        if tolerance == 0 {
+            // Exact timestamp match only
+            let query = format!(
+                r#"
+                SELECT rf.timestamp, rf.frame_data
+                FROM {} rf
+                JOIN {} rs ON rf.session_id = rs.id
+                WHERE rs.camera_id = ? AND rf.timestamp = ?
+                LIMIT 1
+                "#,
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            );
+            let row = sqlx::query(&query)
+                .bind(camera_id)
+                .bind(timestamp)
+                .fetch_optional(&self.pool)
+                .await?;
+                
+            if let Some(row) = row {
+                return Ok(Some(RecordedFrame {
+                    timestamp: row.get("timestamp"),
+                    frame_data: row.get("frame_data"),
+                }));
+            }
+        }
+        
+        // Find the closest frame within tolerance (or closest if tolerance > 0)
+        let tolerance_duration = chrono::Duration::seconds(tolerance);
+        let time_before = timestamp - tolerance_duration;
+        let time_after = timestamp + tolerance_duration;
         
         let query = format!(
             r#"
-            SELECT rf.timestamp, rf.frame_data
+            SELECT rf.timestamp, rf.frame_data,
+                   ABS(julianday(rf.timestamp) - julianday(?)) as time_diff
             FROM {} rf
             JOIN {} rs ON rf.session_id = rs.id
             WHERE rs.camera_id = ? 
-              AND rf.timestamp <= ? 
-              AND rf.timestamp >= ?
-            ORDER BY rf.timestamp DESC
+              AND rf.timestamp >= ? 
+              AND rf.timestamp <= ?
+            ORDER BY time_diff ASC
             LIMIT 1
             "#,
             TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
         );
         let row = sqlx::query(&query)
-        .bind(camera_id)
-        .bind(timestamp)
-        .bind(one_second_before)
-        .fetch_optional(&self.pool)
-        .await?;
+            .bind(timestamp)
+            .bind(camera_id)
+            .bind(time_before)
+            .bind(time_after)
+            .fetch_optional(&self.pool)
+            .await?;
         
         if let Some(row) = row {
             Ok(Some(RecordedFrame {

@@ -6,6 +6,7 @@ This document provides a comprehensive overview of all available REST API endpoi
 
 | Endpoint | Purpose | Format | Parameters |
 |----------|---------|---------|------------|
+| `{camera_path}/control/recordings/frames/{timestamp}` | Single frame by timestamp | JPEG | `tolerance` |
 | `{camera_path}/control/recordings/mp4/segments/{filename}` | Single MP4 recording | MP4 | - |
 | `{camera_path}/control/recordings/hls/timerange` | HLS playlist for time range | M3U8 | `t1`, `t2`, `segment_duration` |
 
@@ -52,6 +53,7 @@ GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21
     ├── recordings/
     │   ├── GET /                             # List recordings
     │   ├── GET /{session_id}/frames          # Frame metadata
+    │   ├── GET frames/{timestamp}            # Get single frame by timestamp
     │   ├── mp4/
     │   │   ├── GET segments                  # List MP4 segments
     │   │   └── GET segments/{filename}       # Stream single MP4
@@ -314,6 +316,41 @@ GET /cam1/control/recordings?from=2025-08-21T00:00:00Z&reason=Manual&sort_order=
 - `to` (optional): ISO 8601 timestamp
 
 **Response:** List of frame metadata objects (timestamp, size)
+
+#### Get Single Frame by Timestamp
+**Endpoint:** `GET /{camera_path}/control/recordings/frames/{timestamp}`
+
+**Path Parameters:**
+- `timestamp`: ISO 8601 timestamp (URL-encoded, e.g., `2025-08-23T10:30:45.123Z`)
+
+**Query Parameters:**
+- `tolerance` (optional): Time tolerance for matching frames (default: exact match)
+  - Format: `{number}{unit}` where unit is `s` (seconds), `m` (minutes), or `h` (hours)
+  - Examples: `30s`, `5m`, `1h`
+  - If exact timestamp not found, returns closest frame within tolerance
+
+**Response:** 
+- **Success (200)**: Raw JPEG binary data with headers:
+  - `Content-Type: image/jpeg`
+  - `X-Frame-Timestamp: {actual_frame_timestamp}`
+- **Not Found (404)**: JSON error message
+- **Bad Request (400)**: Invalid timestamp or tolerance format
+
+**Examples:**
+```bash
+# Get exact frame at timestamp
+GET /cam1/control/recordings/frames/2025-08-23T10:30:45.123Z
+
+# Get closest frame within 30 seconds tolerance
+GET /cam1/control/recordings/frames/2025-08-23T10:30:45.123Z?tolerance=30s
+
+# Get closest frame within 5 minutes tolerance
+GET /cam1/control/recordings/frames/2025-08-23T10:30:45.123Z?tolerance=5m
+
+# With authentication
+GET /cam1/control/recordings/frames/2025-08-23T10:30:45.123Z?tolerance=1h
+Authorization: Bearer your-camera-token
+```
 
 #### List MP4 Segments
 **Endpoint:** `GET {camera_path}/control/recordings/mp4/segments`

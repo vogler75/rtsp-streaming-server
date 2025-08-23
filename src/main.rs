@@ -590,6 +590,20 @@ async fn main() -> Result<()> {
                 )
             ));
 
+            // Get single frame by timestamp
+            let frame_by_timestamp_path = format!("{}/control/recordings/frames/:timestamp", path);
+            let frame_info = api_info.clone();
+            app = app.route(&frame_by_timestamp_path, axum::routing::get(
+                move |headers, path, query| api_recording::api_get_frame_by_timestamp(
+                    headers,
+                    path,
+                    query,
+                    frame_info.camera_id.clone(),
+                    frame_info.camera_config.clone(),
+                    frame_info.recording_manager.clone().unwrap()
+                )
+            ));
+
             // Get active recording
             let active_recording_path = format!("{}/control/recording/active", path);
             let active_info = api_info.clone();

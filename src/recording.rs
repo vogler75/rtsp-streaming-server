@@ -549,12 +549,13 @@ impl RecordingManager {
         &self,
         camera_id: &str,
         timestamp: DateTime<Utc>,
+        tolerance_seconds: Option<i64>,
     ) -> crate::errors::Result<Option<RecordedFrame>> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
             .ok_or_else(|| crate::errors::StreamError::config(&format!("No database found for camera '{}'", camera_id)))?;
 
-        database.get_frame_at_timestamp(camera_id, timestamp).await
+        database.get_frame_at_timestamp(camera_id, timestamp, tolerance_seconds).await
     }
 
     /// Check for active recordings at startup and restart them

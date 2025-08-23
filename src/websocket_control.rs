@@ -731,7 +731,7 @@ impl ControlHandler {
         recording_manager: &RecordingManager,
         sender: Arc<tokio::sync::Mutex<futures_util::stream::SplitSink<WebSocket, Message>>>,
     ) -> CommandResponse {
-        match recording_manager.get_frame_at_timestamp(camera_id, timestamp).await {
+        match recording_manager.get_frame_at_timestamp(camera_id, timestamp, Some(1)).await {
             Ok(Some(frame)) => {
                 // Send the frame with timestamp
                 let frame_bytes = Self::encode_frame_with_timestamp(&frame);

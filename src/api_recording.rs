@@ -35,6 +35,12 @@ pub struct GetFramesQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct GetFrameByTimestampQuery {
+    #[serde(default)]
+    pub tolerance: Option<String>, // e.g., "30s", "5m", "1h" - default is no tolerance (exact match)
+}
+
+#[derive(Debug, Deserialize)]
 pub struct GetMp4SegmentsQuery {
     pub from: Option<chrono::DateTime<chrono::Utc>>,
     pub to: Option<chrono::DateTime<chrono::Utc>>,
@@ -248,8 +254,7 @@ pub async fn api_get_recorded_frames(
             let data = serde_json::json!({
                 "session_id": session_id,
                 "frames": frames_data,
-                "count": frames_data.len(),
-                "note": "Frame data not included in response due to size - use binary WebSocket for frame streaming"
+                "count": frames_data.len()
             });
             Json(ApiResponse::success(data)).into_response()
         }
@@ -517,4 +522,98 @@ pub async fn api_serve_hls_segment(
         axum::extract::Path((camera_id, playlist_id, segment_name)),
         axum::extract::State(app_state),
     ).await
+}
+
+/// Parse tolerance string like "30s", "5m", "1h" into seconds
+fn parse_tolerance_string(tolerance: &str) -> Result<i64, String> {
+    if tolerance.is_empty() {
+        return Ok(0);
+    }
+    
+    let len = tolerance.len();
+    if len < 2 {
+        return Err(format!("Invalid tolerance format: {}", tolerance));
+    }
+    
+    let (number_str, unit) = tolerance.split_at(len - 1);
+    let number: i64 = number_str.parse().map_err(|_| format!("Invalid number in tolerance: {}", number_str))?;
+    
+    match unit {
+        "s" => Ok(number),
+        "m" => Ok(number * 60),
+        "h" => Ok(number * 3600),
+        _ => Err(format!("Invalid time unit: {}. Use 's', 'm', or 'h'", unit))
+    }
+}
+
+pub async fn api_get_frame_by_timestamp(
+    headers: axum::http::HeaderMap,
+    AxumPath(timestamp_str): AxumPath<String>,
+    Query(query): Query<GetFrameByTimestampQuery>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> axum::response::Response {
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    // Parse the timestamp from the path parameter
+    let timestamp = match chrono::DateTime::parse_from_rfc3339(&timestamp_str) {
+        Ok(ts) => ts.with_timezone(&chrono::Utc),
+        Err(_) => {
+            return Json(ApiResponse::<()>::error("Invalid timestamp format. Use ISO 8601 format (e.g., 2025-08-23T10:30:45.123Z)", 400)).into_response();
+        }
+    };
+
+    // Parse tolerance parameter
+    let tolerance_seconds = if let Some(tolerance_str) = query.tolerance {
+        match parse_tolerance_string(&tolerance_str) {
+            Ok(seconds) => Some(seconds),
+            Err(err) => {
+                return Json(ApiResponse::<()>::error(&format!("Invalid tolerance parameter: {}", err), 400)).into_response();
+            }
+        }
+    } else {
+        None // Default: no tolerance (exact match)
+    };
+
+    // Get the frame
+    match recording_manager.get_frame_at_timestamp(&camera_id, timestamp, tolerance_seconds).await {
+        Ok(Some(frame)) => {
+            // Return raw JPEG data
+            axum::response::Response::builder()
+                .status(200)
+                .header("Content-Type", "image/jpeg")
+                .header("Content-Length", frame.frame_data.len())
+                .header("X-Frame-Timestamp", frame.timestamp.to_rfc3339())
+                .body(axum::body::Body::from(frame.frame_data))
+                .unwrap_or_else(|_| {
+                    Json(ApiResponse::<()>::error("Failed to build response", 500)).into_response()
+                })
+        }
+        Ok(None) => {
+            // No frame found
+            axum::response::Response::builder()
+                .status(404)
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_string(&ApiResponse::<()>::error(&format!(
+                        "No frame found for timestamp {} {}",
+                        timestamp.to_rfc3339(),
+                        if let Some(tol) = tolerance_seconds {
+                            format!("within {}s tolerance", tol)
+                        } else {
+                            "(exact match)".to_string()
+                        }
+                    ), 404)).unwrap_or_default()
+                ))
+                .unwrap_or_else(|_| {
+                    Json(ApiResponse::<()>::error("Failed to build 404 response", 500)).into_response()
+                })
+        }
+        Err(e) => {
+            Json(ApiResponse::<()>::error(&format!("Database error: {}", e), 500)).into_response()
+        }
+    }
 }
