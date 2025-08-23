@@ -459,14 +459,6 @@ impl DatabaseProvider for SqliteDatabase {
             .execute(&self.pool)
             .await?;
 
-        let idx_session_timestamp = format!(
-            "CREATE INDEX IF NOT EXISTS idx_session_timestamp ON {}(session_id, timestamp)",
-            TABLE_RECORDING_MJPEG
-        );
-        sqlx::query(&idx_session_timestamp)
-            .execute(&self.pool)
-            .await?;
-
         let idx_timestamp = format!(
             "CREATE INDEX IF NOT EXISTS idx_timestamp ON {}(timestamp)",
             TABLE_RECORDING_MJPEG
