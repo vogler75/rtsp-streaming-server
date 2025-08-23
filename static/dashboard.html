@@ -2227,6 +2227,7 @@
                     <div class="info-row">
                         <span class="info-label">Recording:</span>
                         <span id="recording-status-${camera.id}" style="color: ${recordingActive ? '#27ae60' : '#e74c3c'}">${recordingStatus}</span>
+                        <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor}; margin-left: 10px; padding: 2px 8px; font-size: 12px; border: none; border-radius: 3px; color: white; cursor: pointer;">${recordingBtnText}</button>
                     </div>
                     <div class="info-row">
                         <span class="info-label">DB Size:</span>
@@ -2236,7 +2237,7 @@
                 </div>
                 <div id="actions-${camera.id}" class="camera-actions">
                     <button onclick="openCameraStream('${camera.id}', '${camera.path}', ${requiresToken})">🔗 Stream</button>
-                    <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor}; display: ${recordingAvailable ? 'inline-block' : 'none'};">${recordingBtnText}</button>
+                    <button onclick="openCameraControl('${camera.id}', '${camera.path}', ${requiresToken})">🎮 Control</button>
                     ${adminButtons}
                 </div>
             `;
@@ -2572,6 +2573,14 @@
                         recordingBtnElement.textContent = isRecording ? '⏹️ Stop Recording' : '🔴 Start Recording';
                         recordingBtnElement.style.background = isRecording ? '#e74c3c' : '#27ae60';
                         recordingBtnElement.style.display = 'inline-block'; // Show button since recording is available
+                        // Ensure compact styling is maintained
+                        recordingBtnElement.style.marginLeft = '10px';
+                        recordingBtnElement.style.padding = '2px 8px';
+                        recordingBtnElement.style.fontSize = '12px';
+                        recordingBtnElement.style.border = 'none';
+                        recordingBtnElement.style.borderRadius = '3px';
+                        recordingBtnElement.style.color = 'white';
+                        recordingBtnElement.style.cursor = 'pointer';
                     }
                 }
                 
