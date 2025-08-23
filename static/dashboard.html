@@ -2023,7 +2023,7 @@
 
         async function updateCameraTile(camera) {
             const requiresToken = camera.token_required === true;
-            const isOnline = camera.ffmpeg_running;
+            const isOnline = camera.connected || camera.ffmpeg_running;
             
             // Use specific IDs to update elements
             const statusElement = document.getElementById(`status-${camera.id}`);
@@ -2121,6 +2121,7 @@
             let dbSize = 'Unknown';
             let recordingBtnText = '🔴 Start Recording';
             let recordingBtnColor = '#27ae60';
+            let recordingAvailable = false;
             
             try {
                 const headers = { 'Content-Type': 'application/json' };
@@ -2143,6 +2144,7 @@
                 ]);
                 
                 if (statusResponse.ok) {
+                    recordingAvailable = true;
                     const statusData = await statusResponse.json();
                     recordingActive = statusData.status === 'success' && statusData.data && statusData.data.active;
                     recordingStatus = recordingActive ? 'Active' : 'Stopped';
@@ -2151,6 +2153,7 @@
                 }
                 
                 if (sizeResponse.ok) {
+                    recordingAvailable = true;
                     const sizeData = await sizeResponse.json();
                     if (sizeData.status === 'success' && sizeData.data) {
                         dbSize = formatFileSize(sizeData.data.size_bytes);
@@ -2160,14 +2163,14 @@
                 // Use default values for errors
             }
             
-            return createCameraTile(camera, recordingStatus, recordingActive, dbSize, recordingBtnText, recordingBtnColor);
+            return createCameraTile(camera, recordingStatus, recordingActive, dbSize, recordingBtnText, recordingBtnColor, recordingAvailable);
         }
 
-        function createCameraTile(camera, recordingStatus = 'Loading...', recordingActive = false, dbSize = 'Loading...', recordingBtnText = '🔴 Recording', recordingBtnColor = '#27ae60') {
+        function createCameraTile(camera, recordingStatus = 'Loading...', recordingActive = false, dbSize = 'Loading...', recordingBtnText = '🔴 Recording', recordingBtnColor = '#27ae60', recordingAvailable = false) {
             const tile = document.createElement('div');
             tile.className = 'camera-tile';
             
-            const isOnline = camera.ffmpeg_running;
+            const isOnline = camera.connected || camera.ffmpeg_running;
             const streamId = `stream-${camera.id}`;
             const requiresToken = camera.token_required === true;
             
@@ -2220,6 +2223,7 @@
                         <span class="info-label">Last Frame:</span>
                         <span id="frame-${camera.id}">${camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never'}</span>
                     </div>
+                    ${recordingAvailable ? `
                     <div class="info-row">
                         <span class="info-label">Recording:</span>
                         <span id="recording-status-${camera.id}" style="color: ${recordingActive ? '#27ae60' : '#e74c3c'}">${recordingStatus}</span>
@@ -2227,13 +2231,12 @@
                     <div class="info-row">
                         <span class="info-label">DB Size:</span>
                         <span id="db-size-${camera.id}">${dbSize}</span>
-                    </div>
+                    </div>` : ''}
                     ${tokenSection}
                 </div>
                 <div id="actions-${camera.id}" class="camera-actions">
                     <button onclick="openCameraStream('${camera.id}', '${camera.path}', ${requiresToken})">🔗 Stream</button>
-                    <button onclick="openCameraControl('${camera.id}', '${camera.path}', ${requiresToken})">🎮 Control</button>
-                    <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor};">${recordingBtnText}</button>
+                    <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor}; display: ${recordingAvailable ? 'inline-block' : 'none'};">${recordingBtnText}</button>
                     ${adminButtons}
                 </div>
             `;
@@ -2551,21 +2554,25 @@
             try {
                 // Get recording status
                 const statusResponse = await fetch(`${basePath}${cameraPath}/control/recording/active`, { headers });
-                const statusData = await statusResponse.json();
                 
-                const recordingStatusElement = document.getElementById(`recording-status-${cameraId}`);
-                const recordingBtnElement = document.getElementById(`recording-btn-${cameraId}`);
-                
-                const isRecording = statusData.status === 'success' && statusData.data && statusData.data.active;
-                
-                if (recordingStatusElement) {
-                    recordingStatusElement.textContent = isRecording ? 'Active' : 'Stopped';
-                    recordingStatusElement.style.color = isRecording ? '#27ae60' : '#e74c3c';
-                }
-                
-                if (recordingBtnElement) {
-                    recordingBtnElement.textContent = isRecording ? '⏹️ Stop Recording' : '🔴 Start Recording';
-                    recordingBtnElement.style.background = isRecording ? '#e74c3c' : '#27ae60';
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    
+                    const recordingStatusElement = document.getElementById(`recording-status-${cameraId}`);
+                    const recordingBtnElement = document.getElementById(`recording-btn-${cameraId}`);
+                    
+                    const isRecording = statusData.status === 'success' && statusData.data && statusData.data.active;
+                    
+                    if (recordingStatusElement) {
+                        recordingStatusElement.textContent = isRecording ? 'Active' : 'Stopped';
+                        recordingStatusElement.style.color = isRecording ? '#27ae60' : '#e74c3c';
+                    }
+                    
+                    if (recordingBtnElement) {
+                        recordingBtnElement.textContent = isRecording ? '⏹️ Stop Recording' : '🔴 Start Recording';
+                        recordingBtnElement.style.background = isRecording ? '#e74c3c' : '#27ae60';
+                        recordingBtnElement.style.display = 'inline-block'; // Show button since recording is available
+                    }
                 }
                 
                 // Get database size
