@@ -646,6 +646,14 @@ async fn stream_segment_from_database(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     
+    let range_str = match range {
+        Some((start, Some(end))) => format!("bytes={}-{}", start, end),
+        Some((start, None)) => format!("bytes={}-", start),
+        None => "none".to_string(),
+    };
+    debug!("stream_segment_from_database called: camera_id='{}', filename='{}', range='{}'", 
+           camera_id, filename, range_str);
+    
     let camera_streams = recording_manager.databases.read().await;
     let database = match camera_streams.get(camera_id) {
         Some(db) => db.clone(),
@@ -673,7 +681,19 @@ async fn stream_segment_from_database(
     };
 
     let file_size = segment.size_bytes as u64;
+    let actual_data_size = segment.mp4_data.as_ref().map(|d| d.len()).unwrap_or(0) as u64;
+    
+    if file_size != actual_data_size {
+        warn!("Size mismatch for segment: database size_bytes={}, actual data size={}", 
+              file_size, actual_data_size);
+    }
+    
+    debug!("Database segment info: filename='{}', database_size={}, actual_size={}", 
+           filename, file_size, actual_data_size);
+    
     let (start, end) = calculate_range(range, file_size);
+    debug!("Database range calculation: requested={:?}, file_size={}, calculated={}..{}", 
+           range, file_size, start, end);
 
     let data = match segment.mp4_data {
         Some(blob_data) => blob_data,
@@ -718,6 +738,14 @@ async fn stream_segment_from_filesystem(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     use chrono::Datelike;
+    
+    let range_str = match range {
+        Some((start, Some(end))) => format!("bytes={}-{}", start, end),
+        Some((start, None)) => format!("bytes={}-", start),
+        None => "none".to_string(),
+    };
+    debug!("stream_segment_from_filesystem called: camera_id='{}', filename='{}', range='{}'", 
+           camera_id, filename, range_str);
     
     let base_path = std::path::PathBuf::from(&recording_config.database_path);
 
@@ -767,7 +795,11 @@ async fn stream_segment_from_filesystem(
     };
 
     let file_size = metadata.len();
+    debug!("Filesystem segment info: filename='{}', file_size={}", filename, file_size);
+    
     let (start, end) = calculate_range(range, file_size);
+    debug!("Filesystem range calculation: requested={:?}, file_size={}, calculated={}..{}", 
+           range, file_size, start, end);
 
     let file_data = match tokio::fs::read(&file_path).await {
         Ok(data) => data,

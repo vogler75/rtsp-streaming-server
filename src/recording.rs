@@ -133,26 +133,45 @@ impl RecordingManager {
             recording_start_time,
         ).await?;
 
-        // If pre-recording buffer exists, store all buffered frames first
+        // If pre-recording buffer exists, store all buffered frames first using bulk insert
         let mut initial_frame_count = 0u64;
         if let Some(buffer) = pre_recording_buffer {
             let buffered_frames = buffer.get_buffered_frames().await;
-            info!("Adding {} pre-recorded frames to recording session {}", buffered_frames.len(), session_id);
+            info!("Adding {} pre-recorded frames to recording session {} using bulk insert", buffered_frames.len(), session_id);
             
-            for (frame_number, buffered_frame) in buffered_frames.iter().enumerate() {
-                if let Err(e) = database.add_recorded_frame(
-                    session_id,
-                    buffered_frame.timestamp,
-                    (frame_number + 1) as i64,
-                    &buffered_frame.data,
-                ).await {
-                    error!("Failed to store pre-recorded frame in database: {}", e);
-                } else {
-                    initial_frame_count += 1;
+            if !buffered_frames.is_empty() {
+                // Prepare data for bulk insert: (timestamp, frame_number, frame_data)
+                let bulk_frames: Vec<(chrono::DateTime<chrono::Utc>, i64, Vec<u8>)> = buffered_frames
+                    .iter()
+                    .enumerate()
+                    .map(|(index, frame)| (frame.timestamp, (index + 1) as i64, frame.data.to_vec()))
+                    .collect();
+                
+                match database.add_recorded_frames_bulk(session_id, &bulk_frames).await {
+                    Ok(inserted_count) => {
+                        initial_frame_count = inserted_count;
+                        info!("Successfully bulk inserted {} pre-recorded frames for camera '{}'", inserted_count, camera_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to bulk insert pre-recorded frames: {}", e);
+                        // Fallback to individual inserts if bulk insert fails
+                        info!("Falling back to individual frame inserts for camera '{}'", camera_id);
+                        for (frame_number, buffered_frame) in buffered_frames.iter().enumerate() {
+                            if let Err(e) = database.add_recorded_frame(
+                                session_id,
+                                buffered_frame.timestamp,
+                                (frame_number + 1) as i64,
+                                &buffered_frame.data,
+                            ).await {
+                                error!("Failed to store pre-recorded frame in database: {}", e);
+                            } else {
+                                initial_frame_count += 1;
+                            }
+                        }
+                        info!("Fallback completed: stored {} pre-recorded frames for camera '{}'", initial_frame_count, camera_id);
+                    }
                 }
             }
-            
-            info!("Successfully stored {} pre-recorded frames for camera '{}'", initial_frame_count, camera_id);
         }
 
         // Create active recording entry

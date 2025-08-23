@@ -153,6 +153,13 @@ pub trait DatabaseProvider: Send + Sync {
         frame_data: &[u8],
     ) -> Result<i64>;
     
+    /// Bulk insert multiple recorded frames for better performance
+    async fn add_recorded_frames_bulk(
+        &self,
+        session_id: i64,
+        frames: &[(DateTime<Utc>, i64, Vec<u8>)], // (timestamp, frame_number, frame_data)
+    ) -> Result<u64>;
+    
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>>;
     async fn list_recordings_filtered(&self, camera_id: &str, from: Option<DateTime<Utc>>, to: Option<DateTime<Utc>>, reason: Option<&str>) -> Result<Vec<RecordingSession>>;
     
@@ -714,6 +721,53 @@ impl DatabaseProvider for SqliteDatabase {
         .await?;
 
         Ok(result.rows_affected() as i64)
+    }
+    
+    async fn add_recorded_frames_bulk(
+        &self,
+        session_id: i64,
+        frames: &[(DateTime<Utc>, i64, Vec<u8>)],
+    ) -> Result<u64> {
+        if frames.is_empty() {
+            return Ok(0);
+        }
+        
+        debug!("SQLite bulk insert: inserting {} frames for session {}", frames.len(), session_id);
+        let start_time = std::time::Instant::now();
+        
+        // Build bulk insert query with placeholders
+        let placeholders = frames.iter()
+            .map(|_| "(?, ?, ?)")
+            .collect::<Vec<_>>()
+            .join(", ");
+        
+        let query = format!(
+            r#"
+            INSERT INTO {} (session_id, timestamp, frame_data)
+            VALUES {}
+            "#,
+            TABLE_RECORDING_MJPEG, placeholders
+        );
+        
+        // Create query builder and bind all parameters
+        let mut query_builder = sqlx::query(&query);
+        for frame in frames {
+            query_builder = query_builder
+                .bind(session_id)
+                .bind(frame.0)
+                .bind(&frame.2);
+        }
+        
+        let result = query_builder.execute(&self.pool).await?;
+        
+        let elapsed = start_time.elapsed();
+        debug!(
+            "SQLite bulk insert completed in {:.3}ms, inserted {} frames",
+            elapsed.as_secs_f64() * 1000.0,
+            result.rows_affected()
+        );
+        
+        Ok(result.rows_affected() as u64)
     }
 
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>> {
@@ -2513,6 +2567,48 @@ impl DatabaseProvider for PostgreSqlDatabase {
         .await?;
 
         Ok(result.rows_affected() as i64)
+    }
+    
+    async fn add_recorded_frames_bulk(
+        &self,
+        session_id: i64,
+        frames: &[(DateTime<Utc>, i64, Vec<u8>)],
+    ) -> Result<u64> {
+        if frames.is_empty() {
+            return Ok(0);
+        }
+        
+        debug!("PostgreSQL bulk insert: inserting {} frames for session {}", frames.len(), session_id);
+        let start_time = std::time::Instant::now();
+        
+        // PostgreSQL supports UNNEST for efficient bulk inserts
+        let query = format!(
+            r#"
+            INSERT INTO {} (session_id, timestamp, frame_data)
+            SELECT $1, * FROM UNNEST($2::timestamptz[], $3::bytea[])
+            "#,
+            TABLE_RECORDING_MJPEG
+        );
+        
+        // Collect timestamps and frame data into arrays
+        let timestamps: Vec<DateTime<Utc>> = frames.iter().map(|(ts, _, _)| *ts).collect();
+        let frame_data: Vec<Vec<u8>> = frames.iter().map(|(_, _, data)| data.clone()).collect();
+        
+        let result = sqlx::query(&query)
+            .bind(session_id)
+            .bind(timestamps)
+            .bind(frame_data)
+            .execute(&self.pool)
+            .await?;
+        
+        let elapsed = start_time.elapsed();
+        debug!(
+            "PostgreSQL bulk insert completed in {:.3}ms, inserted {} frames",
+            elapsed.as_secs_f64() * 1000.0,
+            result.rows_affected()
+        );
+        
+        Ok(result.rows_affected() as u64)
     }
 
     async fn list_recordings(&self, query: &RecordingQuery) -> Result<Vec<RecordingSession>> {
