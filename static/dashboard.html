@@ -734,6 +734,57 @@
                             </div>
                         </div>
                         
+                        <!-- Pre-Recording Buffer Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">⏮️ Pre-Recording Buffer</h4>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Pre-Recording Buffer</label>
+                                <select id="pre_recording_enabled" name="pre_recording_enabled">
+                                    <option value="">Use Global Setting</option>
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                                <span class="help-text">Override global pre-recording buffer setting</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Buffer Duration (minutes)</label>
+                                <input type="number" id="pre_recording_buffer_minutes" name="pre_recording_buffer_minutes" placeholder="Use Global" min="1" max="60">
+                                <span class="help-text">Override buffer duration (1-60 minutes)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Memory-Only Storage</label>
+                                <select id="pre_recording_memory_only" name="pre_recording_memory_only">
+                                    <option value="">Use Global Setting</option>
+                                    <option value="true">Memory Only</option>
+                                    <option value="false">Database Storage</option>
+                                </select>
+                                <span class="help-text">Override storage type for buffer</span>
+                            </div>
+                        </div>
+                        
+                    </div>
+                </div>
+
+                <!-- Pre-Recording Buffer Settings -->
+                <div class="form-section">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">⏮️ Pre-Recording Buffer Settings</h3>
+                    <div class="collapsible-content collapsed">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Pre-Recording Buffer</label>
+                                <select id="pre_recording_enabled_camera" name="pre_recording_enabled_camera">
+                                    <option value="">Use Global Setting</option>
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                                <span class="help-text">Override global pre-recording buffer setting</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Buffer Duration (minutes)</label>
+                                <input type="number" id="pre_recording_buffer_minutes_camera" name="pre_recording_buffer_minutes_camera" placeholder="Use Global" min="1" max="60">
+                                <span class="help-text">Override buffer duration (1-60 minutes)</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -780,7 +831,7 @@
                 </div>
 
                 <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">MQTT Settings</h3>
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📡 MQTT Settings</h3>
                     <div class="collapsible-content collapsed">
                         <div class="form-grid">
                             <div class="form-group">
@@ -797,7 +848,7 @@
                 </div>
 
                 <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">FFmpeg Settings</h3>
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🎛️ FFmpeg Settings</h3>
                     <div class="collapsible-content collapsed">
                         <div class="form-group" style="grid-column: 1 / -1; margin-bottom: 20px;">
                             <label style="color: #ff6b6b; font-weight: bold;">Custom FFmpeg Command (Override)</label>
@@ -854,7 +905,7 @@
                 </div>
 
                 <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">Advanced Options</h3>
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">⚙️ Advanced Options</h3>
                     <div class="collapsible-content collapsed">
                         <div class="form-grid">
                             <div class="form-group">
@@ -922,8 +973,8 @@
 
                 <!-- Server Section -->
                 <div class="form-section">
-                    <h3 class="collapsible" onclick="toggleSection(this)">🖥️ Server Settings</h3>
-                    <div class="collapsible-content">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🖥️ Server Settings</h3>
+                    <div class="collapsible-content collapsed">
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Host Address</label>
@@ -956,8 +1007,8 @@
 
                 <!-- TLS Section -->
                 <div class="form-section">
-                    <h3 class="collapsible" onclick="toggleSection(this)">🔒 TLS/SSL Settings</h3>
-                    <div class="collapsible-content">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🔒 TLS/SSL Settings</h3>
+                    <div class="collapsible-content collapsed">
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Enable TLS/SSL</label>
@@ -983,8 +1034,8 @@
 
                 <!-- MQTT Section -->
                 <div class="form-section">
-                    <h3 class="collapsible" onclick="toggleSection(this)">📡 MQTT Settings</h3>
-                    <div class="collapsible-content">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📡 MQTT Settings</h3>
+                    <div class="collapsible-content collapsed">
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Enable MQTT</label>
@@ -1055,8 +1106,8 @@
 
                 <!-- Recording Section -->
                 <div class="form-section">
-                    <h3 class="collapsible" onclick="toggleSection(this)">🎥 Recording Settings</h3>
-                    <div class="collapsible-content">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🎥 Recording Settings</h3>
+                    <div class="collapsible-content collapsed">
                         
                         <!-- Database Backend Section -->
                         <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🗄️ Database Backend</h4>
@@ -1181,14 +1232,72 @@
                                 <span class="help-text">Duration of each HLS segment (1-30 seconds, default 6)</span>
                             </div>
                         </div>
+
+                        <!-- Pre-Recording Buffer Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">⏮️ Pre-Recording Buffer</h4>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Enable Pre-Recording Buffer</label>
+                                <select id="config_recording_pre_recording_enabled">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Continuously buffer frames before recording starts</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Buffer Duration (minutes)</label>
+                                <input type="number" id="config_recording_pre_recording_buffer_minutes" placeholder="1" min="1" max="60">
+                                <span class="help-text">How many minutes of footage to keep in buffer (1-60, default 1)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Memory-Only Storage</label>
+                                <select id="config_recording_pre_recording_memory_only">
+                                    <option value="false">Database Storage</option>
+                                    <option value="true">Memory Only (faster)</option>
+                                </select>
+                                <span class="help-text">Memory-only is faster but buffer is lost on restart</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Cleanup Interval (seconds)</label>
+                                <input type="number" id="config_recording_pre_recording_cleanup_interval_seconds" placeholder="1" min="1" max="60">
+                                <span class="help-text">How often to remove old frames from buffer (1-60 seconds, default 1)</span>
+                            </div>
+                        </div>
                         
+                    </div>
+                </div>
+
+                <!-- Pre-Recording Buffer Section -->
+                <div class="form-section">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">⏮️ Pre-Recording Buffer Settings</h3>
+                    <div class="collapsible-content collapsed">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Enable Pre-Recording Buffer</label>
+                                <select id="config_recording_pre_recording_enabled_new">
+                                    <option value="false">Disabled</option>
+                                    <option value="true">Enabled</option>
+                                </select>
+                                <span class="help-text">Continuously buffer frames before recording starts</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Buffer Duration (minutes)</label>
+                                <input type="number" id="config_recording_pre_recording_buffer_minutes_new" placeholder="5" min="1" max="60">
+                                <span class="help-text">How many minutes of footage to keep in buffer (1-60, default 1)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Cleanup Interval (seconds)</label>
+                                <input type="number" id="config_recording_pre_recording_cleanup_interval_seconds_new" placeholder="1" min="1" max="60">
+                                <span class="help-text">How often to remove old frames from buffer (1-60 seconds, default 1)</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Transcoding Section -->
                 <div class="form-section">
-                    <h3 class="collapsible" onclick="toggleSection(this)">🎬 Transcoding Settings</h3>
-                    <div class="collapsible-content">
+                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🎬 Transcoding Settings</h3>
+                    <div class="collapsible-content collapsed">
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Output Format</label>
@@ -1519,6 +1628,9 @@
                 document.getElementById('hls_storage_enabled').value = (config.recording.hls_storage_enabled !== undefined && config.recording.hls_storage_enabled !== null) ? config.recording.hls_storage_enabled.toString() : '';
                 document.getElementById('hls_storage_retention').value = config.recording.hls_storage_retention || '';
                 document.getElementById('hls_segment_seconds').value = config.recording.hls_segment_seconds || '';
+                // Pre-recording buffer settings (memory-only, using new IDs)
+                document.getElementById('pre_recording_enabled_camera').value = (config.recording.pre_recording_enabled !== undefined && config.recording.pre_recording_enabled !== null) ? config.recording.pre_recording_enabled.toString() : '';
+                document.getElementById('pre_recording_buffer_minutes_camera').value = config.recording.pre_recording_buffer_minutes || '';
             } else {
                 document.getElementById('session_segment_minutes').value = '';
                 document.getElementById('frame_storage_enabled').value = '';
@@ -1530,6 +1642,9 @@
                 document.getElementById('hls_storage_enabled').value = '';
                 document.getElementById('hls_storage_retention').value = '';
                 document.getElementById('hls_segment_seconds').value = '';
+                // Pre-recording buffer settings reset (memory-only, using new IDs)
+                document.getElementById('pre_recording_enabled_camera').value = '';
+                document.getElementById('pre_recording_buffer_minutes_camera').value = '';
             }
             
             // MQTT settings
@@ -1659,6 +1774,11 @@
             document.getElementById('config_recording_hls_storage_retention').value = config.recording?.hls_storage_retention || '';
             document.getElementById('config_recording_hls_segment_seconds').value = config.recording?.hls_segment_seconds || '';
             
+            // Pre-recording buffer settings (memory-only)
+            document.getElementById('config_recording_pre_recording_enabled_new').value = (config.recording?.pre_recording_enabled || false).toString();
+            document.getElementById('config_recording_pre_recording_buffer_minutes_new').value = config.recording?.pre_recording_buffer_minutes || '';
+            document.getElementById('config_recording_pre_recording_cleanup_interval_seconds_new').value = config.recording?.pre_recording_cleanup_interval_seconds || '';
+            
             // Transcoding settings
             document.getElementById('config_transcoding_output_format').value = config.transcoding?.output_format || 'mjpeg';
             document.getElementById('config_transcoding_capture_framerate').value = config.transcoding?.capture_framerate || '';
@@ -1709,7 +1829,11 @@
                     cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1,
                     hls_storage_enabled: document.getElementById('config_recording_hls_storage_enabled').value === 'true',
                     hls_storage_retention: document.getElementById('config_recording_hls_storage_retention').value || "30d",
-                    hls_segment_seconds: parseInt(document.getElementById('config_recording_hls_segment_seconds').value) || 6
+                    hls_segment_seconds: parseInt(document.getElementById('config_recording_hls_segment_seconds').value) || 6,
+                    // Pre-recording buffer settings (memory-only)
+                    pre_recording_enabled: document.getElementById('config_recording_pre_recording_enabled_new').value === 'true',
+                    pre_recording_buffer_minutes: parseInt(document.getElementById('config_recording_pre_recording_buffer_minutes_new').value) || 1,
+                    pre_recording_cleanup_interval_seconds: parseInt(document.getElementById('config_recording_pre_recording_cleanup_interval_seconds_new').value) || 1
                 },
                 transcoding: {
                     output_format: document.getElementById('config_transcoding_output_format').value || "mjpeg",
@@ -1934,7 +2058,8 @@
             if (sessionSegmentMinutes || 
                 (frameStorageEnabled !== '' && frameStorageEnabled !== null) ||
                 frameStorageRetention || videoStorageType || videoStorageRetention || videoSegmentMinutes ||
-                (hlsStorageEnabled !== '' && hlsStorageEnabled !== null) || hlsStorageRetention || hlsSegmentSeconds) {
+                (hlsStorageEnabled !== '' && hlsStorageEnabled !== null) || hlsStorageRetention || hlsSegmentSeconds ||
+                (preRecordingEnabled !== '' && preRecordingEnabled !== null) || preRecordingBufferMinutes) {
                 config.recording = {};
                 
                 if (sessionSegmentMinutes) {
@@ -1964,6 +2089,17 @@
                 }
                 if (hlsSegmentSeconds) {
                     config.recording.hls_segment_seconds = parseInt(hlsSegmentSeconds);
+                }
+                
+                // Pre-recording buffer settings (memory-only, using new field names)
+                const preRecordingEnabled = formData.get('pre_recording_enabled_camera');
+                const preRecordingBufferMinutes = formData.get('pre_recording_buffer_minutes_camera');
+                
+                if (preRecordingEnabled !== '' && preRecordingEnabled !== null) {
+                    config.recording.pre_recording_enabled = preRecordingEnabled === 'true';
+                }
+                if (preRecordingBufferMinutes) {
+                    config.recording.pre_recording_buffer_minutes = parseInt(preRecordingBufferMinutes);
                 }
             }
             

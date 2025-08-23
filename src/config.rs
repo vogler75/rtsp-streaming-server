@@ -107,6 +107,16 @@ impl CameraConfig {
     pub fn get_hls_segment_seconds(&self) -> Option<u64> {
         self.recording.as_ref()?.hls_segment_seconds
     }
+    
+    /// Get the effective pre-recording enabled setting
+    pub fn get_pre_recording_enabled(&self) -> Option<bool> {
+        self.recording.as_ref()?.pre_recording_enabled
+    }
+    
+    /// Get the effective pre-recording buffer duration setting
+    pub fn get_pre_recording_buffer_minutes(&self) -> Option<u64> {
+        self.recording.as_ref()?.pre_recording_buffer_minutes
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +235,10 @@ pub struct CameraRecordingConfig {
     // General settings
     pub session_segment_minutes: Option<u64>, // Override global session segmentation (None=use global, 0=disabled, n=minutes)
     
+    // Pre-recording buffer settings (memory-only)
+    pub pre_recording_enabled: Option<bool>, // Override global pre-recording enabled setting
+    pub pre_recording_buffer_minutes: Option<u64>, // Override global buffer duration
+    
     // Frame storage settings
     pub frame_storage_enabled: Option<bool>, // Override global frame storage setting
     pub frame_storage_retention: Option<String>, // Override global frame retention (e.g., "10m", "5h", "24h")
@@ -282,6 +296,14 @@ pub struct RecordingConfig {
     #[serde(default)]
     pub frame_storage_retention: String, // Max age for frame recordings (e.g., "10m", "5h", "7d")
     
+    // Pre-recording buffer settings (memory-only)
+    #[serde(default)]
+    pub pre_recording_enabled: bool, // Enable pre-recording buffer
+    #[serde(default = "default_pre_recording_buffer_minutes")]
+    pub pre_recording_buffer_minutes: u64, // Buffer duration in minutes
+    #[serde(default = "default_pre_recording_cleanup_interval_seconds")]
+    pub pre_recording_cleanup_interval_seconds: u64, // How often to cleanup buffer frames
+    
     // NEW: MP4 video storage settings
     #[serde(default)]
     pub mp4_storage_type: Mp4StorageType,
@@ -307,6 +329,8 @@ pub struct RecordingConfig {
 
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
 fn default_session_segment_minutes() -> u64 { 60 } // 60 minutes (1 hour)
+fn default_pre_recording_buffer_minutes() -> u64 { 1 } // 5 minutes default buffer
+fn default_pre_recording_cleanup_interval_seconds() -> u64 { 1 } // Check every 1 second
 fn default_mp4_storage_retention() -> String { "30d".to_string() }
 fn default_mp4_segment_minutes() -> u64 { 5 }
 fn default_mp4_framerate() -> f32 { 5.0 }
@@ -367,6 +391,9 @@ impl Default for Config {
                 session_segment_minutes: default_session_segment_minutes(),
                 max_frame_size: default_max_frame_size(),
                 frame_storage_retention: "24h".to_string(),
+                pre_recording_enabled: false,
+                pre_recording_buffer_minutes: default_pre_recording_buffer_minutes(),
+                pre_recording_cleanup_interval_seconds: default_pre_recording_cleanup_interval_seconds(),
                 mp4_storage_type: Mp4StorageType::Disabled,
                 mp4_storage_retention: default_mp4_storage_retention(),
                 mp4_segment_minutes: default_mp4_segment_minutes(),
