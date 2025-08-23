@@ -153,8 +153,8 @@
                     <div class="feature-icon">
                         <i class="fas fa-database"></i>
                     </div>
-                    <h3>Smart Recording</h3>
-                    <p>Frame-by-frame SQLite storage with automatic session management. Hourly session splitting and configurable retention policies.</p>
+                    <h3>Flexible Database Storage</h3>
+                    <p>Choose between SQLite and PostgreSQL backends. Frame-by-frame storage with automatic session management, configurable retention policies, and enterprise-scale support.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">
@@ -183,6 +183,64 @@
                     </div>
                     <h3>Web-based Interface</h3>
                     <p>Responsive dashboard accessible from any device. Timeline-based playback controls and mobile-optimized viewing.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Database Section -->
+    <section class="database-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Powerful Database Options</h2>
+                <p>Choose the right database backend for your deployment scale and requirements</p>
+            </div>
+            <div class="database-grid">
+                <div class="database-card sqlite">
+                    <div class="database-icon">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <h3>SQLite Backend</h3>
+                    <p class="database-description">Perfect for single-server deployments and development environments. Zero setup required.</p>
+                    <ul class="database-features">
+                        <li><i class="fas fa-check"></i> Per-camera database files</li>
+                        <li><i class="fas fa-check"></i> No external dependencies</li>
+                        <li><i class="fas fa-check"></i> Local storage optimization</li>
+                        <li><i class="fas fa-check"></i> Ideal for <10 cameras</li>
+                    </ul>
+                    <div class="database-config">
+                        <code>"database_type": "sqlite"</code>
+                    </div>
+                </div>
+                <div class="database-card postgresql">
+                    <div class="database-icon">
+                        <i class="fas fa-server"></i>
+                    </div>
+                    <h3>PostgreSQL Backend</h3>
+                    <p class="database-description">Enterprise-grade database for large deployments with centralized management and advanced analytics.</p>
+                    <ul class="database-features">
+                        <li><i class="fas fa-check"></i> Centralized data management</li>
+                        <li><i class="fas fa-check"></i> Multi-server deployments</li>
+                        <li><i class="fas fa-check"></i> Advanced querying capabilities</li>
+                        <li><i class="fas fa-check"></i> Scales to 100+ cameras</li>
+                    </ul>
+                    <div class="database-config">
+                        <code>"database_type": "postgresql"</code>
+                    </div>
+                </div>
+            </div>
+            <div class="database-comparison">
+                <div class="comparison-item">
+                    <h4>Per-Camera Databases</h4>
+                    <p>Isolate camera data for better organization and performance scaling</p>
+                </div>
+                <div class="comparison-item">
+                    <h4>Shared Database</h4>
+                    <p>Centralize all camera data for cross-camera analytics and simplified management</p>
+                </div>
+                <div class="comparison-item">
+                    <h4>Automatic Migration</h4>
+                    <p>Switch between backends without data loss or configuration changes</p>
                 </div>
             </div>
         </div>
@@ -276,7 +334,7 @@
                 </div>
                 <div class="tech-item">
                     <i class="fas fa-database"></i>
-                    <span>SQLite</span>
+                    <span>SQLite & PostgreSQL</span>
                 </div>
                 <div class="tech-item">
                     <i class="fas fa-wifi"></i>

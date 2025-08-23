@@ -1,0 +1,30 @@
+{
+  "server": {
+    "bind": "0.0.0.0:8080",
+    "tls": null
+  },
+  "transcoding": {
+    "ffmpeg_path": "ffmpeg",
+    "default_fps": 15,
+    "default_resolution": "640x480",
+    "default_format": "mjpeg"
+  },
+  "mqtt": null,
+  "recording": {
+    "frame_storage_enabled": true,
+    "database_type": "postgresql",
+    "database_url": "postgres://user:password@localhost/",
+    "database_path": "recordings",
+    "session_segment_minutes": 60,
+    "max_frame_size": 1048576,
+    "frame_storage_retention": "7d",
+    "mp4_storage_type": "database",
+    "mp4_storage_retention": "30d",
+    "mp4_segment_minutes": 5,
+    "mp4_framerate": 15,
+    "cleanup_interval_hours": 24,
+    "hls_storage_enabled": true,
+    "hls_storage_retention": "24h",
+    "hls_segment_seconds": 6
+  }
+}

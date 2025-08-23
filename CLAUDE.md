@@ -87,9 +87,10 @@ RTSP Camera → FFmpeg Process → Frame Transcoding → Broadcast Channel → W
 - **Performance monitoring**: FPS tracking and duplicate frame detection
 
 ### Database Design
-- **Per-camera SQLite**: Individual databases in `recordings/` directory
-- **Session-based**: Recording sessions with start/stop timestamps
+- **Configurable backends**: SQLite (per-camera files) or PostgreSQL (shared or per-camera databases)
+- **Session-based**: Recording sessions with start/stop timestamps  
 - **Automatic cleanup**: Configurable age-based deletion of old recordings
+- **Database abstraction**: Single interface supports both SQLite and PostgreSQL seamlessly
 
 ### Security
 - **Token authentication**: Per-camera tokens for WebSocket access (query params or headers)
@@ -97,6 +98,46 @@ RTSP Camera → FFmpeg Process → Frame Transcoding → Broadcast Channel → W
 - **TLS support**: Optional HTTPS with custom certificates
 
 ## Configuration Files
+
+### Database Configuration
+
+The server supports both SQLite and PostgreSQL databases for recording storage:
+
+#### SQLite Configuration (Default)
+```json
+{
+  "recording": {
+    "database_type": "sqlite",
+    "database_path": "recordings"
+  }
+}
+```
+- Creates per-camera SQLite files: `recordings/{camera_id}.db`
+- No additional setup required
+
+#### PostgreSQL Configuration - Per-Camera Databases
+```json
+{
+  "recording": {
+    "database_type": "postgresql", 
+    "database_url": "postgres://user:password@localhost/"
+  }
+}
+```
+- Creates separate databases: `rtsp_cam1`, `rtsp_cam2`, etc.
+- Isolates camera data for better organization
+
+#### PostgreSQL Configuration - Shared Database
+```json
+{
+  "recording": {
+    "database_type": "postgresql",
+    "database_url": "postgres://user:password@localhost/surveillance"
+  }
+}
+```
+- All cameras share single database with `camera_id` discrimination
+- More efficient for large deployments
 
 ### Adding a New Camera
 1. Create `cameras/new_camera.json` with camera configuration
@@ -122,10 +163,11 @@ RTSP Camera → FFmpeg Process → Frame Transcoding → Broadcast Channel → W
 ## Important Dependencies
 - **`retina`**: RTSP client library for camera connections
 - **`axum`**: Web framework with WebSocket support
-- **`sqlx`**: SQLite database operations
+- **`sqlx`**: Database operations (SQLite and PostgreSQL support)
 - **`rumqttc`**: MQTT client for status publishing
 - **`notify`**: File system watching for config hot-reload
 - **External FFmpeg**: Must be installed system-wide for video transcoding
+- **PostgreSQL** (optional): For PostgreSQL database backend
 
 ## Development Notes
 
@@ -145,6 +187,8 @@ RTSP Camera → FFmpeg Process → Frame Transcoding → Broadcast Channel → W
 - **RTSP connections**: Check camera credentials and network connectivity
 - **WebSocket connections**: Verify token authentication for camera access
 - **Port conflicts**: Default server runs on port 8080, configurable in `config.json`
+- **PostgreSQL connections**: Ensure PostgreSQL server is running and credentials are correct
+- **Database permissions**: PostgreSQL user needs CREATE DATABASE permissions for per-camera databases
 
 ### File Watching
 - Server watches `cameras/` directory for changes

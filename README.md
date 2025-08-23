@@ -13,6 +13,7 @@ A high-performance, low-latency video streaming server built in Rust that connec
   - **Frame Storage**: Individual JPEG frames for precise seeking (short-term)
   - **HLS Storage**: Pre-generated HLS segments for fast streaming (medium-term) 
   - **MP4 Storage**: Efficient video segments for long-term archival
+- **Flexible Database Backends**: Choose between SQLite and PostgreSQL for recording storage
 - **Performance Optimized**: HLS storage eliminates conversion overhead for instant playback
 - **HTTPS/TLS Support**: Secure connections with configurable certificates
 - **Web Interface**: Comprehensive dashboard and control interfaces
@@ -773,7 +774,9 @@ The recording system supports three storage formats with independent configurati
     "frame_storage_enabled": true,
     "mp4_storage_type": "database",
     "hls_storage_enabled": true,
+    "database_type": "sqlite",
     "database_path": "recordings",
+    "database_url": null,
     "max_frame_size": 10485760,
     "mp4_framerate": 5.0,
     "frame_storage_retention": "7d",
@@ -785,6 +788,111 @@ The recording system supports three storage formats with independent configurati
   }
 }
 ```
+
+### Database Backend Configuration
+
+The server supports both **SQLite** and **PostgreSQL** databases for recording storage, providing flexibility for different deployment scenarios.
+
+#### SQLite Configuration (Default)
+
+SQLite is the default backend, providing per-camera database files with no additional setup required:
+
+```json
+{
+  "recording": {
+    "database_type": "sqlite",
+    "database_path": "recordings"
+  }
+}
+```
+
+- **Per-camera databases**: Creates individual SQLite files like `recordings/cam1.db`, `recordings/cam2.db`
+- **No dependencies**: Works out of the box with no external database server
+- **Local storage**: All data stored locally in the specified directory
+- **Ideal for**: Single-server deployments, development, and smaller installations
+
+#### PostgreSQL Configuration
+
+PostgreSQL backend provides centralized database storage with two deployment options:
+
+##### Per-Camera PostgreSQL Databases
+
+Creates separate PostgreSQL databases for each camera:
+
+```json
+{
+  "recording": {
+    "database_type": "postgresql",
+    "database_url": "postgres://username:password@localhost/"
+  }
+}
+```
+
+- **Separate databases**: Creates `rtsp_cam1`, `rtsp_cam2`, etc.
+- **Data isolation**: Each camera's recordings are stored in its own database
+- **Scalability**: Better performance for high-volume recordings
+- **Database permissions**: User needs `CREATE DATABASE` permissions
+
+##### Shared PostgreSQL Database
+
+All cameras share a single PostgreSQL database with `camera_id` discrimination:
+
+```json
+{
+  "recording": {
+    "database_type": "postgresql", 
+    "database_url": "postgres://username:password@localhost/surveillance"
+  }
+}
+```
+
+- **Shared database**: All cameras store data in the `surveillance` database
+- **Centralized**: Single database for easier management and backup
+- **Efficient**: Reduced overhead for large multi-camera deployments
+- **Cross-camera queries**: Enables querying across all cameras simultaneously
+
+#### Database Backend Features
+
+Both SQLite and PostgreSQL backends provide identical functionality:
+- ✅ Frame-by-frame storage with timestamps
+- ✅ MP4 video segment storage (filesystem or database)
+- ✅ HLS segment storage for instant playback
+- ✅ Session-based recording management
+- ✅ Automatic cleanup with configurable retention policies
+- ✅ Real-time recording controls and APIs
+- ✅ Time-range queries and playback
+
+#### PostgreSQL Setup Requirements
+
+To use PostgreSQL backend:
+
+1. **Install PostgreSQL server** on your system or use a remote instance
+2. **Create database user** with appropriate permissions:
+   ```sql
+   CREATE USER videoserver WITH PASSWORD 'secure_password';
+   -- For per-camera databases:
+   ALTER USER videoserver CREATEDB;
+   -- For shared database:
+   CREATE DATABASE surveillance OWNER videoserver;
+   ```
+3. **Configure connection URL** in your `config.json`
+4. **Start the server** - databases and tables are created automatically
+
+#### Choosing a Database Backend
+
+**Use SQLite when:**
+- Running a single server instance
+- Fewer than 10 cameras
+- Local storage is preferred  
+- Minimal setup required
+- Development and testing
+
+**Use PostgreSQL when:**
+- Multiple server instances or load balancing
+- More than 10 cameras
+- Centralized database management required
+- Advanced querying and analytics needed
+- Enterprise deployment with database administrators
 
 #### Recording Options
 

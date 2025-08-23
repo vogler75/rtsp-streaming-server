@@ -1038,3 +1038,176 @@ section {
         font-size: 16px;
     }
 }
+
+/* Database Section Styles */
+.database-section {
+    padding: 80px 0;
+    background: var(--surface);
+    position: relative;
+    overflow: hidden;
+}
+
+.database-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.1) 0%, rgba(56, 189, 248, 0.1) 100%);
+    pointer-events: none;
+}
+
+.database-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 30px;
+    margin-bottom: 50px;
+    position: relative;
+    z-index: 2;
+}
+
+.database-card {
+    background: var(--background);
+    border-radius: 16px;
+    padding: 30px;
+    border: 2px solid rgba(74, 222, 128, 0.2);
+    box-shadow: var(--shadow-md);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.database-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--gradient-primary);
+}
+
+.database-card.postgresql::before {
+    background: linear-gradient(135deg, #336791, #4A90E2);
+}
+
+.database-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-xl);
+    border-color: var(--primary-color);
+}
+
+.database-icon {
+    width: 60px;
+    height: 60px;
+    background: var(--gradient-primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 24px;
+    color: white;
+}
+
+.database-card.postgresql .database-icon {
+    background: linear-gradient(135deg, #336791, #4A90E2);
+}
+
+.database-card h3 {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+}
+
+.database-description {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+.database-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 25px 0;
+}
+
+.database-features li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.database-features i {
+    color: var(--primary-color);
+    font-size: 12px;
+}
+
+.database-config {
+    background: rgba(55, 65, 81, 0.8);
+    border-radius: 8px;
+    padding: 15px;
+    border-left: 4px solid var(--primary-color);
+}
+
+.database-card.postgresql .database-config {
+    border-left-color: #4A90E2;
+}
+
+.database-config code {
+    color: #10b981;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.database-comparison {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 30px;
+    position: relative;
+    z-index: 2;
+}
+
+.comparison-item {
+    text-align: center;
+    padding: 25px;
+    background: var(--background);
+    border-radius: 12px;
+    border: 1px solid rgba(74, 222, 128, 0.2);
+    box-shadow: var(--shadow-sm);
+}
+
+.comparison-item h4 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+.comparison-item p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+    .database-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .database-comparison {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .database-card {
+        padding: 20px;
+    }
+}

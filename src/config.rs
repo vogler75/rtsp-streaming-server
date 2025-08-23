@@ -240,12 +240,41 @@ pub struct CameraRecordingConfig {
     pub hls_segment_seconds: Option<u64>, // Override global HLS segment duration in seconds
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum DatabaseType {
+    #[serde(rename = "sqlite")]
+    SQLite,
+    #[serde(rename = "postgresql")]
+    PostgreSQL,
+}
+
+impl Default for DatabaseType {
+    fn default() -> Self {
+        Self::SQLite
+    }
+}
+
+impl std::fmt::Display for DatabaseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DatabaseType::SQLite => write!(f, "sqlite"),
+            DatabaseType::PostgreSQL => write!(f, "postgresql"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
     // Frame storage settings (unchanged)
     #[serde(default)]
     pub frame_storage_enabled: bool,
     pub database_path: String,
+    
+    // Database configuration
+    #[serde(default)]
+    pub database_type: DatabaseType,
+    pub database_url: Option<String>, // PostgreSQL connection string (e.g., "postgres://user:pass@localhost/")
+    
     #[serde(default = "default_session_segment_minutes")]
     pub session_segment_minutes: u64, // Duration for session segmentation in minutes (default: 60)
     #[serde(default = "default_max_frame_size")]
@@ -333,6 +362,8 @@ impl Default for Config {
             recording: Some(RecordingConfig {
                 frame_storage_enabled: false,
                 database_path: "recordings".to_string(),
+                database_type: DatabaseType::SQLite,
+                database_url: None,
                 session_segment_minutes: default_session_segment_minutes(),
                 max_frame_size: default_max_frame_size(),
                 frame_storage_retention: "24h".to_string(),

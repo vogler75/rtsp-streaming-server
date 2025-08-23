@@ -78,7 +78,7 @@ where
 }
 use video_stream::VideoStream;
 use mqtt::{MqttPublisher, MqttHandle};
-use database::SqliteDatabase;
+// Import removed - now using database::create_database_provider
 use recording::RecordingManager;
 
 #[derive(Parser, Debug, Clone)]
@@ -357,12 +357,10 @@ async fn main() -> Result<()> {
                 // Create database for this camera if recording is enabled
                 if let Some(ref recording_manager_ref) = recording_manager {
                     if let Some(recording_config) = &config.recording {
-                        let camera_db_path = format!("{}/{}.db", recording_config.database_path, camera_id);
-                        info!("Creating database for camera '{}' at '{}'", camera_id, camera_db_path);
+                        info!("Creating {} database for camera '{}'", recording_config.database_type, camera_id);
                         
-                        match SqliteDatabase::new(&camera_db_path).await {
+                        match database::create_database_provider(recording_config, Some(&camera_id)).await {
                             Ok(database) => {
-                                let database: Arc<dyn database::DatabaseProvider> = Arc::new(database);
                                 if let Err(e) = recording_manager_ref.add_camera_database(&camera_id, database).await {
                                     error!("Failed to add database for camera '{}': {}", camera_id, e);
                                 } else {
