@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::{RwLock, broadcast};
 use chrono::{DateTime, Utc, Timelike, Datelike};
-use tracing::{info, error, warn, trace};
+use tracing::{info, error, warn, trace, debug};
 use bytes::Bytes;
 
 use crate::config::RecordingConfig;

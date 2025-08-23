@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Camera Control Interface</title>
+    <script src="../../hls.js"></script>
     <style>
         * {
             margin: 0;
@@ -348,7 +349,9 @@
                     <div id="videoContainer">
                         <canvas id="videoCanvas"></canvas>
                         <video id="videoPlayer" style="display: none; width: 100%; height: 100%;" controls></video>
+                        <video id="hlsPlayer" style="display: none; width: 100%; height: 100%;" controls></video>
                         <div id="statusMessage">Ready for commands (responses logged to console)</div>
+                        <div id="modeIndicator" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; display: none;">Frame Mode</div>
                         
                         <div class="video-overlay-controls">
                             <div class="timeline-container" style="width: 100%; display: flex; flex-direction: column;">
@@ -422,10 +425,11 @@
                     </div>
                     <div class="control-group">
                         <label>Playback Mode:</label>
-                        <div style="display: flex; gap: 15px;">
-                            <label><input type="radio" name="playbackMode" value="frames" checked> Frame Recordings</label>
-                            <label><input type="radio" name="playbackMode" value="segments"> MP4 Segments</label>
-                        </div>
+                        <select id="playbackMode" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;">
+                            <option value="frames">Frame Recordings</option>
+                            <option value="segments">MP4 Segments</option>
+                            <option value="hls">HLS Recordings</option>
+                        </select>
                     </div>
                     <div class="control-group">
                         <label>Sort Order:</label>
@@ -455,6 +459,8 @@
                 
                 this.canvas = document.getElementById('videoCanvas');
                 this.ctx = this.canvas.getContext('2d');
+                this.hlsPlayer = document.getElementById('hlsPlayer');
+                this.hls = null; // HLS.js instance
                 
                 this.currentTimestamp = null;
                 this.timelineStart = null;
@@ -468,7 +474,10 @@
                 this.checkActiveRecording();
                 
                 // Auto-load recordings on page load
-                setTimeout(() => this.fetchRecordings(), 1000);
+                setTimeout(() => {
+                    this.fetchRecordings();
+                    this.updateModeIndicator();
+                }, 1000);
             }
             
             setupEventListeners() {
@@ -529,11 +538,15 @@
                 document.getElementById('toDate').value = this.formatDateLocal(toDate);
                 document.getElementById('fromDate').value = this.formatDateLocal(fromDate);
 
-                document.querySelectorAll('input[name="playbackMode"]').forEach(radio => {
-                    radio.addEventListener('change', () => {
-                        this.updateRecordingControlsVisibility();
-                        this.fetchRecordings();
-                    });
+                document.getElementById('playbackMode').addEventListener('change', () => {
+                    this.updateRecordingControlsVisibility();
+                    const mode = document.getElementById('playbackMode').value;
+                    if (mode === 'hls') {
+                        // Auto-refresh recordings when HLS mode is selected
+                        this.logJson({ message: 'HLS Recordings mode selected, refreshing recordings list' });
+                    }
+                    this.fetchRecordings();
+                    this.updateModeIndicator();
                 });
 
                 // Add sort order change listener
@@ -703,13 +716,15 @@
             }
 
             async fetchRecordings() {
-                const mode = document.querySelector('input[name="playbackMode"]:checked').value;
+                const mode = document.getElementById('playbackMode').value;
                 if (mode === 'segments') {
                     return this.fetchVideoSegments();
                 }
+                // For HLS mode, we use the same recordings list as frame mode, so just continue
 
-                // Show canvas, hide video player for frame-by-frame
+                // Show canvas, hide video players for frame-by-frame
                 document.getElementById('videoPlayer').style.display = 'none';
+                document.getElementById('hlsPlayer').style.display = 'none';
                 document.getElementById('videoCanvas').style.display = 'block';
 
                 const from = document.getElementById('fromDate').value;
@@ -831,7 +846,13 @@
                         this.selectedRecording = rec;
                         document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
                         item.classList.add('selected');
-                        this.startReplay(rec);
+                        
+                        const mode = document.getElementById('playbackMode').value;
+                        if (mode === 'hls') {
+                            this.playHlsRecording(rec);
+                        } else {
+                            this.startReplay(rec);
+                        }
                     });
                     container.appendChild(item);
                 });
@@ -881,6 +902,7 @@
 
             playVideoSegment(url) {
                 const videoPlayer = document.getElementById('videoPlayer');
+                const hlsPlayer = document.getElementById('hlsPlayer');
                 const canvas = document.getElementById('videoCanvas');
 
                 console.log('Playing video segment with URL:', url);
@@ -891,8 +913,12 @@
                     this.streamState = 'stopped';
                     this.updatePlayerUI();
                 }
+                
+                // Stop any HLS playback
+                this.stopHls();
 
                 canvas.style.display = 'none';
+                hlsPlayer.style.display = 'none';
                 videoPlayer.style.display = 'block';
 
                 videoPlayer.src = url;
@@ -901,11 +927,14 @@
                     console.error('Video URL was:', url);
                     alert(`Failed to play video: ${error.message}\nURL: ${url}`);
                 });
+                
+                this.updateModeIndicator();
             }
 
             startReplay(recording) {
-                // Show canvas, hide video player
+                // Show canvas, hide video players
                 document.getElementById('videoPlayer').style.display = 'none';
+                document.getElementById('hlsPlayer').style.display = 'none';
                 document.getElementById('videoCanvas').style.display = 'block';
 
                 // Always stop any current stream first to ensure clean state
@@ -937,15 +966,23 @@
             }
 
             startLiveStream() {
-                // Switch back to canvas if we were playing video segments
+                // Switch back to canvas if we were playing video segments or HLS
                 const videoPlayer = document.getElementById('videoPlayer');
+                const hlsPlayer = document.getElementById('hlsPlayer');
                 const canvas = document.getElementById('videoCanvas');
+                
                 if (videoPlayer.style.display !== 'none') {
                     videoPlayer.pause();
                     videoPlayer.src = '';
                     videoPlayer.style.display = 'none';
-                    canvas.style.display = 'block';
                 }
+                
+                if (hlsPlayer.style.display !== 'none') {
+                    this.stopHls();
+                    hlsPlayer.style.display = 'none';
+                }
+                
+                canvas.style.display = 'block';
 
                 this.sendCommand({ cmd: 'live' });
                 this.streamState = 'live';
@@ -1203,12 +1240,12 @@
             }
 
             updateRecordingControlsVisibility() {
-                const mode = document.querySelector('input[name="playbackMode"]:checked').value;
+                const mode = document.getElementById('playbackMode').value;
                 const videoOverlayControls = document.querySelector('.video-overlay-controls');
                 const statusMessage = document.getElementById('statusMessage');
                 
-                if (mode === 'segments') {
-                    // Hide timeline/playback controls overlay and status message in video segments mode
+                if (mode === 'segments' || mode === 'hls') {
+                    // Hide timeline/playback controls overlay and status message in video/HLS mode
                     videoOverlayControls.style.display = 'none';
                     statusMessage.style.display = 'none';
                 } else {
@@ -1230,6 +1267,9 @@
                 if (this.timelineEnd) {
                     document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
                 }
+                
+                // Update mode indicator
+                this.updateModeIndicator();
             }
             
             updateStatus(text, connected) {
@@ -1308,6 +1348,96 @@
                     this.logJson({ ptz_stop_status: resp.status });
                 } catch (e) {
                     this.logJson({ ptz_stop_error: e?.message || String(e) });
+                }
+            }
+            
+            playHlsRecording(recording) {
+                // Hide other players, show HLS player
+                document.getElementById('videoCanvas').style.display = 'none';
+                document.getElementById('videoPlayer').style.display = 'none';
+                document.getElementById('hlsPlayer').style.display = 'block';
+                
+                // Stop any WebSocket streams
+                this.sendCommand({ cmd: 'stop' });
+                this.streamState = 'stopped';
+                
+                // Build HLS URL using the recording's time range
+                const fromTime = new Date(recording.start_time).toISOString();
+                const toTime = recording.end_time ? new Date(recording.end_time).toISOString() : new Date().toISOString();
+                const cameraPath = window.location.pathname.replace('/control.html', '').replace('/control', '');
+                const hlsUrl = `${cameraPath}/control/recordings/hls/timerange?t1=${encodeURIComponent(fromTime)}&t2=${encodeURIComponent(toTime)}`;
+                
+                this.logJson({ message: 'Playing HLS recording', url: hlsUrl, recording: recording });
+                
+                // Clean up any existing HLS instance
+                this.stopHls();
+                
+                // Play HLS stream
+                if (Hls.isSupported()) {
+                    this.hls = new Hls({
+                        debug: false,
+                        enableWorker: true
+                    });
+                    
+                    this.hls.loadSource(hlsUrl);
+                    this.hls.attachMedia(this.hlsPlayer);
+                    
+                    this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        this.logJson({ message: 'HLS manifest parsed successfully' });
+                        this.hlsPlayer.play().catch(error => {
+                            this.logJson({ error: 'Failed to play HLS', details: error.message });
+                        });
+                    });
+                    
+                    this.hls.on(Hls.Events.ERROR, (event, data) => {
+                        this.logJson({ error: 'HLS Error', type: data.type, details: data.details });
+                        if (data.fatal) {
+                            this.stopHls();
+                        }
+                    });
+                } else if (this.hlsPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Native HLS support (Safari)
+                    this.hlsPlayer.src = hlsUrl;
+                    this.hlsPlayer.play().catch(error => {
+                        this.logJson({ error: 'Failed to play HLS natively', details: error.message });
+                    });
+                } else {
+                    this.logJson({ error: 'HLS not supported in this browser' });
+                }
+                
+                this.updateModeIndicator();
+            }
+            
+            stopHls() {
+                if (this.hls) {
+                    this.hls.destroy();
+                    this.hls = null;
+                }
+                
+                if (this.hlsPlayer) {
+                    this.hlsPlayer.pause();
+                    this.hlsPlayer.src = '';
+                }
+            }
+            
+            updateModeIndicator() {
+                const mode = document.getElementById('playbackMode').value;
+                const indicator = document.getElementById('modeIndicator');
+                
+                if (this.streamState === 'live') {
+                    indicator.textContent = 'Live Mode';
+                    indicator.style.display = 'block';
+                } else if (this.streamState === 'replaying') {
+                    indicator.textContent = 'Frame Mode';
+                    indicator.style.display = 'block';
+                } else if (mode === 'segments' && document.getElementById('videoPlayer').style.display !== 'none') {
+                    indicator.textContent = 'MP4 Mode';
+                    indicator.style.display = 'block';
+                } else if (mode === 'hls' && document.getElementById('hlsPlayer').style.display !== 'none') {
+                    indicator.textContent = 'HLS Mode';
+                    indicator.style.display = 'block';
+                } else {
+                    indicator.style.display = 'none';
                 }
             }
         }
