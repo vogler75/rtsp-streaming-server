@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::{RwLock, broadcast};
-use chrono::{DateTime, Utc, Timelike, Datelike};
+use chrono::{DateTime, Utc, Datelike};
 use tracing::{info, error, warn, trace, debug};
 use bytes::Bytes;
 
@@ -143,16 +143,39 @@ impl RecordingManager {
         camera_id: String,
         mut session_id: i64,
         mut frame_receiver: broadcast::Receiver<Bytes>,
+        camera_config: crate::config::CameraConfig,
     ) {
         let mut frame_number = 0i64;
-        let mut last_hour = Utc::now().hour(); // Track the hour of the last frame
+        let mut last_session_check = Utc::now(); // Track when we last checked for session segmentation
+        
+        // Determine the effective session segment duration
+        // Priority: camera-specific setting > global setting
+        // 0 = disabled, None/null = use global, n = minutes
+        let effective_session_segment_minutes = match camera_config.get_session_segment_minutes() {
+            Some(0) => {
+                info!("Session segmentation disabled for camera '{}' (camera override = 0)", camera_id);
+                None // Disabled
+            }
+            Some(minutes) => {
+                info!("Using camera-specific session segmentation for '{}': {} minutes", camera_id, minutes);
+                Some(minutes)
+            }
+            None => {
+                if config.session_segment_minutes == 0 {
+                    info!("Session segmentation disabled for camera '{}' (global setting = 0)", camera_id);
+                    None // Disabled
+                } else {
+                    info!("Using global session segmentation for '{}': {} minutes", camera_id, config.session_segment_minutes);
+                    Some(config.session_segment_minutes)
+                }
+            }
+        };
 
         loop {
             match frame_receiver.recv().await {
                 Ok(frame_data) => {
                     frame_number += 1;
                     let timestamp = Utc::now();
-                    let current_hour = timestamp.hour();
 
                     // Check if recording is still active
                     let active_recordings_guard = active_recordings.read().await;
@@ -164,10 +187,12 @@ impl RecordingManager {
                         break;
                     }
 
-                    // Check for hourly session splitting (when hour changes)
-                    if last_hour != current_hour {
-                        info!("Hour changed from {} to {} for camera '{}', splitting recording session {}", 
-                                last_hour, current_hour, camera_id, session_id);
+                    // Check for session segmentation based on configured interval (if enabled)
+                    if let Some(segment_minutes) = effective_session_segment_minutes {
+                        let session_segment_duration = chrono::Duration::minutes(segment_minutes as i64);
+                        if timestamp.signed_duration_since(last_session_check) >= session_segment_duration {
+                            info!("Session segment interval ({} minutes) reached for camera '{}', splitting recording session {}", 
+                                  segment_minutes, camera_id, session_id);
                         
                         // Get the recording reason from the database to use for the new session
                         if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
@@ -176,14 +201,14 @@ impl RecordingManager {
                                 
                                 // Stop the current session
                                 if let Err(e) = database.stop_recording_session(session_id).await {
-                                    error!("Failed to stop recording session for hourly split: {}", e);
+                                    error!("Failed to stop recording session for segment split: {}", e);
                                 } else {
-                                    info!("Stopped recording session {} for hourly split", session_id);
+                                    info!("Stopped recording session {} for segment split", session_id);
                                     
                                     // Create a new session with the same reason
                                     match database.create_recording_session(&camera_id, reason.as_deref()).await {
                                         Ok(new_session_id) => {
-                                            info!("Created new recording session {} for hourly continuation", new_session_id);
+                                            info!("Created new recording session {} for segment continuation", new_session_id);
                                             
                                             // Update the active recording with new session info
                                             let mut active_recordings_guard = active_recordings.write().await;
@@ -199,7 +224,7 @@ impl RecordingManager {
                                             frame_number = 1; // Reset frame number for new session
                                         }
                                         Err(e) => {
-                                            error!("Failed to create new recording session for hourly split: {}", e);
+                                            error!("Failed to create new recording session for segment split: {}", e);
                                             // Continue with the old session rather than stopping
                                         }
                                     }
@@ -207,8 +232,9 @@ impl RecordingManager {
                             }
                         }
                         
-                        // Update the last hour tracker
-                        last_hour = current_hour;
+                            // Update the last session check timestamp
+                            last_session_check = timestamp;
+                        }
                     }
 
                     // Check frame size
@@ -288,6 +314,7 @@ impl RecordingManager {
                     camera_id.clone(),
                     session_id,
                     frame_receiver,
+                    camera_config.clone(),
                 ));
                 tasks.push(task);
             }

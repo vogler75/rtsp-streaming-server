@@ -16,6 +16,7 @@
   "recording": {
     "cleanup_interval_hours": 1,
     "database_path": "recordings",
+    "session_segment_minutes": 60,
     "frame_storage_enabled": true,
     "frame_storage_retention": "1h",
     "hls_segment_seconds": 6,
@@ -23,9 +24,9 @@
     "hls_storage_retention": "30d",
     "max_frame_size": 10485760,
     "mp4_framerate": 5,
-    "video_segment_minutes": 5,
-    "video_storage_retention": "30d",
-    "video_storage_type": "disabled"
+    "mp4_segment_minutes": 5,
+    "mp4_storage_retention": "30d",
+    "mp4_storage_type": "disabled"
   },
   "server": {
     "admin_token": "test",

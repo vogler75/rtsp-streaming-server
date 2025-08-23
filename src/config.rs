@@ -63,6 +63,11 @@ pub struct CameraConfig {
 }
 
 impl CameraConfig {
+    /// Get the effective session segment minutes setting
+    pub fn get_session_segment_minutes(&self) -> Option<u64> {
+        self.recording.as_ref()?.session_segment_minutes
+    }
+    
     /// Get the effective frame storage enabled setting
     pub fn get_frame_storage_enabled(&self) -> Option<bool> {
         self.recording.as_ref()?.frame_storage_enabled
@@ -217,6 +222,9 @@ pub struct CameraMqttConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraRecordingConfig {
+    // General settings
+    pub session_segment_minutes: Option<u64>, // Override global session segmentation (None=use global, 0=disabled, n=minutes)
+    
     // Frame storage settings
     pub frame_storage_enabled: Option<bool>, // Override global frame storage setting
     pub frame_storage_retention: Option<String>, // Override global frame retention (e.g., "10m", "5h", "24h")
@@ -238,6 +246,8 @@ pub struct RecordingConfig {
     #[serde(default)]
     pub frame_storage_enabled: bool,
     pub database_path: String,
+    #[serde(default = "default_session_segment_minutes")]
+    pub session_segment_minutes: u64, // Duration for session segmentation in minutes (default: 60)
     #[serde(default = "default_max_frame_size")]
     pub max_frame_size: usize, // Maximum frame size in bytes for database storage
     #[serde(default)]
@@ -267,6 +277,7 @@ pub struct RecordingConfig {
 }
 
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
+fn default_session_segment_minutes() -> u64 { 60 } // 60 minutes (1 hour)
 fn default_mp4_storage_retention() -> String { "30d".to_string() }
 fn default_mp4_segment_minutes() -> u64 { 5 }
 fn default_mp4_framerate() -> f32 { 5.0 }
@@ -322,6 +333,7 @@ impl Default for Config {
             recording: Some(RecordingConfig {
                 frame_storage_enabled: false,
                 database_path: "recordings".to_string(),
+                session_segment_minutes: default_session_segment_minutes(),
                 max_frame_size: default_max_frame_size(),
                 frame_storage_retention: "24h".to_string(),
                 mp4_storage_type: Mp4StorageType::Disabled,
