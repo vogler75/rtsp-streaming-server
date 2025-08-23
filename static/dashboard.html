@@ -672,7 +672,7 @@
                             </div>
                             <div class="form-group">
                                 <label>MP4 Video Storage Override</label>
-                                <select id="video_storage_type" name="video_storage_type">
+                                <select id="mp4_storage_type" name="mp4_storage_type">
                                     <option value="">Use system default</option>
                                     <option value="disabled">Disabled</option>
                                     <option value="filesystem">Filesystem</option>
@@ -682,12 +682,12 @@
                             </div>
                             <div class="form-group">
                                 <label>MP4 Retention Period</label>
-                                <input type="text" id="video_storage_retention" name="video_storage_retention" placeholder="30d">
+                                <input type="text" id="mp4_storage_retention" name="mp4_storage_retention" placeholder="30d">
                                 <span class="help-text">Override global MP4 retention (e.g., 30d, 7d, 24h)</span>
                             </div>
                             <div class="form-group">
                                 <label>MP4 Segment Duration (minutes)</label>
-                                <input type="number" id="video_segment_minutes" name="video_segment_minutes" placeholder="5" min="1" max="60">
+                                <input type="number" id="mp4_segment_minutes" name="mp4_segment_minutes" placeholder="5" min="1" max="60">
                                 <span class="help-text">Override global segment length (1-60 minutes)</span>
                             </div>
                             <div class="form-group">
@@ -1044,7 +1044,7 @@
                             </div>
                             <div class="form-group">
                                 <label>MP4 Video Storage</label>
-                                <select id="config_recording_video_storage_type">
+                                <select id="config_recording_mp4_storage_type">
                                     <option value="disabled">Disabled - No MP4 recordings</option>
                                     <option value="filesystem">Filesystem - Store files on disk</option>
                                     <option value="database">Database - Store in database (diskless)</option>
@@ -1073,12 +1073,12 @@
                             </div>
                             <div class="form-group">
                                 <label>MP4 Storage Retention</label>
-                                <input type="text" id="config_recording_video_storage_retention" placeholder="30d">
+                                <input type="text" id="config_recording_mp4_storage_retention" placeholder="30d">
                                 <span class="help-text">Auto-delete MP4 videos older than this (e.g., 30d, 7d, 24h)</span>
                             </div>
                             <div class="form-group">
                                 <label>MP4 Segment Duration (minutes)</label>
-                                <input type="number" id="config_recording_video_segment_minutes" placeholder="5" min="1" max="60">
+                                <input type="number" id="config_recording_mp4_segment_minutes" placeholder="5" min="1" max="60">
                                 <span class="help-text">Duration of each MP4 video segment (1-60 minutes)</span>
                             </div>
                             <div class="form-group">
@@ -1420,9 +1420,9 @@
             if (config.recording) {
                 document.getElementById('frame_storage_enabled').value = (config.recording.frame_storage_enabled !== undefined && config.recording.frame_storage_enabled !== null) ? config.recording.frame_storage_enabled.toString() : '';
                 document.getElementById('frame_storage_retention').value = config.recording.frame_storage_retention || '';
-                document.getElementById('video_storage_type').value = config.recording.video_storage_type || '';
-                document.getElementById('video_storage_retention').value = config.recording.video_storage_retention || '';
-                document.getElementById('video_segment_minutes').value = config.recording.video_segment_minutes || '';
+                document.getElementById('mp4_storage_type').value = config.recording.mp4_storage_type || '';
+                document.getElementById('mp4_storage_retention').value = config.recording.mp4_storage_retention || '';
+                document.getElementById('mp4_segment_minutes').value = config.recording.mp4_segment_minutes || '';
                 // HLS settings
                 document.getElementById('hls_storage_enabled').value = (config.recording.hls_storage_enabled !== undefined && config.recording.hls_storage_enabled !== null) ? config.recording.hls_storage_enabled.toString() : '';
                 document.getElementById('hls_storage_retention').value = config.recording.hls_storage_retention || '';
@@ -1430,9 +1430,9 @@
             } else {
                 document.getElementById('frame_storage_enabled').value = '';
                 document.getElementById('frame_storage_retention').value = '';
-                document.getElementById('video_storage_type').value = '';
-                document.getElementById('video_storage_retention').value = '';
-                document.getElementById('video_segment_minutes').value = '';
+                document.getElementById('mp4_storage_type').value = '';
+                document.getElementById('mp4_storage_retention').value = '';
+                document.getElementById('mp4_segment_minutes').value = '';
                 // HLS settings
                 document.getElementById('hls_storage_enabled').value = '';
                 document.getElementById('hls_storage_retention').value = '';
@@ -1547,13 +1547,13 @@
             
             // Recording settings
             document.getElementById('config_recording_frame_storage_enabled').value = (config.recording?.frame_storage_enabled || false).toString();
-            document.getElementById('config_recording_video_storage_type').value = config.recording?.video_storage_type || 'filesystem';
+            document.getElementById('config_recording_mp4_storage_type').value = config.recording?.mp4_storage_type || 'filesystem';
             document.getElementById('config_recording_mp4_framerate').value = config.recording?.mp4_framerate || '5.0';
             document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
             document.getElementById('config_recording_max_frame_size').value = config.recording?.max_frame_size || '';
             document.getElementById('config_recording_frame_storage_retention').value = config.recording?.frame_storage_retention || '';
-            document.getElementById('config_recording_video_storage_retention').value = config.recording?.video_storage_retention || '';
-            document.getElementById('config_recording_video_segment_minutes').value = config.recording?.video_segment_minutes || '';
+            document.getElementById('config_recording_mp4_storage_retention').value = config.recording?.mp4_storage_retention || '';
+            document.getElementById('config_recording_mp4_segment_minutes').value = config.recording?.mp4_segment_minutes || '';
             document.getElementById('config_recording_cleanup_interval_hours').value = config.recording?.cleanup_interval_hours || '';
             // HLS settings
             document.getElementById('config_recording_hls_storage_enabled').value = (config.recording?.hls_storage_enabled || false).toString();
@@ -1597,13 +1597,13 @@
                 },
                 recording: {
                     frame_storage_enabled: document.getElementById('config_recording_frame_storage_enabled').value === 'true',
-                    video_storage_type: document.getElementById('config_recording_video_storage_type').value || 'filesystem',
+                    mp4_storage_type: document.getElementById('config_recording_mp4_storage_type').value || 'filesystem',
                     mp4_framerate: parseFloat(document.getElementById('config_recording_mp4_framerate').value) || 5.0,
                     database_path: document.getElementById('config_recording_database_path').value || "recordings",
                     max_frame_size: parseInt(document.getElementById('config_recording_max_frame_size').value) || 10485760,
                     frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
-                    video_storage_retention: document.getElementById('config_recording_video_storage_retention').value || "30d",
-                    video_segment_minutes: parseInt(document.getElementById('config_recording_video_segment_minutes').value) || 5,
+                    mp4_storage_retention: document.getElementById('config_recording_mp4_storage_retention').value || "30d",
+                    mp4_segment_minutes: parseInt(document.getElementById('config_recording_mp4_segment_minutes').value) || 5,
                     cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1,
                     hls_storage_enabled: document.getElementById('config_recording_hls_storage_enabled').value === 'true',
                     hls_storage_retention: document.getElementById('config_recording_hls_storage_retention').value || "30d",
@@ -1819,9 +1819,9 @@
             // Add per-camera recording settings if configured
             const frameStorageEnabled = formData.get('frame_storage_enabled');
             const frameStorageRetention = formData.get('frame_storage_retention');
-            const videoStorageType = formData.get('video_storage_type');
-            const videoStorageRetention = formData.get('video_storage_retention');
-            const videoSegmentMinutes = formData.get('video_segment_minutes');
+            const videoStorageType = formData.get('mp4_storage_type');
+            const videoStorageRetention = formData.get('mp4_storage_retention');
+            const videoSegmentMinutes = formData.get('mp4_segment_minutes');
             // HLS settings
             const hlsStorageEnabled = formData.get('hls_storage_enabled');
             const hlsStorageRetention = formData.get('hls_storage_retention');
@@ -1840,13 +1840,13 @@
                     config.recording.frame_storage_retention = frameStorageRetention;
                 }
                 if (videoStorageType !== '' && videoStorageType !== null) {
-                    config.recording.video_storage_type = videoStorageType;
+                    config.recording.mp4_storage_type = videoStorageType;
                 }
                 if (videoStorageRetention) {
-                    config.recording.video_storage_retention = videoStorageRetention;
+                    config.recording.mp4_storage_retention = videoStorageRetention;
                 }
                 if (videoSegmentMinutes) {
-                    config.recording.video_segment_minutes = parseInt(videoSegmentMinutes);
+                    config.recording.mp4_segment_minutes = parseInt(videoSegmentMinutes);
                 }
                 // HLS settings
                 if (hlsStorageEnabled !== '' && hlsStorageEnabled !== null) {

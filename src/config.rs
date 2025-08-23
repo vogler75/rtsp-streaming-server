@@ -74,18 +74,18 @@ impl CameraConfig {
     }
     
     /// Get the effective video storage type
-    pub fn get_video_storage_type(&self) -> Option<&Mp4StorageType> {
-        self.recording.as_ref()?.video_storage_type.as_ref()
+    pub fn get_mp4_storage_type(&self) -> Option<&Mp4StorageType> {
+        self.recording.as_ref()?.mp4_storage_type.as_ref()
     }
     
     /// Get the effective video storage retention setting
-    pub fn get_video_storage_retention(&self) -> Option<&String> {
-        self.recording.as_ref()?.video_storage_retention.as_ref()
+    pub fn get_mp4_storage_retention(&self) -> Option<&String> {
+        self.recording.as_ref()?.mp4_storage_retention.as_ref()
     }
     
     /// Get the effective video segment minutes setting
-    pub fn get_video_segment_minutes(&self) -> Option<u64> {
-        self.recording.as_ref()?.video_segment_minutes
+    pub fn get_mp4_segment_minutes(&self) -> Option<u64> {
+        self.recording.as_ref()?.mp4_segment_minutes
     }
     
     /// Get the effective HLS storage enabled setting
@@ -222,9 +222,9 @@ pub struct CameraRecordingConfig {
     pub frame_storage_retention: Option<String>, // Override global frame retention (e.g., "10m", "5h", "24h")
     
     // MP4 recording settings
-    pub video_storage_type: Option<Mp4StorageType>, // Override global video storage type
-    pub video_storage_retention: Option<String>, // Override global video retention (e.g., "30d")
-    pub video_segment_minutes: Option<u64>, // Override global segment duration
+    pub mp4_storage_type: Option<Mp4StorageType>, // Override global video storage type
+    pub mp4_storage_retention: Option<String>, // Override global video retention (e.g., "30d")
+    pub mp4_segment_minutes: Option<u64>, // Override global segment duration
     
     // HLS storage settings
     pub hls_storage_enabled: Option<bool>, // Override global HLS storage setting
@@ -245,11 +245,11 @@ pub struct RecordingConfig {
     
     // NEW: MP4 video storage settings
     #[serde(default)]
-    pub video_storage_type: Mp4StorageType,
-    #[serde(default = "default_video_storage_retention")]
-    pub video_storage_retention: String, // Max age for video recordings (e.g., "30d")
-    #[serde(default = "default_video_segment_minutes")]
-    pub video_segment_minutes: u64, // Duration of each video segment in minutes
+    pub mp4_storage_type: Mp4StorageType,
+    #[serde(default = "default_mp4_storage_retention")]
+    pub mp4_storage_retention: String, // Max age for video recordings (e.g., "30d")
+    #[serde(default = "default_mp4_segment_minutes")]
+    pub mp4_segment_minutes: u64, // Duration of each video segment in minutes
     #[serde(default = "default_mp4_framerate")]
     pub mp4_framerate: f32, // Framerate for MP4 recordings (e.g., 5.0, 15.0, 30.0)
     
@@ -267,8 +267,8 @@ pub struct RecordingConfig {
 }
 
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
-fn default_video_storage_retention() -> String { "30d".to_string() }
-fn default_video_segment_minutes() -> u64 { 5 }
+fn default_mp4_storage_retention() -> String { "30d".to_string() }
+fn default_mp4_segment_minutes() -> u64 { 5 }
 fn default_mp4_framerate() -> f32 { 5.0 }
 fn default_hls_storage_retention() -> String { "30d".to_string() }
 fn default_hls_segment_seconds() -> u64 { 6 }
@@ -324,9 +324,9 @@ impl Default for Config {
                 database_path: "recordings".to_string(),
                 max_frame_size: default_max_frame_size(),
                 frame_storage_retention: "24h".to_string(),
-                video_storage_type: Mp4StorageType::Disabled,
-                video_storage_retention: default_video_storage_retention(),
-                video_segment_minutes: default_video_segment_minutes(),
+                mp4_storage_type: Mp4StorageType::Disabled,
+                mp4_storage_retention: default_mp4_storage_retention(),
+                mp4_segment_minutes: default_mp4_segment_minutes(),
                 mp4_framerate: default_mp4_framerate(),
                 cleanup_interval_hours: default_cleanup_interval_hours(),
                 hls_storage_enabled: false,

@@ -35,8 +35,8 @@ frame_storage_retention = "1h"  # Delete frame recordings older than this (e.g.,
 
 # MP4 video segment recording for efficient, long-term storage
 video_storage_enabled = true
-video_storage_retention = "7d" # Delete video segments older than this (e.g., "30d")
-video_segment_minutes = 5 # Duration of each MP4 video segment in minutes
+mp4_storage_retention = "7d" # Delete video segments older than this (e.g., "30d")
+mp4_segment_minutes = 5 # Duration of each MP4 video segment in minutes
 
 # Global cleanup settings
 cleanup_interval_hours = 1  # How often to run the cleanup process for old data

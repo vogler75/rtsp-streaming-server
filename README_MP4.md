@@ -10,8 +10,8 @@ How the MP4 Recording System Works:
       "frame_storage_enabled": true,      // SQLite frame storage
       "video_storage_enabled": true,      // MP4 video segment creation
       "database_path": "recordings",
-      "video_segment_minutes": 5,         // Duration of each MP4 segment
-      "video_storage_retention": "30d"    // Auto-cleanup after 30 days
+      "mp4_segment_minutes": 5,         // Duration of each MP4 segment
+      "mp4_storage_retention": "30d"    // Auto-cleanup after 30 days
     }
   }
   ```
@@ -20,8 +20,8 @@ How the MP4 Recording System Works:
   ```toml
   [recording]
   video_storage_enabled = true
-  video_segment_minutes = 5
-  video_storage_retention = "30d"
+  mp4_segment_minutes = 5
+  mp4_storage_retention = "30d"
   ```
 
   1. Frame Generation & Streaming
@@ -110,7 +110,7 @@ How the MP4 Recording System Works:
   - Cleanup runs every `cleanup_interval_hours` (default: 1 hour)
   
   Example cleanup process:
-  1. Check video_storage_retention (e.g., "30d")
+  1. Check mp4_storage_retention (e.g., "30d")
   2. Calculate cutoff date (30 days ago)
   3. Scan directory structure for each camera
   4. Delete files older than cutoff: cam1_20240719_*.mp4 (if today is 2024-08-19)

@@ -308,9 +308,9 @@ Create a JSON file for each camera in the `cameras/` directory:
   "recording": {
     "frame_storage_enabled": true,
     "frame_storage_retention": "24h",
-    "video_storage_type": "filesystem",
-    "video_storage_retention": "7d",
-    "video_segment_minutes": 5
+    "mp4_storage_type": "filesystem",
+    "mp4_storage_retention": "7d",
+    "mp4_segment_minutes": 5
   },
   
   "transcoding_override": {
@@ -771,14 +771,14 @@ The recording system supports three storage formats with independent configurati
 {
   "recording": {
     "frame_storage_enabled": true,
-    "video_storage_type": "database",
+    "mp4_storage_type": "database",
     "hls_storage_enabled": true,
     "database_path": "recordings",
     "max_frame_size": 10485760,
     "mp4_framerate": 5.0,
     "frame_storage_retention": "7d",
-    "video_storage_retention": "30d",
-    "video_segment_minutes": 5,
+    "mp4_storage_retention": "30d",
+    "mp4_segment_minutes": 5,
     "hls_storage_retention": "30d",
     "hls_segment_seconds": 6,
     "cleanup_interval_hours": 1
@@ -790,7 +790,7 @@ The recording system supports three storage formats with independent configurati
 
 ##### Core Settings
 - **frame_storage_enabled**: Enable/disable frame-by-frame SQLite storage
-- **video_storage_type**: MP4 storage mode: `"disabled"`, `"filesystem"`, or `"database"`  
+- **mp4_storage_type**: MP4 storage mode: `"disabled"`, `"filesystem"`, or `"database"`  
 - **hls_storage_enabled**: Enable/disable HLS segment pre-generation
 - **database_path**: Base path for database files and video segments
 - **max_frame_size**: Maximum size for a single frame in bytes (SQLite storage)
@@ -800,7 +800,7 @@ The recording system supports three storage formats with independent configurati
 - **frame_storage_retention**: Maximum age for frame recordings before deletion
   - Format: `"10m"` (minutes), `"5h"` (hours), `"7d"` (days)  
   - **Recommended**: 1-7 days for precise seeking and analysis
-- **video_storage_retention**: Maximum age for MP4 segments before deletion
+- **mp4_storage_retention**: Maximum age for MP4 segments before deletion
   - Format: `"10m"` (minutes), `"5h"` (hours), `"30d"` (days)
   - **Recommended**: 30-90 days for long-term archival
 - **hls_storage_retention**: Maximum age for HLS segments before deletion
@@ -808,7 +808,7 @@ The recording system supports three storage formats with independent configurati
   - **Recommended**: 7-30 days for fast streaming access
 
 ##### Segment Configuration  
-- **video_segment_minutes**: Duration of each MP4 segment (default: 5 minutes)
+- **mp4_segment_minutes**: Duration of each MP4 segment (default: 5 minutes)
 - **hls_segment_seconds**: Duration of each HLS segment (default: 6 seconds)
 - **cleanup_interval_hours**: How often to run automatic cleanup (default: 1 hour)
 
@@ -829,9 +829,9 @@ You can override global recording settings for individual cameras in their confi
   "recording": {
     "frame_storage_enabled": true,
     "frame_storage_retention": "1d",
-    "video_storage_type": "database",
-    "video_storage_retention": "14d",
-    "video_segment_minutes": 10,
+    "mp4_storage_type": "database",
+    "mp4_storage_retention": "14d",
+    "mp4_segment_minutes": 10,
     "hls_storage_enabled": true,
     "hls_storage_retention": "7d",
     "hls_segment_seconds": 6
@@ -852,7 +852,7 @@ When `frame_storage_retention` is configured:
 5. Processes each camera independently based on its configuration
 
 #### Video Storage Cleanup
-When `video_storage_retention` is configured:
+When `mp4_storage_retention` is configured:
 1. Scans MP4 files in the recordings directory
 2. Deletes video segments older than the retention period based on filename timestamp
 3. Uses hierarchical directory structure for organization (YYYY/MM/DD)

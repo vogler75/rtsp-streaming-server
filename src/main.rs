@@ -287,7 +287,7 @@ async fn main() -> Result<()> {
 
     // Initialize recording manager if enabled
     let recording_manager: Option<Arc<RecordingManager>> = if let Some(recording_config) = &config.recording {
-        if recording_config.frame_storage_enabled || recording_config.video_storage_type != config::Mp4StorageType::Disabled {
+        if recording_config.frame_storage_enabled || recording_config.mp4_storage_type != config::Mp4StorageType::Disabled {
             info!("Initializing recording system with database directory: {}", recording_config.database_path);
             
             // Directory already created and verified earlier

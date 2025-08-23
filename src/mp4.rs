@@ -147,9 +147,9 @@ pub async fn serve_hls_playlist(
         .unwrap_or(recording_config.hls_storage_enabled);
     
     // Also check MP4 storage type to determine priority
-    let video_storage_type = camera_config.get_video_storage_type()
-        .unwrap_or(&recording_config.video_storage_type);
-    let mp4_enabled = video_storage_type != &config::Mp4StorageType::Disabled;
+    let mp4_storage_type = camera_config.get_mp4_storage_type()
+        .unwrap_or(&recording_config.mp4_storage_type);
+    let mp4_enabled = mp4_storage_type != &config::Mp4StorageType::Disabled;
 
     // When both HLS and MP4 are enabled, ALWAYS prefer HLS
     if hls_enabled {

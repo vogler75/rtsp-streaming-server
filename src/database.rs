@@ -1382,15 +1382,15 @@ impl DatabaseProvider for SqliteDatabase {
         };
 
         // Get camera-specific config or use global config
-        let (frame_retention, video_retention, video_storage_type, hls_enabled, hls_retention) = if let Some(cam_id) = &camera_id {
+        let (frame_retention, video_retention, mp4_storage_type, hls_enabled, hls_retention) = if let Some(cam_id) = &camera_id {
             if let Some(camera_config) = camera_configs.get(cam_id) {
                 // Use camera-specific retention settings if available, otherwise fall back to global
                 let frame_retention = camera_config.get_frame_storage_retention()
                     .unwrap_or(&config.frame_storage_retention);
-                let video_retention = camera_config.get_video_storage_retention()
-                    .unwrap_or(&config.video_storage_retention);
-                let video_type = camera_config.get_video_storage_type()
-                    .unwrap_or(&config.video_storage_type);
+                let video_retention = camera_config.get_mp4_storage_retention()
+                    .unwrap_or(&config.mp4_storage_retention);
+                let video_type = camera_config.get_mp4_storage_type()
+                    .unwrap_or(&config.mp4_storage_type);
                 let hls_enabled = camera_config.get_hls_storage_enabled()
                     .unwrap_or(config.hls_storage_enabled);
                 let hls_retention = camera_config.get_hls_storage_retention()
@@ -1399,16 +1399,16 @@ impl DatabaseProvider for SqliteDatabase {
             } else {
                 // Camera not found in configs, use global settings
                 (config.frame_storage_retention.clone(), 
-                 config.video_storage_retention.clone(),
-                 config.video_storage_type.clone(),
+                 config.mp4_storage_retention.clone(),
+                 config.mp4_storage_type.clone(),
                  config.hls_storage_enabled,
                  config.hls_storage_retention.clone())
             }
         } else {
             // No camera_id found, use global settings
             (config.frame_storage_retention.clone(), 
-             config.video_storage_retention.clone(),
-             config.video_storage_type.clone(),
+             config.mp4_storage_retention.clone(),
+             config.mp4_storage_type.clone(),
              config.hls_storage_enabled,
              config.hls_storage_retention.clone())
         };
@@ -1427,7 +1427,7 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         // Cleanup video segments with camera-specific or global retention
-        if video_storage_type != crate::config::Mp4StorageType::Disabled {
+        if mp4_storage_type != crate::config::Mp4StorageType::Disabled {
             if let Ok(duration) = humantime::parse_duration(&video_retention) {
                 if duration.as_secs() > 0 {
                     let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
