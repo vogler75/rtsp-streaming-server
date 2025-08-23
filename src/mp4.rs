@@ -3,10 +3,31 @@ use chrono::{DateTime, Utc};
 use tracing::{error, info, warn, debug};
 use serde::Deserialize;
 use tokio::process::Command;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use crate::{config, recording::RecordingManager};
 use crate::AppState;
 use crate::database::{HlsPlaylist, HlsSegment};
+
+// Simple LRU cache for MP4 segments with 5 minute TTL
+lazy_static::lazy_static! {
+    static ref MP4_SEGMENT_CACHE: Arc<RwLock<HashMap<String, CachedSegment>>> = Arc::new(RwLock::new(HashMap::new()));
+}
+
+struct CachedSegment {
+    data: Vec<u8>,
+    size_bytes: i64,
+    cached_at: Instant,
+}
+
+impl CachedSegment {
+    fn is_expired(&self) -> bool {
+        self.cached_at.elapsed() > Duration::from_secs(300) // 5 minute TTL
+    }
+}
 
 /// Cleanup old HLS temporary directories on server startup
 /// (Only needed for any leftover temp directories from database-based HLS generation)
@@ -663,44 +684,79 @@ async fn stream_segment_from_database(
     };
     drop(camera_streams);
 
-    // Extract timestamp from filename and use efficient time-based lookup
-    let segment = if let Some(timestamp) = parse_timestamp_from_filename(filename) {
-        match database.get_video_segment_by_time(camera_id, timestamp).await {
-            Ok(Some(segment)) => segment,
-            Ok(None) => {
-                return (axum::http::StatusCode::NOT_FOUND, "Recording not found").into_response();
+    // Create cache key from camera_id and filename
+    let cache_key = format!("{}:{}", camera_id, filename);
+    
+    // Try to get from cache first
+    let (data, file_size) = {
+        let cache = MP4_SEGMENT_CACHE.read().await;
+        if let Some(cached) = cache.get(&cache_key) {
+            if !cached.is_expired() {
+                debug!("Cache HIT for segment '{}', serving from cache", cache_key);
+                (cached.data.clone(), cached.size_bytes as u64)
+            } else {
+                debug!("Cache EXPIRED for segment '{}', fetching from database", cache_key);
+                (Vec::new(), 0) // Will fetch from database
             }
-            Err(e) => {
-                error!("Failed to get segment by time: {}", e);
-                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-            }
+        } else {
+            debug!("Cache MISS for segment '{}', fetching from database", cache_key);
+            (Vec::new(), 0) // Will fetch from database
         }
-    } else {
-        error!("Invalid filename format: {}. Expected format: YYYY-MM-DDTHH:MM:SS.ffffffZ or YYYY-MM-DDTHH-MM-SSZ.mp4", filename);
-        return (axum::http::StatusCode::BAD_REQUEST, "Invalid filename format").into_response();
     };
+    
+    // If not in cache or expired, fetch from database
+    let (data, file_size) = if data.is_empty() {
+        // Extract timestamp from filename and use efficient time-based lookup
+        let segment = if let Some(timestamp) = parse_timestamp_from_filename(filename) {
+            match database.get_video_segment_by_time(camera_id, timestamp).await {
+                Ok(Some(segment)) => segment,
+                Ok(None) => {
+                    return (axum::http::StatusCode::NOT_FOUND, "Recording not found").into_response();
+                }
+                Err(e) => {
+                    error!("Failed to get segment by time: {}", e);
+                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                }
+            }
+        } else {
+            error!("Invalid filename format: {}. Expected format: YYYY-MM-DDTHH:MM:SS.ffffffZ or YYYY-MM-DDTHH-MM-SSZ.mp4", filename);
+            return (axum::http::StatusCode::BAD_REQUEST, "Invalid filename format").into_response();
+        };
 
-    let file_size = segment.size_bytes as u64;
-    let actual_data_size = segment.mp4_data.as_ref().map(|d| d.len()).unwrap_or(0) as u64;
+        let file_size = segment.size_bytes as u64;
+        let data = match segment.mp4_data {
+            Some(blob_data) => blob_data,
+            None => {
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Segment data not found in database").into_response();
+            }
+        };
+        
+        // Cache the segment data
+        {
+            let mut cache = MP4_SEGMENT_CACHE.write().await;
+            
+            // Clean up expired entries while we have write lock
+            cache.retain(|_, v| !v.is_expired());
+            
+            // Add new entry to cache
+            cache.insert(cache_key.clone(), CachedSegment {
+                data: data.clone(),
+                size_bytes: segment.size_bytes,
+                cached_at: Instant::now(),
+            });
+            debug!("Cached segment '{}' ({} bytes) for future requests", cache_key, data.len());
+        }
+        
+        (data, file_size)
+    } else {
+        (data, file_size)
+    };
     
-    if file_size != actual_data_size {
-        warn!("Size mismatch for segment: database size_bytes={}, actual data size={}", 
-              file_size, actual_data_size);
-    }
-    
-    debug!("Database segment info: filename='{}', database_size={}, actual_size={}", 
-           filename, file_size, actual_data_size);
+    debug!("Database segment info: filename='{}', file_size={}", filename, file_size);
     
     let (start, end) = calculate_range(range, file_size);
     debug!("Database range calculation: requested={:?}, file_size={}, calculated={}..{}", 
            range, file_size, start, end);
-
-    let data = match segment.mp4_data {
-        Some(blob_data) => blob_data,
-        None => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Segment data not found in database").into_response();
-        }
-    };
 
     let chunk = if start == 0 && end == file_size.saturating_sub(1) {
         data
@@ -747,67 +803,111 @@ async fn stream_segment_from_filesystem(
     debug!("stream_segment_from_filesystem called: camera_id='{}', filename='{}', range='{}'", 
            camera_id, filename, range_str);
     
-    let base_path = std::path::PathBuf::from(&recording_config.database_path);
-
-    // Extract timestamp from filename to construct the exact path
-    let file_path = if let Some(timestamp) = parse_timestamp_from_filename(filename) {
-        // Construct path based on timestamp: base_path/camera_id/year/month/day/filename
-        let date_path = base_path.join(camera_id)
-            .join(timestamp.year().to_string())           // e.g., "2025"
-            .join(format!("{:02}", timestamp.month()))    // e.g., "08" 
-            .join(format!("{:02}", timestamp.day()))      // e.g., "23"
-            .join(filename);                              // e.g., "2025-08-23T18-31-44Z.mp4"
-        
-        debug!("Constructed filesystem path for '{}': {:?}", filename, date_path);
-        
-        // Check if the date-based path exists first
-        if date_path.exists() {
-            date_path
+    // Create cache key from camera_id and filename
+    let cache_key = format!("{}:{}", camera_id, filename);
+    
+    // Try to get from cache first
+    let (file_data, file_size) = {
+        let cache = MP4_SEGMENT_CACHE.read().await;
+        if let Some(cached) = cache.get(&cache_key) {
+            if !cached.is_expired() {
+                debug!("Cache HIT for filesystem segment '{}', serving from cache", cache_key);
+                (cached.data.clone(), cached.size_bytes as u64)
+            } else {
+                debug!("Cache EXPIRED for filesystem segment '{}', reading from disk", cache_key);
+                (Vec::new(), 0) // Will read from filesystem
+            }
         } else {
-            // Fallback: try direct path without date folders
+            debug!("Cache MISS for filesystem segment '{}', reading from disk", cache_key);
+            (Vec::new(), 0) // Will read from filesystem
+        }
+    };
+    
+    // If not in cache or expired, read from filesystem
+    let (file_data, file_size) = if file_data.is_empty() {
+        let base_path = std::path::PathBuf::from(&recording_config.database_path);
+
+        // Extract timestamp from filename to construct the exact path
+        let file_path = if let Some(timestamp) = parse_timestamp_from_filename(filename) {
+            // Construct path based on timestamp: base_path/camera_id/year/month/day/filename
+            let date_path = base_path.join(camera_id)
+                .join(timestamp.year().to_string())           // e.g., "2025"
+                .join(format!("{:02}", timestamp.month()))    // e.g., "08" 
+                .join(format!("{:02}", timestamp.day()))      // e.g., "23"
+                .join(filename);                              // e.g., "2025-08-23T18-31-44Z.mp4"
+            
+            debug!("Constructed filesystem path for '{}': {:?}", filename, date_path);
+            
+            // Check if the date-based path exists first
+            if date_path.exists() {
+                date_path
+            } else {
+                // Fallback: try direct path without date folders
+                let direct_path = base_path.join(camera_id).join(filename);
+                debug!("Date-based path not found, trying direct path: {:?}", direct_path);
+                
+                if direct_path.exists() {
+                    direct_path
+                } else {
+                    return (axum::http::StatusCode::NOT_FOUND, "Recording file not found").into_response();
+                }
+            }
+        } else {
+            // If timestamp parsing fails, try direct path only
             let direct_path = base_path.join(camera_id).join(filename);
-            debug!("Date-based path not found, trying direct path: {:?}", direct_path);
+            debug!("Failed to parse timestamp from '{}', trying direct path: {:?}", filename, direct_path);
             
             if direct_path.exists() {
                 direct_path
             } else {
                 return (axum::http::StatusCode::NOT_FOUND, "Recording file not found").into_response();
             }
-        }
-    } else {
-        // If timestamp parsing fails, try direct path only
-        let direct_path = base_path.join(camera_id).join(filename);
-        debug!("Failed to parse timestamp from '{}', trying direct path: {:?}", filename, direct_path);
+        };
+
+        let metadata = match tokio::fs::metadata(&file_path).await {
+            Ok(metadata) => metadata,
+            Err(e) => { 
+                error!("Failed to get file metadata: {}", e); 
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to access file").into_response(); 
+            }
+        };
+
+        let file_size = metadata.len();
         
-        if direct_path.exists() {
-            direct_path
-        } else {
-            return (axum::http::StatusCode::NOT_FOUND, "Recording file not found").into_response();
+        let file_data = match tokio::fs::read(&file_path).await {
+            Ok(data) => data,
+            Err(e) => { 
+                error!("Failed to read file: {}", e); 
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response(); 
+            }
+        };
+        
+        // Cache the file data
+        {
+            let mut cache = MP4_SEGMENT_CACHE.write().await;
+            
+            // Clean up expired entries while we have write lock
+            cache.retain(|_, v| !v.is_expired());
+            
+            // Add new entry to cache
+            cache.insert(cache_key.clone(), CachedSegment {
+                data: file_data.clone(),
+                size_bytes: file_size as i64,
+                cached_at: Instant::now(),
+            });
+            debug!("Cached filesystem segment '{}' ({} bytes) for future requests", cache_key, file_data.len());
         }
+        
+        (file_data, file_size)
+    } else {
+        (file_data, file_size)
     };
-
-    let metadata = match tokio::fs::metadata(&file_path).await {
-        Ok(metadata) => metadata,
-        Err(e) => { 
-            error!("Failed to get file metadata: {}", e); 
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to access file").into_response(); 
-        }
-    };
-
-    let file_size = metadata.len();
+    
     debug!("Filesystem segment info: filename='{}', file_size={}", filename, file_size);
     
     let (start, end) = calculate_range(range, file_size);
     debug!("Filesystem range calculation: requested={:?}, file_size={}, calculated={}..{}", 
            range, file_size, start, end);
-
-    let file_data = match tokio::fs::read(&file_path).await {
-        Ok(data) => data,
-        Err(e) => { 
-            error!("Failed to read file: {}", e); 
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response(); 
-        }
-    };
 
     let chunk = file_data.get(start as usize..=(end as usize)).unwrap_or(&file_data).to_vec();
 
