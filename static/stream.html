@@ -235,25 +235,6 @@
             }
         });
         
-        // Handle page visibility changes to pause/resume streaming
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                // Page is hidden, close the connection to save resources
-                if (videoStream && videoStream.ws && videoStream.isConnected) {
-                    console.log('Page hidden, closing WebSocket connection');
-                    videoStream.ws.close();
-                    videoStream.clearFrameTimeout();
-                }
-            } else {
-                // Page is visible again, reconnect if needed
-                if (videoStream && (!videoStream.ws || videoStream.ws.readyState !== WebSocket.OPEN)) {
-                    console.log('Page visible, reconnecting WebSocket');
-                    videoStream.reconnectAttempts = 0; // Reset attempts
-                    videoStream.connectWebSocket();
-                }
-            }
-        });
-        
         // Handle window resize
         window.addEventListener('resize', () => {
             // Canvas will auto-resize on next frame
