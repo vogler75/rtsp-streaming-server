@@ -115,6 +115,16 @@ fn generate_random_token(length: usize) -> String {
         .collect()
 }
 
+fn save_config_to_file(config: &Config, path: &str) -> Result<()> {
+    // Don't include cameras in the saved config (they're loaded from cameras/ directory)
+    let mut config_to_save = config.clone();
+    config_to_save.cameras.clear();
+    
+    let json = serde_json::to_string_pretty(&config_to_save)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct AppState {
     camera_streams: Arc<tokio::sync::RwLock<HashMap<String, CameraStreamInfo>>>,
@@ -168,17 +178,53 @@ async fn main() -> Result<()> {
             let admin_token = generate_random_token(32);
             info!("========================================");
             info!("Generated admin token: {}", admin_token);
-            info!("Use this token to access /admin interface");
-            info!("Save this token - it will be different on next restart!");
+            info!("Use this token to access /dashboard for admin interface");
+            info!("This token has been saved to {}", args.config);
             info!("========================================");
             
             let mut default_config = Config::default();
             default_config.server.admin_token = Some(admin_token);
+            
+            // Save the generated config to disk
+            match save_config_to_file(&default_config, &args.config) {
+                Ok(_) => info!("Saved default configuration to {}", args.config),
+                Err(save_err) => error!("Failed to save configuration to {}: {}", args.config, save_err),
+            }
+            
             default_config
         }
     };
 
     info!("Starting RTSP streaming server on {}:{}", config.server.host, config.server.port);
+    
+    // Check and create required directories
+    // 1. Check cameras directory
+    let cameras_dir = config.server.cameras_directory.as_deref().unwrap_or("cameras");
+    match std::fs::create_dir_all(cameras_dir) {
+        Ok(_) => {
+            info!("Cameras directory '{}' is ready", cameras_dir);
+        }
+        Err(e) => {
+            error!("Failed to create cameras directory '{}': {}", cameras_dir, e);
+            error!("The server cannot start without access to the cameras configuration directory");
+            std::process::exit(1);
+        }
+    }
+    
+    // 2. Check recordings directory (if recording is configured)
+    if let Some(ref recording_config) = config.recording {
+        let recordings_dir = &recording_config.database_path;
+        match std::fs::create_dir_all(recordings_dir) {
+            Ok(_) => {
+                info!("Recordings directory '{}' is ready", recordings_dir);
+            }
+            Err(e) => {
+                error!("Failed to create recordings directory '{}': {}", recordings_dir, e);
+                error!("The server cannot start without access to the recordings directory");
+                std::process::exit(1);
+            }
+        }
+    }
     
     // Check FFmpeg availability
     match tokio::process::Command::new("ffmpeg")
@@ -243,44 +289,37 @@ async fn main() -> Result<()> {
         if recording_config.frame_storage_enabled || recording_config.video_storage_type != config::Mp4StorageType::Disabled {
             info!("Initializing recording system with database directory: {}", recording_config.database_path);
             
-            // Ensure the database directory exists
-            if let Err(e) = std::fs::create_dir_all(&recording_config.database_path) {
-                error!("Failed to create database directory '{}': {}", recording_config.database_path, e);
-                None
-            } else {
-                
-                match RecordingManager::new(Arc::new(recording_config.clone())).await {
-                    Ok(manager) => {
-                        info!("Recording system initialized successfully");
-                        // Initialize with camera configs for cleanup purposes
-                        manager.update_camera_configs(config.cameras.clone()).await;
-                        let manager = Arc::new(manager);
+            // Directory already created and verified earlier
+            match RecordingManager::new(Arc::new(recording_config.clone())).await {
+                Ok(manager) => {
+                    info!("Recording system initialized successfully");
+                    // Initialize with camera configs for cleanup purposes
+                    manager.update_camera_configs(config.cameras.clone()).await;
+                    let manager = Arc::new(manager);
+                        
+                    // Start cleanup task if frame_storage_retention is configured
+                    if !recording_config.frame_storage_retention.is_empty() && recording_config.frame_storage_retention != "0" {
+                        let manager_clone = manager.clone();
+                        let cleanup_interval = recording_config.cleanup_interval_hours;
+                        tokio::spawn(async move {
+                            let mut interval = tokio::time::interval(
+                                tokio::time::Duration::from_secs(cleanup_interval * 3600)
+                            );
                             
-                            // Start cleanup task if frame_storage_retention is configured
-                            if !recording_config.frame_storage_retention.is_empty() && recording_config.frame_storage_retention != "0" {
-                                    let manager_clone = manager.clone();
-                                    let cleanup_interval = recording_config.cleanup_interval_hours;
-                                    tokio::spawn(async move {
-                                        let mut interval = tokio::time::interval(
-                                            tokio::time::Duration::from_secs(cleanup_interval * 3600)
-                                        );
-                                        
-                                        loop {
-                                            interval.tick().await;
-                                            if let Err(e) = manager_clone.cleanup_task().await {
-                                                error!("Failed to cleanup recordings: {}", e);
-                                            }
-                                        }
-                                    });
-
+                            loop {
+                                interval.tick().await;
+                                if let Err(e) = manager_clone.cleanup_task().await {
+                                    error!("Failed to cleanup recordings: {}", e);
+                                }
                             }
-                            
-                        Some(manager)
+                        });
                     }
-                    Err(e) => {
-                        error!("Failed to initialize recording manager: {}", e);
-                        None
-                    }
+                        
+                    Some(manager)
+                }
+                Err(e) => {
+                    error!("Failed to initialize recording manager: {}", e);
+                    None
                 }
             }
         } else {
