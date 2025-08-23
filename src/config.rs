@@ -117,6 +117,11 @@ impl CameraConfig {
     pub fn get_pre_recording_buffer_minutes(&self) -> Option<u64> {
         self.recording.as_ref()?.pre_recording_buffer_minutes
     }
+    
+    /// Get the effective pre-recording cleanup interval setting
+    pub fn get_pre_recording_cleanup_interval_seconds(&self) -> Option<u64> {
+        self.recording.as_ref()?.pre_recording_cleanup_interval_seconds
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,6 +243,7 @@ pub struct CameraRecordingConfig {
     // Pre-recording buffer settings (memory-only)
     pub pre_recording_enabled: Option<bool>, // Override global pre-recording enabled setting
     pub pre_recording_buffer_minutes: Option<u64>, // Override global buffer duration
+    pub pre_recording_cleanup_interval_seconds: Option<u64>, // Override global cleanup interval
     
     // Frame storage settings
     pub frame_storage_enabled: Option<bool>, // Override global frame storage setting

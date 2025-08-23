@@ -58,6 +58,7 @@ impl AppState {
             camera_config.clone(),
             &self.transcoding_config,
             self.mqtt_handle.clone(),
+            self.recording_config.as_ref().map(|arc| arc.as_ref()),
         ).await {
             Ok(video_stream) => {
                 // Create database for this camera if recording is enabled
@@ -80,12 +81,21 @@ impl AppState {
                     }
                 }
 
-                // Extract frame sender and fps counter before starting (since start() consumes the video_stream)
+                // Extract frame sender, fps counter, and pre-recording buffer before starting (since start() consumes the video_stream)
                 let frame_sender = video_stream.frame_sender.clone();
                 let fps_counter = video_stream.get_fps_counter();
+                let pre_recording_buffer = video_stream.pre_recording_buffer.clone();
                 
                 // Start the video stream and get the task handle
                 let task_handle = video_stream.start().await;
+                
+                // Create MP4 buffer stats for this camera
+                let mp4_buffer_stats = Arc::new(tokio::sync::RwLock::new(crate::Mp4BufferStats::new()));
+                
+                // Register MP4 buffer stats with recording manager if available
+                if let Some(ref recording_manager_ref) = self.recording_manager {
+                    recording_manager_ref.register_mp4_buffer_stats(&camera_id, mp4_buffer_stats.clone()).await;
+                }
                 
                 // Store the camera stream info
                 let camera_stream_info = CameraStreamInfo {
@@ -96,6 +106,8 @@ impl AppState {
                     recording_manager: self.recording_manager.clone(),
                     task_handle: Some(Arc::new(task_handle)),
                     capture_fps: fps_counter,
+                    pre_recording_buffer,
+                    mp4_buffer_stats,
                 };
                 
                 // Add to camera streams
@@ -206,10 +218,10 @@ impl AppState {
         if let Some((requested_duration, reason)) = was_recording {
             info!("Restarting recording for camera '{}' after restart", camera_id);
             if let Some(ref recording_manager_ref) = &self.recording_manager {
-                // Get the frame sender for this camera
-                if let Some(frame_sender) = {
+                // Get the frame sender and pre-recording buffer for this camera
+                if let Some((frame_sender, pre_recording_buffer)) = {
                     let camera_streams = self.camera_streams.read().await;
-                    camera_streams.get(&camera_id).map(|info| info.frame_sender.clone())
+                    camera_streams.get(&camera_id).map(|info| (info.frame_sender.clone(), info.pre_recording_buffer.clone()))
                 } {
                     match recording_manager_ref.start_recording(
                         &camera_id,
@@ -218,6 +230,7 @@ impl AppState {
                         requested_duration,
                         frame_sender,
                         &camera_config,
+                        pre_recording_buffer.as_ref(),
                     ).await {
                         Ok(session_id) => {
                             info!("Successfully restarted recording for camera '{}' with session ID {}", camera_id, session_id);

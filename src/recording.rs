@@ -26,6 +26,7 @@ pub struct RecordingManager {
     active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>, // camera_id -> recording
     frame_subscribers: Arc<RwLock<HashMap<String, broadcast::Receiver<Bytes>>>>, // camera_id -> receiver
     camera_configs: Arc<RwLock<HashMap<String, crate::config::CameraConfig>>>, // camera configs for cleanup
+    mp4_buffer_stats: Arc<RwLock<HashMap<String, Arc<tokio::sync::RwLock<crate::Mp4BufferStats>>>>>, // camera_id -> buffer stats
 }
 
 impl RecordingManager {
@@ -36,6 +37,7 @@ impl RecordingManager {
             active_recordings: Arc::new(RwLock::new(HashMap::new())),
             frame_subscribers: Arc::new(RwLock::new(HashMap::new())),
             camera_configs: Arc::new(RwLock::new(HashMap::new())),
+            mp4_buffer_stats: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -43,6 +45,18 @@ impl RecordingManager {
     pub async fn update_camera_configs(&self, configs: HashMap<String, crate::config::CameraConfig>) {
         let mut camera_configs = self.camera_configs.write().await;
         *camera_configs = configs;
+    }
+    
+    /// Register MP4 buffer stats for a camera
+    pub async fn register_mp4_buffer_stats(&self, camera_id: &str, stats: Arc<tokio::sync::RwLock<crate::Mp4BufferStats>>) {
+        let mut buffer_stats = self.mp4_buffer_stats.write().await;
+        buffer_stats.insert(camera_id.to_string(), stats);
+    }
+    
+    /// Get MP4 buffer stats for a camera
+    pub async fn get_mp4_buffer_stats(&self, camera_id: &str) -> Option<Arc<tokio::sync::RwLock<crate::Mp4BufferStats>>> {
+        let buffer_stats = self.mp4_buffer_stats.read().await;
+        buffer_stats.get(camera_id).cloned()
     }
 
     /// Get the recording configuration
@@ -96,6 +110,7 @@ impl RecordingManager {
         requested_duration: Option<i64>,
         frame_sender: Arc<broadcast::Sender<Bytes>>,
         camera_config: &crate::config::CameraConfig,
+        pre_recording_buffer: Option<&crate::pre_recording_buffer::PreRecordingBuffer>,
     ) -> crate::errors::Result<i64> {
         // Get the database for this camera
         let database = self.get_camera_database(camera_id).await
@@ -104,17 +119,47 @@ impl RecordingManager {
         // Stop any existing recording for this camera
         self.stop_camera_recordings(camera_id).await?;
 
+        // Determine the recording start time - use first frame from pre-recording buffer if available
+        let recording_start_time = if let Some(buffer) = pre_recording_buffer {
+            buffer.get_first_frame_timestamp().await.unwrap_or_else(|| Utc::now())
+        } else {
+            Utc::now()
+        };
+
         // Create new recording session in database
         let session_id = database.create_recording_session(
             camera_id,
             reason,
+            recording_start_time,
         ).await?;
+
+        // If pre-recording buffer exists, store all buffered frames first
+        let mut initial_frame_count = 0u64;
+        if let Some(buffer) = pre_recording_buffer {
+            let buffered_frames = buffer.get_buffered_frames().await;
+            info!("Adding {} pre-recorded frames to recording session {}", buffered_frames.len(), session_id);
+            
+            for (frame_number, buffered_frame) in buffered_frames.iter().enumerate() {
+                if let Err(e) = database.add_recorded_frame(
+                    session_id,
+                    buffered_frame.timestamp,
+                    (frame_number + 1) as i64,
+                    &buffered_frame.data,
+                ).await {
+                    error!("Failed to store pre-recorded frame in database: {}", e);
+                } else {
+                    initial_frame_count += 1;
+                }
+            }
+            
+            info!("Successfully stored {} pre-recorded frames for camera '{}'", initial_frame_count, camera_id);
+        }
 
         // Create active recording entry
         let active_recording = ActiveRecording {
             session_id,
-            start_time: Utc::now(),
-            frame_count: 0,
+            start_time: recording_start_time,
+            frame_count: initial_frame_count,
             requested_duration,
         };
 
@@ -205,8 +250,8 @@ impl RecordingManager {
                                 } else {
                                     info!("Stopped recording session {} for segment split", session_id);
                                     
-                                    // Create a new session with the same reason
-                                    match database.create_recording_session(&camera_id, reason.as_deref()).await {
+                                    // Create a new session with the same reason, using current time
+                                    match database.create_recording_session(&camera_id, reason.as_deref(), Utc::now()).await {
                                         Ok(new_session_id) => {
                                             info!("Created new recording session {} for segment continuation", new_session_id);
                                             
@@ -301,6 +346,9 @@ impl RecordingManager {
         
         // Get the effective video storage type for this camera
         let mp4_storage_type = self.get_storage_type_for_camera(&camera_config);
+        
+        // Get MP4 buffer stats for this camera before spawning
+        let mp4_stats = self.get_mp4_buffer_stats(&camera_id).await;
 
         tokio::spawn(async move {
             let mut tasks = Vec::new();
@@ -325,8 +373,10 @@ impl RecordingManager {
                     database.clone(),
                     active_recordings.clone(),
                     camera_id.clone(),
+                    session_id, // Pass session_id
                     frame_sender.subscribe(),
                     mp4_storage_type,
+                    mp4_stats,
                 ));
                 tasks.push(segmenter_task);
             }
@@ -710,12 +760,64 @@ impl RecordingManager {
         database: Arc<dyn DatabaseProvider>,
         active_recordings: Arc<RwLock<HashMap<String, ActiveRecording>>>,
         camera_id: String,
+        session_id: i64, // Add session_id parameter
         mut frame_receiver: broadcast::Receiver<Bytes>,
         mp4_storage_type: crate::config::Mp4StorageType,
+        mp4_buffer_stats: Option<Arc<tokio::sync::RwLock<crate::Mp4BufferStats>>>,
     ) {
         let segment_duration = chrono::Duration::minutes(config.mp4_segment_minutes as i64);
-        let mut segment_start_time = Utc::now();
+        
+        // Get recording start time (which may include pre-recorded frames)
+        let mut segment_start_time = {
+            if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
+                active_recording.start_time
+            } else {
+                Utc::now()
+            }
+        };
+        
         let mut frame_buffer = Vec::new();
+        
+        // Process any pre-recorded frames first if they exist
+        if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
+            if active_recording.frame_count > 0 {
+                info!("Processing {} pre-recorded frames for MP4 segmentation", active_recording.frame_count);
+                
+                // Get pre-recorded frames from database
+                match database.get_recorded_frames(
+                    active_recording.session_id, 
+                    Some(active_recording.start_time),
+                    None  // Get all frames from start time onwards
+                ).await {
+                    Ok(recorded_frames) => {
+                        if !recorded_frames.is_empty() {
+                            info!("Found {} pre-recorded frames for MP4 segmentation", recorded_frames.len());
+                            
+                            // Convert RecordedFrame to Bytes for processing
+                            let pre_recorded_frame_data: Vec<Bytes> = recorded_frames.into_iter()
+                                .map(|frame| Bytes::from(frame.frame_data))
+                                .collect();
+                            
+                            // Add pre-recorded frames to buffer
+                            frame_buffer.extend(pre_recorded_frame_data);
+                            
+                            // Update MP4 buffer stats
+                            if let Some(ref stats) = mp4_buffer_stats {
+                                let buffer_size = frame_buffer.iter().map(|f| f.len()).sum::<usize>();
+                                let mut stats = stats.write().await;
+                                stats.frame_count = frame_buffer.len();
+                                stats.size_bytes = buffer_size;
+                            }
+                            
+                            info!("Added {} pre-recorded frames to MP4 segment buffer", frame_buffer.len());
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to retrieve pre-recorded frames for MP4 segmentation: {}", e);
+                    }
+                }
+            }
+        }
 
         loop {
             match frame_receiver.recv().await {
@@ -723,22 +825,70 @@ impl RecordingManager {
                     // Check if recording is still active
                     if !active_recordings.read().await.contains_key(&camera_id) {
                         trace!("Recording stopped for camera '{}', ending segmenter task", camera_id);
+                        
+                        // Flush remaining frames in buffer before stopping
+                        if !frame_buffer.is_empty() {
+                            info!("Flushing {} remaining frames from MP4 buffer on recording stop for camera '{}'", frame_buffer.len(), camera_id);
+                            let frames_to_process = std::mem::take(&mut frame_buffer);
+                            let end_time = Utc::now();
+                            
+                            // Update buffer stats to show empty buffer
+                            if let Some(ref stats) = mp4_buffer_stats {
+                                let mut stats = stats.write().await;
+                                stats.frame_count = 0;
+                                stats.size_bytes = 0;
+                            }
+                            
+                            // Spawn a task to process the final segment
+                            let final_config = config.clone();
+                            let final_database = database.clone();
+                            let final_camera_id = camera_id.clone();
+                            let final_storage_type = mp4_storage_type.clone();
+                            let log_camera_id = camera_id.clone(); // Clone for logging
+                            tokio::spawn(async move {
+                                if let Err(e) = Self::create_video_segment(
+                                    final_config,
+                                    final_database,
+                                    final_camera_id,
+                                    session_id,
+                                    segment_start_time,
+                                    end_time,
+                                    frames_to_process,
+                                    final_storage_type,
+                                ).await {
+                                    error!("Failed to create final video segment on recording stop: {}", e);
+                                } else {
+                                    info!("Successfully created final video segment on recording stop for camera '{}'", log_camera_id);
+                                }
+                            });
+                        }
                         break;
                     }
 
                     frame_buffer.push(frame_data);
 
+                    // Update MP4 buffer stats
+                    if let Some(ref stats) = mp4_buffer_stats {
+                        let buffer_size = frame_buffer.iter().map(|f| f.len()).sum::<usize>();
+                        let mut stats = stats.write().await;
+                        stats.frame_count = frame_buffer.len();
+                        stats.size_bytes = buffer_size;
+                    }
+
                     if Utc::now().signed_duration_since(segment_start_time) >= segment_duration {
                         let frames_to_process = std::mem::take(&mut frame_buffer);
+                        
+                        // Update buffer stats after taking frames
+                        if let Some(ref stats) = mp4_buffer_stats {
+                            let buffer_size = frame_buffer.iter().map(|f| f.len()).sum::<usize>();
+                            let mut stats = stats.write().await;
+                            stats.frame_count = frame_buffer.len();
+                            stats.size_bytes = buffer_size;
+                        }
                         let end_time = Utc::now();
 
-                        // Get session_id from active recording
-                        let session_id = if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
-                            active_recording.session_id
-                        } else {
-                            error!("No active recording found for camera '{}'", camera_id);
-                            continue;
-                        };
+                        // Use the session_id passed to this function
+                        // (no need to look up from active_recordings since we have it directly)
 
                         // Spawn a task to process the segment
                         let task_config = config.clone();
@@ -938,7 +1088,15 @@ impl RecordingManager {
             .unwrap_or(config.hls_segment_seconds);
         
         let segment_duration = chrono::Duration::seconds(segment_seconds as i64);
-        let mut segment_start_time = Utc::now();
+        
+        // Get recording start time (which may include pre-recorded frames)
+        let mut segment_start_time = {
+            if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
+                active_recording.start_time
+            } else {
+                Utc::now()
+            }
+        };
         let mut frame_buffer = Vec::new();
         
         // Get the last segment index for this session to avoid duplicates
@@ -957,6 +1115,39 @@ impl RecordingManager {
             }
         };
 
+        // Process any pre-recorded frames first if they exist
+        if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
+            if active_recording.frame_count > 0 {
+                info!("Processing {} pre-recorded frames for HLS segmentation", active_recording.frame_count);
+                
+                // Get pre-recorded frames from database
+                match database.get_recorded_frames(
+                    session_id, 
+                    Some(active_recording.start_time),
+                    None  // Get all frames from start time onwards
+                ).await {
+                    Ok(recorded_frames) => {
+                        if !recorded_frames.is_empty() {
+                            info!("Found {} pre-recorded frames for HLS segmentation", recorded_frames.len());
+                            
+                            // Convert RecordedFrame to Bytes for processing
+                            let pre_recorded_frame_data: Vec<Bytes> = recorded_frames.into_iter()
+                                .map(|frame| Bytes::from(frame.frame_data))
+                                .collect();
+                            
+                            // Add pre-recorded frames to buffer
+                            frame_buffer.extend(pre_recorded_frame_data);
+                            
+                            info!("Added {} pre-recorded frames to HLS segment buffer", frame_buffer.len());
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to retrieve pre-recorded frames for HLS segmentation: {}", e);
+                    }
+                }
+            }
+        }
+
         info!("Starting HLS segmenter for camera '{}' with {} second segments, starting at index {}", 
               camera_id, segment_seconds, segment_index);
         loop {
@@ -965,6 +1156,34 @@ impl RecordingManager {
                     // Check if recording is still active
                     if !active_recordings.read().await.contains_key(&camera_id) {
                         trace!("Recording stopped for camera '{}', ending HLS segmenter task", camera_id);
+                        
+                        // Flush remaining frames in buffer before stopping
+                        if !frame_buffer.is_empty() {
+                            info!("Flushing {} remaining frames from HLS buffer on recording stop", frame_buffer.len());
+                            let frames_to_process = std::mem::take(&mut frame_buffer);
+                            let end_time = Utc::now();
+                            
+                            // Create final HLS segment
+                            let final_config = config.clone();
+                            let final_database = database.clone();
+                            let final_camera_id = camera_id.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = Self::create_hls_segment(
+                                    final_config,
+                                    final_database,
+                                    final_camera_id,
+                                    session_id,
+                                    segment_index,
+                                    segment_start_time,
+                                    end_time,
+                                    frames_to_process,
+                                ).await {
+                                    error!("Failed to create final HLS segment on recording stop: {}", e);
+                                } else {
+                                    info!("Successfully created final HLS segment on recording stop");
+                                }
+                            });
+                        }
                         break;
                     }
 

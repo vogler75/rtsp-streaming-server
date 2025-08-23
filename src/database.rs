@@ -138,6 +138,7 @@ pub trait DatabaseProvider: Send + Sync {
         &self,
         camera_id: &str,
         reason: Option<&str>,
+        start_time: chrono::DateTime<chrono::Utc>,
     ) -> Result<i64>;
     
     async fn stop_recording_session(&self, session_id: i64) -> Result<()>;
@@ -631,6 +632,7 @@ impl DatabaseProvider for SqliteDatabase {
         &self,
         camera_id: &str,
         reason: Option<&str>,
+        start_time: chrono::DateTime<chrono::Utc>,
     ) -> Result<i64> {
         let query = format!(
             r#"
@@ -641,7 +643,7 @@ impl DatabaseProvider for SqliteDatabase {
         );
         let result = sqlx::query(&query)
         .bind(camera_id)
-        .bind(Utc::now())
+        .bind(start_time)
         .bind(reason)
         .execute(&self.pool)
         .await?;
@@ -2436,6 +2438,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         &self,
         camera_id: &str,
         reason: Option<&str>,
+        start_time: chrono::DateTime<chrono::Utc>,
     ) -> Result<i64> {
         let query = format!(
             r#"
@@ -2447,7 +2450,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         );
         let row = sqlx::query(&query)
         .bind(camera_id)
-        .bind(Utc::now())
+        .bind(start_time)
         .bind(reason)
         .fetch_one(&self.pool)
         .await?;

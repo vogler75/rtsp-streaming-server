@@ -705,8 +705,8 @@
                             </div>
                             <div class="form-group">
                                 <label>MP4 Segment Duration (minutes)</label>
-                                <input type="number" id="mp4_segment_minutes" name="mp4_segment_minutes" placeholder="5" min="1" max="60">
-                                <span class="help-text">Override global segment length (1-60 minutes)</span>
+                                <input type="number" id="mp4_segment_minutes" name="mp4_segment_minutes" placeholder="5" min="1" max="10">
+                                <span class="help-text">Override global segment length (1-10 minutes)</span>
                             </div>
                         </div>
                         
@@ -781,8 +781,8 @@
                             </div>
                             <div class="form-group">
                                 <label>Buffer Duration (minutes)</label>
-                                <input type="number" id="pre_recording_buffer_minutes_camera" name="pre_recording_buffer_minutes_camera" placeholder="Use Global" min="1" max="60">
-                                <span class="help-text">Override buffer duration (1-60 minutes)</span>
+                                <input type="number" id="pre_recording_buffer_minutes_camera" name="pre_recording_buffer_minutes_camera" placeholder="Use Global" min="1" max="10">
+                                <span class="help-text">Override buffer duration (1-10 minutes)</span>
                             </div>
                         </div>
                     </div>
@@ -2315,6 +2315,16 @@
                 frameElement.textContent = camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
             }
             
+            const preBufferElement = document.getElementById(`pre-buffer-${camera.id}`);
+            if (preBufferElement) {
+                preBufferElement.textContent = `${camera.pre_recording_buffer_frames} frames (${camera.pre_recording_buffer_size_kb} KB)`;
+            }
+            
+            const mp4BufferElement = document.getElementById(`mp4-buffer-${camera.id}`);
+            if (mp4BufferElement) {
+                mp4BufferElement.textContent = `${camera.mp4_buffered_frames} frames (${camera.mp4_buffered_size_kb} KB)`;
+            }
+            
             // Check if embedded stream needs to be stopped due to camera going offline
             const checkbox = document.getElementById(`stream-checkbox-${camera.id}`);
             if (checkbox && checkbox.checked && !isOnline) {
@@ -2472,6 +2482,14 @@
                     <div class="info-row">
                         <span class="info-label">Last Frame:</span>
                         <span id="frame-${camera.id}">${camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never'}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Pre-Buffer:</span>
+                        <span id="pre-buffer-${camera.id}">${camera.pre_recording_buffer_frames} frames (${camera.pre_recording_buffer_size_kb} KB)</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">MP4 Buffer:</span>
+                        <span id="mp4-buffer-${camera.id}">${camera.mp4_buffered_frames} frames (${camera.mp4_buffered_size_kb} KB)</span>
                     </div>
                     ${recordingAvailable ? `
                     <div class="info-row">

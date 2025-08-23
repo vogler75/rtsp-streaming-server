@@ -121,6 +121,7 @@ pub async fn api_start_recording(
     camera_config: config::CameraConfig,
     recording_manager: Arc<RecordingManager>,
     frame_sender: Arc<broadcast::Sender<Bytes>>,
+    pre_recording_buffer: Option<crate::pre_recording_buffer::PreRecordingBuffer>,
 ) -> axum::response::Response {
     if let Err(response) = check_api_auth(&headers, &camera_config) {
         return response;
@@ -140,6 +141,7 @@ pub async fn api_start_recording(
         None,
         frame_sender,
         &camera_config,
+        pre_recording_buffer.as_ref(),
     ).await {
         Ok(session_id) => {
             let data = serde_json::json!({

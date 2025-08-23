@@ -28,6 +28,7 @@ mod watcher;
 mod camera_manager;
 mod mp4;
 mod handlers;
+mod pre_recording_buffer;
 mod ptz;
 mod api_ptz;
 
@@ -93,6 +94,25 @@ pub struct Args {
     verbose: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct Mp4BufferStats {
+    pub frame_count: usize,
+    pub size_bytes: usize,
+}
+
+impl Mp4BufferStats {
+    pub fn new() -> Self {
+        Self {
+            frame_count: 0,
+            size_bytes: 0,
+        }
+    }
+    
+    pub fn size_kb(&self) -> u64 {
+        (self.size_bytes as f64 / 1024.0).round() as u64
+    }
+}
+
 #[derive(Clone)]
 struct CameraStreamInfo {
     camera_id: String,
@@ -102,6 +122,8 @@ struct CameraStreamInfo {
     recording_manager: Option<Arc<RecordingManager>>,
     task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
     capture_fps: Arc<tokio::sync::RwLock<f32>>, // Shared FPS counter from RtspClient
+    pre_recording_buffer: Option<crate::pre_recording_buffer::PreRecordingBuffer>,
+    mp4_buffer_stats: Arc<tokio::sync::RwLock<Mp4BufferStats>>, // MP4 buffer statistics
 }
 
 fn generate_random_token(length: usize) -> String {
@@ -352,6 +374,7 @@ async fn main() -> Result<()> {
             camera_config.clone(),
             &config.transcoding,
             mqtt_handle.clone(),
+            config.recording.as_ref(),
         ).await {
             Ok(video_stream) => {
                 // Create database for this camera if recording is enabled
@@ -374,9 +397,18 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Extract frame sender and FPS counter before starting (since start() consumes the video_stream)
+                // Extract frame sender, FPS counter, and pre-recording buffer before starting (since start() consumes the video_stream)
                 let frame_sender = video_stream.frame_sender.clone();
                 let fps_counter = video_stream.get_fps_counter();
+                let pre_recording_buffer = video_stream.pre_recording_buffer.clone();
+                
+                // Create MP4 buffer stats for this camera
+                let mp4_buffer_stats = Arc::new(tokio::sync::RwLock::new(Mp4BufferStats::new()));
+                
+                // Register MP4 buffer stats with recording manager if available
+                if let Some(ref recording_manager_ref) = recording_manager {
+                    recording_manager_ref.register_mp4_buffer_stats(&camera_id, mp4_buffer_stats.clone()).await;
+                }
                 
                 // Start the video stream and get the task handle
                 let task_handle = video_stream.start().await;
@@ -390,6 +422,8 @@ async fn main() -> Result<()> {
                     recording_manager: recording_manager.clone(),
                     task_handle: Some(Arc::new(task_handle)),
                     capture_fps: fps_counter,
+                    pre_recording_buffer,
+                    mp4_buffer_stats,
                 });
                 info!("Started camera '{}' on path '{}'" , camera_id, camera_config.path);
             }
@@ -546,7 +580,8 @@ async fn main() -> Result<()> {
                     start_info.camera_id.clone(),
                     start_info.camera_config.clone(),
                     start_info.recording_manager.clone().unwrap(),
-                    start_info.frame_sender.clone()
+                    start_info.frame_sender.clone(),
+                    start_info.pre_recording_buffer.clone()
                 )
             ));
 
@@ -773,8 +808,8 @@ async fn main() -> Result<()> {
                 data
             };
             
-            // Get active stream IDs, their receiver counts, and FPS separately to avoid holding both locks
-            let (active_stream_ids, stream_receiver_counts, stream_fps_values) = {
+            // Get active stream IDs, their receiver counts, FPS, pre-recording buffer stats, and MP4 buffer stats separately to avoid holding both locks
+            let (active_stream_ids, stream_receiver_counts, stream_fps_values, pre_recording_buffer_frame_counts, pre_recording_buffer_size_kb, mp4_buffer_frame_counts, mp4_buffer_size_kb) = {
                 let camera_streams = state.camera_streams.read().await;
                 let ids = camera_streams.keys().cloned().collect::<std::collections::HashSet<String>>();
                 let counts: std::collections::HashMap<String, usize> = camera_streams.iter()
@@ -788,7 +823,27 @@ async fn main() -> Result<()> {
                     fps_values.insert(id.clone(), fps);
                 }
                 
-                (ids, counts, fps_values)
+                // Collect pre-recording buffer frame counts and sizes
+                let mut buffer_frame_counts = std::collections::HashMap::new();
+                let mut buffer_size_kb = std::collections::HashMap::new();
+                for (id, info) in camera_streams.iter() {
+                    if let Some(ref pre_recording_buffer) = info.pre_recording_buffer {
+                        let stats = pre_recording_buffer.get_stats().await;
+                        buffer_frame_counts.insert(id.clone(), stats.frame_count);
+                        buffer_size_kb.insert(id.clone(), (stats.total_size_bytes as f64 / 1024.0).round() as u64);
+                    }
+                }
+                
+                // Collect MP4 buffer frame counts and sizes
+                let mut mp4_buffer_frames = std::collections::HashMap::new();
+                let mut mp4_buffer_kb = std::collections::HashMap::new();
+                for (id, info) in camera_streams.iter() {
+                    let mp4_stats = info.mp4_buffer_stats.read().await;
+                    mp4_buffer_frames.insert(id.clone(), mp4_stats.frame_count);
+                    mp4_buffer_kb.insert(id.clone(), mp4_stats.size_kb());
+                }
+                
+                (ids, counts, fps_values, buffer_frame_counts, buffer_size_kb, mp4_buffer_frames, mp4_buffer_kb)
             };
             
             trace!("[API] Got {} total configs, {} active streams", 
@@ -822,7 +877,11 @@ async fn main() -> Result<()> {
                             "last_frame_time": real_status.last_frame_time,
                             "ffmpeg_running": real_status.ffmpeg_running,
                             "duplicate_frames": real_status.duplicate_frames,
-                            "token_required": token_required
+                            "token_required": token_required,
+                            "pre_recording_buffer_frames": pre_recording_buffer_frame_counts.get(&camera_id).copied().unwrap_or(0),
+                            "pre_recording_buffer_size_kb": pre_recording_buffer_size_kb.get(&camera_id).copied().unwrap_or(0),
+                            "mp4_buffered_frames": mp4_buffer_frame_counts.get(&camera_id).copied().unwrap_or(0),
+                            "mp4_buffered_size_kb": mp4_buffer_size_kb.get(&camera_id).copied().unwrap_or(0)
                         })
                     } else {
                         // No MQTT status, but camera stream is active - get basic info
@@ -840,7 +899,11 @@ async fn main() -> Result<()> {
                             "last_frame_time": null,
                             "ffmpeg_running": true,  // If stream is active, FFmpeg must be running
                             "duplicate_frames": 0,
-                            "token_required": token_required
+                            "token_required": token_required,
+                            "pre_recording_buffer_frames": pre_recording_buffer_frame_counts.get(&camera_id).copied().unwrap_or(0),
+                            "pre_recording_buffer_size_kb": pre_recording_buffer_size_kb.get(&camera_id).copied().unwrap_or(0),
+                            "mp4_buffered_frames": mp4_buffer_frame_counts.get(&camera_id).copied().unwrap_or(0),
+                            "mp4_buffered_size_kb": mp4_buffer_size_kb.get(&camera_id).copied().unwrap_or(0)
                         })
                     }
                 } else {
@@ -855,7 +918,11 @@ async fn main() -> Result<()> {
                         "last_frame_time": null,
                         "ffmpeg_running": false,
                         "duplicate_frames": 0,
-                        "token_required": token_required
+                        "token_required": token_required,
+                        "pre_recording_buffer_frames": 0,
+                        "pre_recording_buffer_size_kb": 0,
+                        "mp4_buffered_frames": 0,
+                        "mp4_buffered_size_kb": 0
                     })
                 };
                 
