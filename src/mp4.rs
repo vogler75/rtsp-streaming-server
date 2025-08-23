@@ -458,7 +458,7 @@ pub async fn serve_hls_segment(
     axum::extract::State(app_state): axum::extract::State<AppState>,
 ) -> axum::response::Response {
     let (camera_id, playlist_id, segment_name) = path.0;
-    info!("Serving HLS segment: camera_id={}, playlist_id={}, segment={}", camera_id, playlist_id, segment_name);
+    debug!("Serving HLS segment: camera_id={}, playlist_id={}, segment={}", camera_id, playlist_id, segment_name);
     
     // Validate segment name to prevent path traversal
     if segment_name.contains("..") || segment_name.contains("/") || !segment_name.ends_with(".ts") {
