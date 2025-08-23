@@ -85,7 +85,7 @@ impl RtspClientBuilder {
             capture_framerate: 30,
             output_framerate: None,
             channel_buffer_size: Some(1024),
-            debug_capture: Some(true),
+            debug_capture: Some(false),
             debug_duplicate_frames: Some(false),
         };
         

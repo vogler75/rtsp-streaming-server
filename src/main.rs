@@ -103,6 +103,18 @@ struct CameraStreamInfo {
     task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
 
+fn generate_random_token(length: usize) -> String {
+    use rand::Rng;
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut rng = rand::thread_rng();
+    (0..length)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
 #[derive(Clone)]
 pub struct AppState {
     camera_streams: Arc<tokio::sync::RwLock<HashMap<String, CameraStreamInfo>>>,
@@ -114,6 +126,7 @@ pub struct AppState {
     pub admin_token: Option<String>,
     pub cameras_directory: String,
     start_time: std::time::Instant,
+    pub server_config: Arc<config::ServerConfig>, // Store full server config for API access
 }
 
 // CreateCameraRequest moved to api::admin
@@ -149,8 +162,19 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             warn!("Could not load configuration from {}: {}", args.config, e);
-            info!("Using default configuration");
-            Config::default()
+            info!("Starting with minimal configuration - no cameras configured");
+            
+            // Generate a random admin token for initial access
+            let admin_token = generate_random_token(32);
+            info!("========================================");
+            info!("Generated admin token: {}", admin_token);
+            info!("Use this token to access /admin interface");
+            info!("Save this token - it will be different on next restart!");
+            info!("========================================");
+            
+            let mut default_config = Config::default();
+            default_config.server.admin_token = Some(admin_token);
+            default_config
         }
     };
 
@@ -404,6 +428,7 @@ async fn main() -> Result<()> {
         admin_token: config.server.admin_token.clone(),
         cameras_directory: config.server.cameras_directory.clone().unwrap_or_else(|| "cameras".to_string()),
         start_time: std::time::Instant::now(),
+        server_config: Arc::new(config.server.clone()),
     };
 
     // Build router with camera paths
@@ -796,18 +821,22 @@ async fn main() -> Result<()> {
 
     // Server configuration management API endpoints
     let args_get = args.clone();
+    let admin_config_state = app_state.clone();
     app = app.route("/api/admin/config", axum::routing::get(move |headers: axum::http::HeaderMap| {
         let args = args_get.clone();
+        let state = admin_config_state.clone();
         async move {
-            api_config::api_get_config(headers, args).await
+            api_config::api_get_config(headers, args, state).await
         }
     }));
 
     let args_put = args.clone();
+    let admin_update_state = app_state.clone();
     app = app.route("/api/admin/config", axum::routing::put(move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
         let args = args_put.clone();
+        let state = admin_update_state.clone();
         async move {
-            api_config::api_update_config(headers, body, args).await
+            api_config::api_update_config(headers, body, args, state).await
         }
     }));
     

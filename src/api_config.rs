@@ -162,24 +162,18 @@ pub async fn api_delete_camera(
 pub async fn api_get_config(
     headers: axum::http::HeaderMap,
     args: Args,
+    state: AppState,
 ) -> axum::response::Response {
-    let config_path = &args.config;
-
-    let current_config = match config::Config::load(config_path) {
-        Ok(config) => config,
-        Err(e) => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                   Json(ApiResponse::<()>::error(&format!("Failed to load config: {}", e), 500)))
-                  .into_response();
-        }
-    };
-
-    if !check_admin_token(&headers, &current_config.server.admin_token) {
+    // Check admin token using the in-memory config from AppState
+    if !check_admin_token(&headers, &state.admin_token) {
         return (axum::http::StatusCode::UNAUTHORIZED,
                 Json(ApiResponse::<()>::error("Unauthorized", 401)))
                .into_response();
     }
 
+    let config_path = &args.config;
+
+    // Try to load config from file first
     match std::fs::read_to_string(config_path) {
         Ok(content) => {
             match serde_json::from_str::<serde_json::Value>(&content) {
@@ -189,9 +183,21 @@ pub async fn api_get_config(
                          .into_response()
             }
         }
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                  Json(ApiResponse::<()>::error(&format!("Failed to read config file: {}", e), 500)))
-                 .into_response()
+        Err(_) => {
+            // If file doesn't exist, return the in-memory config
+            // Build config from AppState components
+            let cameras = state.camera_configs.read().await;
+            let config = config::Config {
+                server: (*state.server_config).clone(),
+                cameras: cameras.clone(),
+                transcoding: (*state.transcoding_config).clone(),
+                mqtt: None, // We don't store the full MQTT config in AppState
+                recording: state.recording_config.as_ref().map(|rc| (**rc).clone()),
+            };
+            drop(cameras);
+            
+            Json(ApiResponse::success(config)).into_response()
+        }
     }
 }
 
@@ -217,23 +223,34 @@ pub async fn api_update_config(
     headers: axum::http::HeaderMap,
     body: axum::extract::Json<serde_json::Value>,
     args: Args,
+    state: AppState,
 ) -> axum::response::Response {
-    let config_path = &args.config;
-
-    let current_config = match config::Config::load(config_path) {
-        Ok(config) => config,
-        Err(e) => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                   Json(ApiResponse::<()>::error(&format!("Failed to load config: {}", e), 500)))
-                  .into_response();
-        }
-    };
-
-    if !check_admin_token(&headers, &current_config.server.admin_token) {
+    // Check admin token using the in-memory config from AppState
+    if !check_admin_token(&headers, &state.admin_token) {
         return (axum::http::StatusCode::UNAUTHORIZED,
                 Json(ApiResponse::<()>::error("Unauthorized", 401)))
                .into_response();
     }
+
+    let config_path = &args.config;
+
+    // Try to load current config from file, or use in-memory config if file doesn't exist
+    let current_config = match config::Config::load(config_path) {
+        Ok(config) => config,
+        Err(_) => {
+            // If file doesn't exist, build config from AppState
+            let cameras = state.camera_configs.read().await;
+            let config = config::Config {
+                server: (*state.server_config).clone(),
+                cameras: cameras.clone(),
+                transcoding: (*state.transcoding_config).clone(),
+                mqtt: None,
+                recording: state.recording_config.as_ref().map(|rc| (**rc).clone()),
+            };
+            drop(cameras);
+            config
+        }
+    };
 
     let mut current_config_value = match serde_json::to_value(&current_config) {
         Ok(val) => val,

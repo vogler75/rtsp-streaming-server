@@ -451,6 +451,14 @@ pub async fn api_serve_hls_timerange(
         admin_token: None,
         cameras_directory: "cameras".to_string(),
         start_time: std::time::Instant::now(),
+        server_config: Arc::new(crate::config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            tls: None,
+            cors_allow_origin: None,
+            admin_token: None,
+            cameras_directory: None,
+        }),
     };
 
     // Call the existing HLS playlist function
@@ -494,6 +502,14 @@ pub async fn api_serve_hls_segment(
         admin_token: None,
         cameras_directory: "cameras".to_string(),
         start_time: std::time::Instant::now(),
+        server_config: Arc::new(crate::config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            tls: None,
+            cors_allow_origin: None,
+            admin_token: None,
+            cameras_directory: None,
+        }),
     };
 
     // Call the existing HLS segment function

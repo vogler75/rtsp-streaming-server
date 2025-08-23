@@ -50,6 +50,9 @@ rumqttc = "0.24"
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
 
+# Random generation for tokens
+rand = "0.8"
+
 # Command line argument parsing
 clap = { version = "4", features = ["derive"] }
 
