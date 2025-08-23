@@ -300,6 +300,27 @@
             font-size: 12px;
         }
 
+        .recording-status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 8px;
+        }
+
+        .recording-status-badge.active {
+            background: #27ae60;
+            color: white;
+        }
+
+        .recording-status-badge.stopped {
+            background: #95a5a6;
+            color: white;
+        }
+
         .modal {
             display: none;
             position: fixed;
@@ -2212,7 +2233,7 @@
                     ${recordingAvailable ? `
                     <div class="info-row">
                         <span class="info-label">Recording:</span>
-                        <span id="recording-status-${camera.id}" style="color: ${recordingActive ? '#27ae60' : '#e74c3c'}">${recordingStatus}</span>
+                        <span id="recording-status-${camera.id}" class="recording-status-badge ${recordingActive ? 'active' : 'stopped'}">${recordingStatus}</span>
                         <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor}; margin-left: 10px; padding: 2px 8px; font-size: 12px; border: none; border-radius: 3px; color: white; cursor: pointer;">${recordingBtnText}</button>
                     </div>
                     <div class="info-row">
@@ -2553,7 +2574,7 @@
                     
                     if (recordingStatusElement) {
                         recordingStatusElement.textContent = isRecording ? 'Active' : 'Stopped';
-                        recordingStatusElement.style.color = isRecording ? '#27ae60' : '#e74c3c';
+                        recordingStatusElement.className = `recording-status-badge ${isRecording ? 'active' : 'stopped'}`;
                     }
                     
                     if (recordingBtnElement) {
@@ -2586,7 +2607,7 @@
                 
                 if (recordingStatusElement) {
                     recordingStatusElement.textContent = 'Error';
-                    recordingStatusElement.style.color = '#e74c3c';
+                    recordingStatusElement.className = 'recording-status-badge stopped';
                 }
                 
                 if (dbSizeElement) {
