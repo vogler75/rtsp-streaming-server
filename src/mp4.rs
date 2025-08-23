@@ -1,6 +1,6 @@
 use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 use serde::Deserialize;
 use tokio::process::Command;
 
@@ -93,7 +93,7 @@ pub async fn serve_hls_playlist(
     axum::extract::State(app_state): axum::extract::State<AppState>,
 ) -> axum::response::Response {
     let camera_id = path.0;
-    info!("Serving HLS playlist: camera_id={}, from={}, to={}", camera_id, query.t1, query.t2);
+    debug!("Serving HLS playlist: camera_id={}, from={}, to={}", camera_id, query.t1, query.t2);
     
     
     let recording_manager = match app_state.recording_manager {
@@ -153,12 +153,12 @@ pub async fn serve_hls_playlist(
 
     // When both HLS and MP4 are enabled, ALWAYS prefer HLS
     if hls_enabled {
-        info!("HLS storage enabled for camera '{}', checking for pre-generated segments", camera_id);
+        debug!("HLS storage enabled for camera '{}', checking for pre-generated segments", camera_id);
         
         // Try to find pre-generated HLS segments in database
         match database.get_recording_hls_segments_for_timerange(&camera_id, query.t1, query.t2).await {
             Ok(hls_segments) if !hls_segments.is_empty() => {
-                info!("Found {} pre-generated HLS segments for camera '{}' in time range", hls_segments.len(), camera_id);
+                debug!("Found {} pre-generated HLS segments for camera '{}' in time range", hls_segments.len(), camera_id);
                 
                 // Create HLS playlist from database-stored segments
                 let mut playlist_content = String::new();
@@ -180,7 +180,7 @@ pub async fn serve_hls_playlist(
                 
                 playlist_content.push_str("#EXT-X-ENDLIST\n");
                 
-                info!("Generated HLS playlist from {} database segments for camera '{}'", hls_segments.len(), camera_id);
+                debug!("Generated HLS playlist from {} database segments for camera '{}'", hls_segments.len(), camera_id);
                 
                 return axum::response::Response::builder()
                     .status(axum::http::StatusCode::OK)
@@ -489,7 +489,7 @@ pub async fn serve_hls_segment(
         let parts: Vec<&str> = segment_name.trim_end_matches(".ts").split('_').collect();
         if parts.len() >= 4 && parts[0] == "recording" {
             if let (Ok(session_id), Ok(segment_index)) = (parts[1].parse::<i64>(), parts[2].parse::<i32>()) {
-                info!("Serving database-stored HLS segment from recording_hls table: session_id={}, segment_index={}", session_id, segment_index);
+                debug!("Serving database-stored HLS segment from recording_hls table: session_id={}, segment_index={}", session_id, segment_index);
                 
                 match database.get_recording_hls_segment_by_session_and_index(session_id, segment_index).await {
                     Ok(Some(hls_segment)) => {
