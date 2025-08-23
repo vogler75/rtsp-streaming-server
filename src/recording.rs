@@ -1030,7 +1030,7 @@ impl RecordingManager {
         // Store segment in database with better error handling
         match database.add_recording_hls_segment(&hls_segment).await {
             Ok(_) => {
-                info!("Stored HLS segment {} for camera '{}' session {} ({} bytes, {:.2}s duration)", 
+                debug!("Stored HLS segment {} for camera '{}' session {} ({} bytes, {:.2}s duration)", 
                       segment_index, camera_id, session_id, size_bytes, duration_seconds);
             }
             Err(e) => {
