@@ -290,7 +290,7 @@
         .camera-actions {
             padding: 15px;
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 10px;
             border-top: 1px solid rgba(255,255,255,0.1);
         }
@@ -2059,28 +2059,14 @@
                 toggleEmbeddedStream(camera.id, camera.path, requiresToken);
             }
             
-            // Update admin buttons if in admin mode
+            // Update admin buttons visibility based on admin mode
             const cameraActionsDiv = document.getElementById(`actions-${camera.id}`);
-            if (cameraActionsDiv && isAdminMode) {
-                // Check if admin buttons already exist
-                if (!cameraActionsDiv.querySelector('.delete-btn')) {
-                    // Add admin buttons if they don't exist
-                    const editBtn = document.createElement('button');
-                    editBtn.onclick = () => showEditCamera(camera.id);
-                    editBtn.textContent = '✏️ Edit';
-                    
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'delete-btn';
-                    deleteBtn.onclick = () => deleteCamera(camera.id);
-                    deleteBtn.textContent = '🗑️ Delete';
-                    
-                    cameraActionsDiv.appendChild(editBtn);
-                    cameraActionsDiv.appendChild(deleteBtn);
-                }
-            } else if (cameraActionsDiv && !isAdminMode) {
-                // Remove admin buttons if not in admin mode
-                const adminButtons = cameraActionsDiv.querySelectorAll('button:not([onclick*="Stream"]):not([onclick*="Control"]):not([onclick*="Recording"])');
-                adminButtons.forEach(btn => btn.remove());
+            if (cameraActionsDiv) {
+                const editBtn = cameraActionsDiv.querySelector('button[onclick*="showEditCamera"]');
+                const deleteBtn = cameraActionsDiv.querySelector('.delete-btn');
+                
+                if (editBtn) editBtn.style.display = isAdminMode ? 'inline-block' : 'none';
+                if (deleteBtn) deleteBtn.style.display = isAdminMode ? 'inline-block' : 'none';
             }
             
             // Update recording status (keep existing function)
@@ -2238,7 +2224,8 @@
                 <div id="actions-${camera.id}" class="camera-actions">
                     <button onclick="openCameraStream('${camera.id}', '${camera.path}', ${requiresToken})">🔗 Stream</button>
                     <button onclick="openCameraControl('${camera.id}', '${camera.path}', ${requiresToken})">🎮 Control</button>
-                    ${adminButtons}
+                    <button onclick="showEditCamera('${camera.id}')" style="display: ${isAdminMode ? 'inline-block' : 'none'};">✏️ Edit</button>
+                    <button class="delete-btn" onclick="deleteCamera('${camera.id}')" style="display: ${isAdminMode ? 'inline-block' : 'none'};">🗑️ Delete</button>
                 </div>
             `;
             
