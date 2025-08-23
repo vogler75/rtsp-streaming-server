@@ -4,7 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Camera Control Interface</title>
-    <script src="../../hls.js"></script>
+
+    <script src="../hls.js"></script>
+
+    <!--
+    <script>
+    // Get the current URL path (e.g., /streamvault/cam1/control)
+    const path = window.location.pathname;
+
+    // Remove the last two segments (e.g., "control" and "cam1")
+    const basePath = path.split('/').slice(0, -2).join('/');
+
+    // Dynamically create a script tag for hls.js
+    const script = document.createElement('script');
+    script.src = `${basePath}/hls.js`;
+    document.head.appendChild(script);
+    </script>
+    -->
+
     <style>
         * {
             margin: 0;
