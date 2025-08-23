@@ -2053,6 +2053,9 @@
             const hlsStorageEnabled = formData.get('hls_storage_enabled');
             const hlsStorageRetention = formData.get('hls_storage_retention');
             const hlsSegmentSeconds = formData.get('hls_segment_seconds');
+            // Pre-recording buffer settings
+            const preRecordingEnabled = formData.get('pre_recording_enabled_camera');
+            const preRecordingBufferMinutes = formData.get('pre_recording_buffer_minutes_camera');
             
             // Only add recording section if at least one setting is configured
             if (sessionSegmentMinutes || 
@@ -2092,9 +2095,6 @@
                 }
                 
                 // Pre-recording buffer settings (memory-only, using new field names)
-                const preRecordingEnabled = formData.get('pre_recording_enabled_camera');
-                const preRecordingBufferMinutes = formData.get('pre_recording_buffer_minutes_camera');
-                
                 if (preRecordingEnabled !== '' && preRecordingEnabled !== null) {
                     config.recording.pre_recording_enabled = preRecordingEnabled === 'true';
                 }

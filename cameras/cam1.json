@@ -33,6 +33,9 @@
   },
   "recording": {
     "session_segment_minutes": 10,
+    "pre_recording_enabled": null,
+    "pre_recording_buffer_minutes": null,
+    "pre_recording_cleanup_interval_seconds": null,
     "frame_storage_enabled": null,
     "frame_storage_retention": null,
     "mp4_storage_type": null,
