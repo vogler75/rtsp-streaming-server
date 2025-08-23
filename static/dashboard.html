@@ -1058,14 +1058,43 @@
                     <h3 class="collapsible" onclick="toggleSection(this)">🎥 Recording Settings</h3>
                     <div class="collapsible-content">
                         
+                        <!-- Database Backend Section -->
+                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🗄️ Database Backend</h4>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Database Type</label>
+                                <select id="config_recording_database_type" onchange="toggleDatabaseOptions()">
+                                    <option value="sqlite">SQLite (Default)</option>
+                                    <option value="postgresql">PostgreSQL</option>
+                                </select>
+                                <span class="help-text">Choose database backend for recording storage</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Database Path <span style="color: #999;">(SQLite)</span></label>
+                                <input type="text" id="config_recording_database_path" placeholder="recordings">
+                                <span class="help-text">Directory for SQLite database files</span>
+                            </div>
+                            <div class="form-group" id="database_url_group" style="display: none;">
+                                <label>Database URL <span style="color: #999;">(PostgreSQL)</span></label>
+                                <input type="text" id="config_recording_database_url" placeholder="postgres://user:password@localhost/">
+                                <span class="help-text">PostgreSQL connection URL. End with '/' for per-camera DBs, specify DB name for shared DB</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Examples Section -->
+                        <div id="database_examples" style="margin: 15px 0; padding: 15px; background: rgba(74, 144, 226, 0.1); border-left: 4px solid #4a90e2; border-radius: 4px; display: none;">
+                            <h5 style="color: #4a90e2; margin: 0 0 10px 0;">PostgreSQL Examples:</h5>
+                            <div style="font-family: monospace; font-size: 13px; color: #ddd;">
+                                <div style="margin: 5px 0;"><strong>Per-camera databases:</strong> <code>postgres://user:pass@localhost/</code></div>
+                                <div style="margin: 5px 0; color: #999;">→ Creates separate databases: rtsp_cam1, rtsp_cam2, etc.</div>
+                                <div style="margin: 5px 0;"><strong>Shared database:</strong> <code>postgres://user:pass@localhost/surveillance</code></div>
+                                <div style="margin: 5px 0; color: #999;">→ All cameras use the same database with camera_id discrimination</div>
+                            </div>
+                        </div>
+
                         <!-- General Section -->
                         <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">⚙️ General</h4>
                         <div class="form-grid">
-                            <div class="form-group">
-                                <label>Database Path</label>
-                                <input type="text" id="config_recording_database_path" placeholder="recordings">
-                                <span class="help-text">Directory for recording database storage</span>
-                            </div>
                             <div class="form-group">
                                 <label>Session Segment Duration (minutes)</label>
                                 <input type="number" id="config_recording_session_segment_minutes" placeholder="60" min="1" max="1440">
@@ -1409,6 +1438,20 @@
             element.nextElementSibling.classList.toggle('collapsed');
         }
 
+        function toggleDatabaseOptions() {
+            const databaseType = document.getElementById('config_recording_database_type').value;
+            const databaseUrlGroup = document.getElementById('database_url_group');
+            const databaseExamples = document.getElementById('database_examples');
+            
+            if (databaseType === 'postgresql') {
+                databaseUrlGroup.style.display = 'block';
+                databaseExamples.style.display = 'block';
+            } else {
+                databaseUrlGroup.style.display = 'none';
+                databaseExamples.style.display = 'none';
+            }
+        }
+
         function showAddCamera() {
             if (!isAdminMode) {
                 showAdminAuth();
@@ -1599,8 +1642,13 @@
             document.getElementById('config_recording_frame_storage_enabled').value = (config.recording?.frame_storage_enabled || false).toString();
             document.getElementById('config_recording_mp4_storage_type').value = config.recording?.mp4_storage_type || 'filesystem';
             document.getElementById('config_recording_mp4_framerate').value = config.recording?.mp4_framerate || '5.0';
+            document.getElementById('config_recording_database_type').value = config.recording?.database_type || 'sqlite';
             document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
+            document.getElementById('config_recording_database_url').value = config.recording?.database_url || '';
             document.getElementById('config_recording_session_segment_minutes').value = config.recording?.session_segment_minutes || '';
+            
+            // Update database options display
+            toggleDatabaseOptions();
             document.getElementById('config_recording_max_frame_size').value = config.recording?.max_frame_size || '';
             document.getElementById('config_recording_frame_storage_retention').value = config.recording?.frame_storage_retention || '';
             document.getElementById('config_recording_mp4_storage_retention').value = config.recording?.mp4_storage_retention || '';
@@ -1650,7 +1698,9 @@
                     frame_storage_enabled: document.getElementById('config_recording_frame_storage_enabled').value === 'true',
                     mp4_storage_type: document.getElementById('config_recording_mp4_storage_type').value || 'filesystem',
                     mp4_framerate: parseFloat(document.getElementById('config_recording_mp4_framerate').value) || 5.0,
+                    database_type: document.getElementById('config_recording_database_type').value || 'sqlite',
                     database_path: document.getElementById('config_recording_database_path').value || "recordings",
+                    database_url: document.getElementById('config_recording_database_url').value || null,
                     session_segment_minutes: parseInt(document.getElementById('config_recording_session_segment_minutes').value) || 60,
                     max_frame_size: parseInt(document.getElementById('config_recording_max_frame_size').value) || 10485760,
                     frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
