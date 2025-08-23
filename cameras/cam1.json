@@ -31,16 +31,7 @@
     "publish_interval": 5,
     "topic_name": null
   },
-  "recording": {
-    "frame_storage_enabled": null,
-    "frame_storage_retention": null,
-    "video_storage_type": "database",
-    "video_storage_retention": null,
-    "video_segment_minutes": null,
-    "hls_storage_enabled": true,
-    "hls_storage_retention": "7d",
-    "hls_segment_seconds": null
-  },
+  "recording": null,
   "ptz": {
     "enabled": true,
     "protocol": "onvif",

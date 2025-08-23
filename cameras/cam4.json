@@ -28,8 +28,8 @@
     "data_timeout_secs": null
   },
   "mqtt": {
-    "publish_interval": 0,
-    "topic_name": "surveillance/cameras/cam2/image"
+    "publish_interval": 5,
+    "topic_name": null
   },
   "recording": null,
   "ptz": {

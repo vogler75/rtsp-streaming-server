@@ -18,11 +18,14 @@
     "database_path": "recordings",
     "frame_storage_enabled": true,
     "frame_storage_retention": "1h",
+    "hls_segment_seconds": 6,
+    "hls_storage_enabled": true,
+    "hls_storage_retention": "30d",
     "max_frame_size": 10485760,
     "mp4_framerate": 5,
     "video_segment_minutes": 5,
     "video_storage_retention": "30d",
-    "video_storage_type": "database"
+    "video_storage_type": "disabled"
   },
   "server": {
     "admin_token": "test",
