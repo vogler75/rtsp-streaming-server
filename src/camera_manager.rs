@@ -82,8 +82,9 @@ impl AppState {
                     }
                 }
 
-                // Extract frame sender before starting (since start() consumes the video_stream)
+                // Extract frame sender and fps counter before starting (since start() consumes the video_stream)
                 let frame_sender = video_stream.frame_sender.clone();
+                let fps_counter = video_stream.get_fps_counter();
                 
                 // Start the video stream and get the task handle
                 let task_handle = video_stream.start().await;
@@ -96,6 +97,7 @@ impl AppState {
                     camera_config: camera_config.clone(),
                     recording_manager: self.recording_manager.clone(),
                     task_handle: Some(Arc::new(task_handle)),
+                    capture_fps: fps_counter,
                 };
                 
                 // Add to camera streams

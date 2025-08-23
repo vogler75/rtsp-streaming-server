@@ -68,6 +68,10 @@ impl VideoStream {
         })
     }
     
+    pub fn get_fps_counter(&self) -> Arc<tokio::sync::RwLock<f32>> {
+        self.rtsp_client.get_fps_counter()
+    }
+    
     pub async fn start(self) -> tokio::task::JoinHandle<()> {
         let camera_id = self.camera_id.clone();
         tokio::spawn(async move {

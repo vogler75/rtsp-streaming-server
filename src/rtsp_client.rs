@@ -66,6 +66,10 @@ impl RtspClient {
         }
     }
     
+    pub fn get_fps_counter(&self) -> Arc<tokio::sync::RwLock<f32>> {
+        self.capture_fps.clone()
+    }
+    
     pub async fn start(&self) -> Result<()> {
         // Main capture loop
         loop {

@@ -101,6 +101,7 @@ struct CameraStreamInfo {
     camera_config: config::CameraConfig,
     recording_manager: Option<Arc<RecordingManager>>,
     task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
+    capture_fps: Arc<tokio::sync::RwLock<f32>>, // Shared FPS counter from RtspClient
 }
 
 fn generate_random_token(length: usize) -> String {
@@ -375,8 +376,9 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Extract frame sender before starting (since start() consumes the video_stream)
+                // Extract frame sender and FPS counter before starting (since start() consumes the video_stream)
                 let frame_sender = video_stream.frame_sender.clone();
+                let fps_counter = video_stream.get_fps_counter();
                 
                 // Start the video stream and get the task handle
                 let task_handle = video_stream.start().await;
@@ -389,6 +391,7 @@ async fn main() -> Result<()> {
                     camera_config: camera_config.clone(),
                     recording_manager: recording_manager.clone(),
                     task_handle: Some(Arc::new(task_handle)),
+                    capture_fps: fps_counter,
                 });
                 info!("Started camera '{}' on path '{}'" , camera_id, camera_config.path);
             }
@@ -744,14 +747,22 @@ async fn main() -> Result<()> {
                 data
             };
             
-            // Get active stream IDs and their receiver counts separately to avoid holding both locks
-            let (active_stream_ids, stream_receiver_counts) = {
+            // Get active stream IDs, their receiver counts, and FPS separately to avoid holding both locks
+            let (active_stream_ids, stream_receiver_counts, stream_fps_values) = {
                 let camera_streams = state.camera_streams.read().await;
                 let ids = camera_streams.keys().cloned().collect::<std::collections::HashSet<String>>();
                 let counts: std::collections::HashMap<String, usize> = camera_streams.iter()
                     .map(|(id, info)| (id.clone(), info.frame_sender.receiver_count()))
                     .collect();
-                (ids, counts)
+                
+                // Collect FPS values (we need to await them, but we can't do async in map)
+                let mut fps_values = std::collections::HashMap::new();
+                for (id, info) in camera_streams.iter() {
+                    let fps = *info.capture_fps.read().await;
+                    fps_values.insert(id.clone(), fps);
+                }
+                
+                (ids, counts, fps_values)
             };
             
             trace!("[API] Got {} total configs, {} active streams", 
@@ -790,6 +801,7 @@ async fn main() -> Result<()> {
                     } else {
                         // No MQTT status, but camera stream is active - get basic info
                         let clients_connected = stream_receiver_counts.get(&camera_id).copied().unwrap_or(0);
+                        let capture_fps = stream_fps_values.get(&camera_id).copied().unwrap_or(0.0);
                         
                         // Camera is active (streaming) even without MQTT
                         serde_json::json!({
@@ -797,7 +809,7 @@ async fn main() -> Result<()> {
                             "path": camera_config.path,
                             "enabled": is_enabled,
                             "connected": true,  // Stream is active, so it's connected
-                            "capture_fps": 0.0,  // Unknown without MQTT
+                            "capture_fps": capture_fps,  // Get actual FPS from stream
                             "clients_connected": clients_connected,
                             "last_frame_time": null,
                             "ffmpeg_running": true,  // If stream is active, FFmpeg must be running
