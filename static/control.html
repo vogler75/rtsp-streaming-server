@@ -449,8 +449,15 @@
                         </select>
                     </div>
                     <div class="control-group">
+                        <label>Filter by Reason (optional):</label>
+                        <input type="text" id="reasonFilter" placeholder="e.g. Motion, Security, %alarm%" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;" />
+                        <div class="info-text" style="margin-top: 3px; font-size: 11px;">
+                            💡 Use % as wildcard (e.g., "%alarm%" finds "motion alarm", "fire alarm", etc.)
+                        </div>
+                    </div>
+                    <div class="control-group">
                         <label>Sort Order:</label>
-                        <select id="sortOrder" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="sortOrder" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;">
                             <option value="newest">Newest First</option>
                             <option value="oldest">Oldest First</option>
                         </select>
@@ -569,6 +576,15 @@
                 // Add sort order change listener
                 document.getElementById('sortOrder').addEventListener('change', () => {
                     this.fetchRecordings();
+                });
+                
+                // Add reason filter change listener (with debounce)
+                let reasonFilterTimeout;
+                document.getElementById('reasonFilter').addEventListener('input', () => {
+                    clearTimeout(reasonFilterTimeout);
+                    reasonFilterTimeout = setTimeout(() => {
+                        this.fetchRecordings();
+                    }, 500); // 500ms debounce
                 });
 
                 // Add event listener for keep toggle buttons (using event delegation)
@@ -766,7 +782,12 @@
 
                 // Convert to UTC for backend API call
                 const sortOrder = document.getElementById('sortOrder').value;
-                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings?from=${fromDate.toISOString()}&to=${toDate.toISOString()}&sort_order=${sortOrder}`;
+                const reasonFilter = document.getElementById('reasonFilter').value.trim();
+                
+                let url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings?from=${fromDate.toISOString()}&to=${toDate.toISOString()}&sort_order=${sortOrder}`;
+                if (reasonFilter) {
+                    url += `&reason=${encodeURIComponent(reasonFilter)}`;
+                }
                 
                 try {
                     const headers = {};
@@ -799,6 +820,7 @@
                 const toDate = new Date(to + 'T23:59:59');
 
                 const sortOrder = document.getElementById('sortOrder').value;
+                const reasonFilter = document.getElementById('reasonFilter').value.trim();
                 
                 // Use REST API for MP4 segments
                 const baseUrl = window.location.origin + window.location.pathname.replace('/control', '');
@@ -807,6 +829,10 @@
                     to: toDate.toISOString(),
                     sort_order: sortOrder
                 });
+                
+                if (reasonFilter) {
+                    params.append('reason', reasonFilter);
+                }
                 
                 const url = `${baseUrl}/control/recordings/mp4/segments?${params}`;
                 
