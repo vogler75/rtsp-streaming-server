@@ -891,6 +891,11 @@ function updateServerStatus(statusData, cameras) {
     document.getElementById('activeCameras').textContent = statusData.total_cameras;
     document.getElementById('totalConnections').textContent = statusData.total_clients;
     
+    // Update version display if available
+    if (statusData.version) {
+        document.getElementById('versionDisplay').textContent = `Version: ${statusData.version}`;
+    }
+    
     // Calculate recording cameras from camera data
     const recordingCameras = cameras.filter(cam => cam.ffmpeg_running).length;
     document.getElementById('recordingStatus').textContent = 

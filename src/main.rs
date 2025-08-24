@@ -37,6 +37,9 @@ use config::Config;
 use errors::{Result, StreamError};
 use api_recording::ApiResponse;
 
+// Include version from version.txt at compile time
+const VERSION: &str = include_str!("../version.txt");
+
 // Custom formatter to remove "rtsp_streaming_server::" prefix and pad to 80 chars
 struct CustomFormatter;
 
@@ -193,6 +196,11 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::EnvFilter::new(log_level))
         .with(fmt_layer)
         .init();
+
+    // Display version at startup
+    info!("=====================================");
+    info!("RTSP Streaming Server v{}", VERSION.trim());
+    info!("=====================================");
 
     let config = match Config::load(&args.config) {
         Ok(cfg) => {
@@ -849,6 +857,7 @@ async fn main() -> Result<()> {
             }
             
             let status = serde_json::json!({
+                "version": VERSION.trim(),
                 "uptime_secs": uptime_secs,
                 "total_clients": total_clients,
                 "total_cameras": total_cameras

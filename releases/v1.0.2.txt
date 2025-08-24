@@ -1,0 +1,19 @@
+Release v1.0.2
+
+Changes since v1.0.1:
+- UI improvements with a new table-based recordings list layout
+- Addition of a reason filter for recordings
+- HLS playback fixes with proper FFmpeg framerate handling  
+- Recording manager enhancements
+- Throughput tracking refactoring
+- Dashboard updates with separated JavaScript files
+
+Git commits:
+7f5430d Redesign recordings list with table layout
+5045b28 Add reason filter to recordings view
+babbaea Improve HLS segment logging and FFmpeg framerate handling
+7b32bbe Improve recording manager initialization logic
+5160a22 Refactor throughput tracker and update project docs
+e3de98f Move dashboard JS to separate file and add route
+54d9d0f Update dashboard.html
+d3d2956 Update dashboard.html
