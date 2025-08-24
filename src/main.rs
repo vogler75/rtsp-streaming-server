@@ -556,6 +556,7 @@ async fn main() -> Result<()> {
         .route("/dashboard", axum::routing::get(handlers::dashboard_handler))
         .route("/debug", axum::routing::get(handlers::debug_handler))
         .route("/hls.js", axum::routing::get(handlers::hlsjs_handler))
+        .route("/dashboard.js", axum::routing::get(handlers::dashboardjs_handler))
         .nest_service("/recordings", tower_http::services::ServeDir::new(app_state.recording_config.as_ref().map_or("recordings", |c| &c.database_path)));
     
     // Add routes for each camera (both stream and control endpoints)

@@ -28,6 +28,15 @@ pub async fn hlsjs_handler() -> axum::response::Html<String> {
     axum::response::Html(html)
 }
 
+pub async fn dashboardjs_handler() -> axum::http::Response<String> {
+    trace!("Dashboard JS requested");
+    let js = include_str!("../static/dashboard.js").to_string();
+    axum::http::Response::builder()
+        .header("content-type", "application/javascript")
+        .body(js)
+        .unwrap()
+}
+
 pub async fn serve_control_page() -> axum::response::Html<String> {
     let html = include_str!("../static/control.html").to_string();
     axum::response::Html(html)
