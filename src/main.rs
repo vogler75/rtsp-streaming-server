@@ -100,6 +100,10 @@ pub struct Args {
     /// Enable throughput tracking and database logging
     #[arg(long)]
     throughput: bool,
+
+    /// When creating a new config, generate a random admin password instead of the default "manager"
+    #[arg(long)]
+    random_admin_token: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -211,12 +215,20 @@ async fn main() -> Result<()> {
             warn!("Could not load configuration from {}: {}", args.config, e);
             info!("Starting with minimal configuration - no cameras configured");
             
-            // Generate a random admin token for initial access
-            let admin_token = generate_random_token(32);
+            // Determine initial admin password for first-time setup
+            let admin_token = if args.random_admin_token {
+                generate_random_token(32)
+            } else {
+                "manager".to_string()
+            };
             info!("========================================");
-            info!("Generated admin token: {}", admin_token);
-            info!("Use this token to access /dashboard for admin interface");
-            info!("This token has been saved to {}", args.config);
+            if args.random_admin_token {
+                info!("Generated random admin password: {}", admin_token);
+            } else {
+                info!("Initial admin password: {}", admin_token);
+            }
+            info!("Use this password to access /dashboard for admin interface");
+            info!("This password has been saved to {}", args.config);
             info!("========================================");
             
             let mut default_config = Config::default();
