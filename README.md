@@ -170,8 +170,8 @@ Here's a complete `config.json` file with all sections:
   "mqtt": {
     "enabled": true,
     "broker_url": "mqtt://192.168.1.4:1883",
-    "client_id": "videoserver-01",
-    "base_topic": "Videoserver",
+    "client_id": "videoserver-${hostname}",
+    "base_topic": "Videoserver/${hostname}",
     "qos": 0,
     "retain": false,
     "keep_alive_secs": 60,
@@ -222,10 +222,10 @@ Here's a complete `config.json` file with all sections:
   "mqtt": {
     "enabled": true,
     "broker_url": "mqtt://192.168.1.4:1883",
-    "client_id": "videoserver-01",
+    "client_id": "videoserver-${hostname}",
     "username": "mqtt_user",
     "password": "mqtt_pass",
-    "base_topic": "Videoserver",
+    "base_topic": "Videoserver/${hostname}",
     "qos": 0,
     "retain": false,
     "keep_alive_secs": 60,

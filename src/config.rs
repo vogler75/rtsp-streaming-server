@@ -356,9 +356,6 @@ impl MqttConfig {
         
         // Substitute ${hostname} in client_id
         self.client_id = self.client_id.replace("${hostname}", &hostname);
-        
-        info!("MQTT config substituted: base_topic = {}, client_id = {}", 
-              self.base_topic, self.client_id);
     }
 }
 

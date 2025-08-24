@@ -14,10 +14,10 @@ key_path = "certs/server.key"
 [mqtt]
 enabled = true
 broker_url = "mqtt://192.168.1.4:1883"  # Can also use mqtts:// for TLS
-client_id = "videoserver-02"
+client_id = "videoserver-${hostname}"
 # username = "mqtt_user"  # Optional
 # password = "mqtt_pass"  # Optional
-base_topic = "Videoserver/2"  # Base topic for all MQTT messages
+base_topic = "Videoserver/${hostname}"  # Base topic for all MQTT messages
 qos = 0  # Quality of Service (0, 1, or 2)
 retain = false  # Whether to retain messages
 keep_alive_secs = 60  # Keep-alive interval in secondsa
