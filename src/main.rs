@@ -313,9 +313,27 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Initialize recording manager if enabled
+    // Initialize recording manager if any recording mode is enabled globally or per-camera
     let recording_manager: Option<Arc<RecordingManager>> = if let Some(recording_config) = &config.recording {
-        if recording_config.frame_storage_enabled || recording_config.mp4_storage_type != config::Mp4StorageType::Disabled {
+        // Global switches that should enable recording manager
+        let global_wants_manager =
+            recording_config.frame_storage_enabled ||
+            recording_config.mp4_storage_type != config::Mp4StorageType::Disabled ||
+            recording_config.hls_storage_enabled;
+
+        // Per-camera overrides may enable recording even if global is disabled
+        let any_camera_wants_manager = config.cameras.values().any(|cam_cfg| {
+            if let Some(rec) = &cam_cfg.recording {
+                let frame_enabled = rec.frame_storage_enabled.unwrap_or(false);
+                let mp4_enabled = rec.mp4_storage_type.as_ref().map(|t| *t != config::Mp4StorageType::Disabled).unwrap_or(false);
+                let hls_enabled = rec.hls_storage_enabled.unwrap_or(false);
+                frame_enabled || mp4_enabled || hls_enabled
+            } else {
+                false
+            }
+        });
+
+        if global_wants_manager || any_camera_wants_manager {
             info!("Initializing recording system with database directory: {}", recording_config.database_path);
             
             // Directory already created and verified earlier
@@ -352,7 +370,7 @@ async fn main() -> Result<()> {
                 }
             }
         } else {
-            info!("Recording system disabled in configuration");
+            info!("Recording system disabled (no global or per-camera recording enabled)");
             None
         }
     } else {
@@ -1174,5 +1192,3 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
 // admin API handlers moved to api::admin
 
 // Camera management functions for dynamic reload
-
-
