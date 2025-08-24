@@ -241,6 +241,8 @@ pub async fn serve_hls_playlist(
                 playlist_content.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
                 
                 for segment in &hls_segments {
+                    debug!("HLS segment {}: duration_seconds={:.3}, start_time={}, end_time={}", 
+                           segment.segment_index, segment.duration_seconds, segment.start_time, segment.end_time);
                     playlist_content.push_str(&format!("#EXTINF:{:.3},\n", segment.duration_seconds));
                     // Create segment URL that will be handled by serve_hls_segment_from_database
                     // Use "db" as a placeholder playlist_id for database-stored segments
@@ -405,14 +407,22 @@ pub async fn serve_hls_playlist(
 
     // Generate HLS segments using FFmpeg
     let playlist_path = format!("{}/playlist.m3u8", temp_dir);
+    // Get the configured capture framerate from transcoding config (more accurate than mp4_framerate)
+    let transcoding_config = &app_state.transcoding_config;
+    let capture_framerate = transcoding_config.capture_framerate;
+    
     let mut hls_cmd = Command::new("ffmpeg");
     hls_cmd.args([
         "-f", "concat",
         "-safe", "0",
         "-i", &concat_list_path,
+        "-r", &capture_framerate.to_string(), // Input framerate to match camera capture rate
         "-c:v", "libx264",
         "-c:a", "aac",
+        "-vf", &format!("fps={}", capture_framerate), // Output framerate filter
         "-preset", "ultrafast",
+        "-avoid_negative_ts", "make_zero", // Fix timestamp issues
+        "-fflags", "+genpts", // Generate presentation timestamps
         "-hls_time", &query.segment_duration.to_string(),
         "-hls_playlist_type", "vod",
         "-hls_segment_type", "mpegts", // Use MPEG-TS segments for better HLS compatibility
