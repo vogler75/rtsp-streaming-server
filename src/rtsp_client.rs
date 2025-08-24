@@ -36,11 +36,11 @@ pub struct RtspClient {
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>) -> Self {
-        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle, camera_mqtt_config).await
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>, shutdown_flag: Option<Arc<AtomicBool>>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle, camera_mqtt_config, shutdown_flag).await
     }
 
-    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>) -> Self {
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>, shutdown_flag: Option<Arc<AtomicBool>>) -> Self {
         Self {
             camera_id,
             config,
@@ -62,7 +62,7 @@ impl RtspClient {
             last_frame_hash: Arc::new(RwLock::new(None)),
             duplicate_frame_count: Arc::new(RwLock::new(0)),
             last_mqtt_publish_time: Arc::new(RwLock::new(None)),
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            shutdown_flag: shutdown_flag.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
         }
     }
     

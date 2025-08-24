@@ -129,6 +129,7 @@ struct CameraStreamInfo {
     capture_fps: Arc<tokio::sync::RwLock<f32>>, // Shared FPS counter from RtspClient
     pre_recording_buffer: Option<crate::pre_recording_buffer::PreRecordingBuffer>,
     mp4_buffer_stats: Arc<tokio::sync::RwLock<Mp4BufferStats>>, // MP4 buffer statistics
+    shutdown_flag: Arc<std::sync::atomic::AtomicBool>, // Shared shutdown signal for graceful termination
 }
 
 fn generate_random_token(length: usize) -> String {
@@ -400,12 +401,16 @@ async fn main() -> Result<()> {
         
         info!("Configuring camera '{}' on path '{}'...", camera_id, camera_config.path);
         
+        // Create shared shutdown flag
+        let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
         match VideoStream::new(
             camera_id.clone(),
             camera_config.clone(),
             &config.transcoding,
             mqtt_handle.clone(),
             config.recording.as_ref(),
+            Some(shutdown_flag.clone()),
         ).await {
             Ok(video_stream) => {
                 // Create database for this camera if recording is enabled
@@ -463,6 +468,7 @@ async fn main() -> Result<()> {
                     capture_fps: fps_counter,
                     pre_recording_buffer,
                     mp4_buffer_stats,
+                    shutdown_flag,
                 });
                 info!("Started camera '{}' on path '{}'" , camera_id, camera_config.path);
             }

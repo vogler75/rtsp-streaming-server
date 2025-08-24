@@ -23,8 +23,9 @@ impl VideoStream {
         default_transcoding: &TranscodingConfig,
         mqtt_handle: Option<MqttHandle>,
         global_recording_config: Option<&crate::config::RecordingConfig>,
+        shutdown_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<Self> {
-        Self::new_from_builder(camera_id, camera_config, default_transcoding.clone(), mqtt_handle, global_recording_config).await
+        Self::new_from_builder(camera_id, camera_config, default_transcoding.clone(), mqtt_handle, global_recording_config, shutdown_flag).await
     }
 
     pub async fn new_from_builder(
@@ -33,6 +34,7 @@ impl VideoStream {
         default_transcoding: TranscodingConfig,
         mqtt_handle: Option<MqttHandle>,
         global_recording_config: Option<&crate::config::RecordingConfig>,
+        shutdown_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Result<Self> {
         // Use camera-specific transcoding config if available, otherwise use default
         let transcoding = camera_config.transcoding_override.as_ref().unwrap_or(&default_transcoding);
@@ -91,6 +93,7 @@ impl VideoStream {
             transcoding.debug_duplicate_frames.unwrap_or(false),
             mqtt_handle,
             camera_config.mqtt.clone(),
+            shutdown_flag,
         ).await;
         
         Ok(Self {

@@ -52,6 +52,9 @@ impl AppState {
         
         info!("Adding camera '{}' on path '{}'...", camera_id, camera_config.path);
         
+        // Create shared shutdown flag
+        let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
         // Create video stream
         match VideoStream::new(
             camera_id.clone(),
@@ -59,6 +62,7 @@ impl AppState {
             &self.transcoding_config,
             self.mqtt_handle.clone(),
             self.recording_config.as_ref().map(|arc| arc.as_ref()),
+            Some(shutdown_flag.clone()),
         ).await {
             Ok(video_stream) => {
                 // Create database for this camera if recording is enabled
@@ -113,6 +117,7 @@ impl AppState {
                     capture_fps: fps_counter,
                     pre_recording_buffer,
                     mp4_buffer_stats,
+                    shutdown_flag,
                 };
                 
                 // Add to camera streams
@@ -152,6 +157,13 @@ impl AppState {
         };
         
         if let Some(camera_info) = removed {
+            // Signal graceful shutdown first
+            info!("Signalling graceful shutdown for camera '{}'", camera_id);
+            camera_info.shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            
+            // Wait a moment for graceful shutdown
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
             // Stop and abort the video stream task
             if let Some(task_handle) = camera_info.task_handle {
                 info!("Cancelling video stream task for camera '{}'", camera_id);
