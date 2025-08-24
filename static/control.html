@@ -55,6 +55,12 @@
             margin-bottom: 20px;
         }
         
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
         .left-column {
             display: flex;
             flex-direction: column;
@@ -116,34 +122,96 @@
         
         .recordings-list {
             flex: 1;
-            min-height: 400px;
+            min-height: 300px;
             overflow-y: auto;
             background: rgba(0, 0, 0, 0.2);
             border-radius: 5px;
-            padding: 10px;
+            padding: 0;
         }
         
-        .recording-item {
-            padding: 10px;
-            margin-bottom: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
+        .recordings-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        
+        .recordings-table th {
+            background: rgba(0, 0, 0, 0.3);
+            color: rgba(255, 255, 255, 0.9);
+            padding: 8px 6px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            position: sticky;
+            top: 0;
+        }
+        
+        .recordings-table td {
+            padding: 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .recordings-table tbody tr {
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background-color 0.2s ease;
         }
         
-        .recording-item:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateX(5px);
+        .recordings-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.1);
         }
         
-        .recording-item.selected {
+        .recordings-table tbody tr.selected {
             background: rgba(76, 175, 80, 0.3);
-            border: 1px solid #4CAF50;
+        }
+        
+        .keep-status {
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 2px;
+            display: inline-block;
+        }
+        
+        .keep-status.protected {
+            background: rgba(76, 175, 80, 0.3);
+            color: #4CAF50;
+        }
+        
+        .keep-status.normal {
+            background: rgba(128, 128, 128, 0.2);
+            color: #999;
+        }
+        
+        .keep-toggle-btn {
+            padding: 1px 4px;
+            font-size: 9px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-radius: 2px;
+            cursor: pointer;
+            margin-left: 4px;
+        }
+        
+        .keep-toggle-btn:hover {
+            background: rgba(255,255,255,0.2);
         }
         
         .control-group {
             margin-bottom: 15px;
+        }
+        
+        .filters-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .filters-container {
+                grid-template-columns: 1fr;
+            }
         }
         
         .control-group label {
@@ -408,64 +476,65 @@
                         </div>
                     </div>
                 </div>
-                
-                <div class="panel" id="recordingControlsPanel">
-                    <h2>Recording Controls</h2>
-                    <div class="info-text" style="margin-bottom: 10px;">📡 Uses REST API</div>
-                    <div class="control-group">
-                        <label>Recording Reason:</label>
-                        <input type="text" id="recordingReason" placeholder="e.g., Security event, motion detected..." />
-                    </div>
-                    <div class="button-group">
-                        <button id="startRecording" class="success">▶️ Start Recording</button>
-                        <button id="stopRecording" class="danger" disabled>⏹ Stop Recording</button>
-                    </div>
-                </div>
             </div>
             
             <div class="right-column">
-                <div class="panel">
-                    <h2>Available Recordings</h2>
-                    <div class="control-group">
-                        <label>Date Range:</label>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <input type="date" id="fromDate" style="flex: 1;" />
-                            <span>to</span>
-                            <input type="date" id="toDate" style="flex: 1;" />
+                <div class="panel" id="recordingControlsPanel" style="height: 100%; display: flex; flex-direction: column;">
+                    <h2 style="margin-bottom: 10px;">Recording Controls</h2>
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                        <div>
+                            <label style="font-size: 12px; margin-bottom: 4px;">Reason (optional):</label>
+                            <div style="display: flex; gap: 8px; align-items: stretch;">
+                                <input type="text" id="recordingReason" placeholder="Motion, Security, etc..." style="padding: 6px; font-size: 12px; flex: 1;" />
+                                <button id="startRecording" class="success" style="padding: 6px 10px; font-size: 11px; white-space: nowrap;">▶️ Start</button>
+                                <button id="stopRecording" class="danger" disabled style="padding: 6px 10px; font-size: 11px; white-space: nowrap;">⏹ Stop</button>
+                            </div>
                         </div>
-                        <div class="button-group" style="margin-top: 10px;">
-                            <button id="refreshRecordings">🔄 Refresh List</button>
-                        </div>
-                        <div class="info-text" style="margin-top: 5px; font-size: 11px;">
-                            ⏰ Times displayed in your local timezone
-                        </div>
-                    </div>
-                    <div class="control-group">
-                        <label>Playback Mode:</label>
-                        <select id="playbackMode" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;">
-                            <option value="frames">Frame Recordings</option>
-                            <option value="hls">HLS Recordings</option>
-                            <option value="segments">MP4 Segments</option>                            
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label>Filter by Reason (optional):</label>
-                        <input type="text" id="reasonFilter" placeholder="e.g. Motion, Security, %alarm%" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;" />
-                        <div class="info-text" style="margin-top: 3px; font-size: 11px;">
-                            💡 Use % as wildcard (e.g., "%alarm%" finds "motion alarm", "fire alarm", etc.)
-                        </div>
-                    </div>
-                    <div class="control-group">
-                        <label>Sort Order:</label>
-                        <select id="sortOrder" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;">
-                            <option value="newest">Newest First</option>
-                            <option value="oldest">Oldest First</option>
-                        </select>
-                    </div>
-                    <div class="recordings-list" id="recordingsList">
-                        <div class="info-text">Select a date range and click "Refresh List"</div>
                     </div>
                 </div>
+            </div>
+        </div>
+        
+        <div class="panel" style="margin-top: 20px;">
+            <h2>Available Recordings</h2>
+            <div class="filters-container">
+                <div class="control-group">
+                    <label>Date Range:</label>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <input type="date" id="fromDate" style="min-width: 130px; flex: 1;" />
+                        <span style="white-space: nowrap;">to</span>
+                        <input type="date" id="toDate" style="min-width: 130px; flex: 1;" />
+                        <button id="refreshRecordings" style="padding: 8px 12px; font-size: 12px; flex: none; white-space: nowrap;">🔄 Refresh</button>
+                    </div>
+                    <div class="info-text" style="margin-top: 5px; font-size: 11px;">
+                        ⏰ Times displayed in your local timezone
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Playback Mode:</label>
+                    <select id="playbackMode" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;">
+                        <option value="frames">Frame Recordings</option>
+                        <option value="hls">HLS Recordings</option>
+                        <option value="segments">MP4 Segments</option>                            
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Filter by Reason (optional):</label>
+                    <input type="text" id="reasonFilter" placeholder="e.g. Motion, Security, %alarm%" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;" />
+                    <div class="info-text" style="margin-top: 3px; font-size: 11px;">
+                        💡 Use % as wildcard (e.g., "%alarm%" finds "motion alarm", "fire alarm", etc.)
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Sort Order:</label>
+                    <select id="sortOrder" style="width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; border-radius: 5px; font-size: 14px;">
+                        <option value="newest">Newest First</option>
+                        <option value="oldest">Oldest First</option>
+                    </select>
+                </div>
+            </div>
+            <div class="recordings-list" id="recordingsList">
+                <div class="info-text">Select a date range and click "Refresh List"</div>
             </div>
         </div>
         
@@ -852,76 +921,103 @@
 
             displayRecordings(recordings) {
                 const container = document.getElementById('recordingsList');
-                container.innerHTML = '';
+                
                 if (recordings.length === 0) {
-                    container.innerHTML = '<div class="info-text">No recordings found.</div>';
+                    container.innerHTML = '<div class="info-text" style="padding: 20px;">No recordings found.</div>';
                     return;
                 }
                 
+                // Create table HTML
+                let tableHTML = `
+                    <table class="recordings-table">
+                        <thead>
+                            <tr>
+                                <th>Session</th>
+                                <th>Start Time</th>
+                                <th>End Time</th>
+                                <th>Duration</th>
+                                <th>Reason</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
                 recordings.forEach(rec => {
-                    const item = document.createElement('div');
-                    item.className = 'recording-item';
-                    
-                    // Display times in local timezone with more detailed format
+                    // Format start time
                     const startTime = new Date(rec.start_time).toLocaleString(undefined, {
-                        year: 'numeric',
                         month: '2-digit',
                         day: '2-digit',
                         hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
+                        minute: '2-digit'
                     });
                     
-                    const endTime = rec.end_time ? 
-                        new Date(rec.end_time).toLocaleString(undefined, {
-                            year: 'numeric',
+                    // Format end time
+                    let endTime = 'In Progress';
+                    if (rec.end_time) {
+                        endTime = new Date(rec.end_time).toLocaleString(undefined, {
                             month: '2-digit',
                             day: '2-digit',
                             hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit'
-                        }) : 'In Progress';
+                            minute: '2-digit'
+                        });
+                    }
                     
-                    // Calculate duration if recording is complete
-                    let durationText = '';
+                    // Calculate duration
+                    let durationText = '-';
                     if (rec.end_time) {
                         const duration = new Date(rec.end_time) - new Date(rec.start_time);
                         const hours = Math.floor(duration / (1000 * 60 * 60));
                         const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
-                        const seconds = Math.floor((duration % (1000 * 60)) / 1000);
-                        durationText = `<br>Duration: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                        if (hours > 0) {
+                            durationText = `${hours}h ${minutes}m`;
+                        } else {
+                            durationText = `${minutes}m`;
+                        }
                     }
                     
-                    const reasonText = rec.reason && rec.reason !== 'null' ? `<br>📝 <em>${rec.reason}</em>` : '';
-                    const keepFlag = rec.keep_session ? '<span style="color: #4CAF50; font-weight: bold;">🔒 PROTECTED</span>' : '<span style="color: #666;">📄 Normal</span>';
+                    // Format reason
+                    const reasonText = rec.reason && rec.reason !== 'null' ? rec.reason : '-';
                     
-                    item.innerHTML = `
-                        <div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                                <strong>Session ${rec.id}</strong>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    ${keepFlag}
-                                    <button class="keep-toggle-btn" data-session-id="${rec.id}" data-keep-session="${rec.keep_session}" 
-                                            style="padding: 2px 6px; font-size: 10px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); color: white; border-radius: 3px; cursor: pointer;"
-                                            title="${rec.keep_session ? 'Remove protection' : 'Protect from purging'}">
-                                        ${rec.keep_session ? '🔓' : '🔒'}
-                                    </button>
-                                </div>
-                            </div>
-                            ${reasonText}<br>Start: ${startTime}<br>End: ${endTime}${durationText}
-                        </div>
+                    // Keep status
+                    const keepStatus = rec.keep_session ? 
+                        '<span class="keep-status protected">🔒 Protected</span>' : 
+                        '<span class="keep-status normal">📄 Normal</span>';
+                    
+                    const toggleButton = `<button class="keep-toggle-btn" data-session-id="${rec.id}" data-keep-session="${rec.keep_session}" 
+                                                  title="${rec.keep_session ? 'Remove protection' : 'Protect from purging'}">
+                                              ${rec.keep_session ? '🔓' : '🔒'}
+                                          </button>`;
+                    
+                    tableHTML += `
+                        <tr data-session-id="${rec.id}">
+                            <td>${rec.id}</td>
+                            <td>${startTime}</td>
+                            <td>${endTime}</td>
+                            <td>${durationText}</td>
+                            <td style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${reasonText}">${reasonText}</td>
+                            <td>${keepStatus}${toggleButton}</td>
+                        </tr>
                     `;
+                });
+                
+                tableHTML += '</tbody></table>';
+                container.innerHTML = tableHTML;
+                
+                // Add click handlers for table rows
+                const rows = container.querySelectorAll('tbody tr');
+                rows.forEach((row, index) => {
+                    const rec = recordings[index];
                     
-                    // Add click handler for the main item (excluding the button)
-                    item.addEventListener('click', (event) => {
+                    row.addEventListener('click', (event) => {
                         // Don't select recording if clicking on the keep toggle button
                         if (event.target.classList.contains('keep-toggle-btn')) {
                             return;
                         }
                         
                         this.selectedRecording = rec;
-                        document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
-                        item.classList.add('selected');
+                        rows.forEach(r => r.classList.remove('selected'));
+                        row.classList.add('selected');
                         
                         const mode = document.getElementById('playbackMode').value;
                         if (mode === 'hls') {
@@ -929,50 +1025,95 @@
                         } else {
                             this.startReplay(rec);
                         }
+                        
+                        // Scroll to top to show the video player
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
                     });
-                    container.appendChild(item);
                 });
             }
 
             displayVideoSegments(segments) {
                 const container = document.getElementById('recordingsList');
-                container.innerHTML = '';
+                
                 if (segments.length === 0) {
-                    container.innerHTML = '<div class="info-text">No video segments found.</div>';
+                    container.innerHTML = '<div class="info-text" style="padding: 20px;">No video segments found.</div>';
                     return;
                 }
 
+                // Create table HTML for segments
+                let tableHTML = `
+                    <table class="recordings-table">
+                        <thead>
+                            <tr>
+                                <th>Start Time</th>
+                                <th>End Time</th>
+                                <th>Duration</th>
+                                <th>Size</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
                 segments.forEach(seg => {
-                    const item = document.createElement('div');
-                    item.className = 'recording-item';
-                    
-                    const startTime = new Date(seg.start_time).toLocaleTimeString();
-                    const endTime = new Date(seg.end_time).toLocaleTimeString();
-                    const sizeMB = (seg.size_bytes / (1024 * 1024)).toFixed(2);
+                    const startTime = new Date(seg.start_time).toLocaleString(undefined, {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                    const endTime = new Date(seg.end_time).toLocaleString(undefined, {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                    const sizeMB = (seg.size_bytes / (1024 * 1024)).toFixed(1);
 
-                    // Use duration from server response
-                    let durationText = '';
+                    // Format duration
+                    let durationText = '-';
                     if (seg.duration_seconds) {
                         const totalSeconds = seg.duration_seconds;
                         const hours = Math.floor(totalSeconds / 3600);
                         const minutes = Math.floor((totalSeconds % 3600) / 60);
-                        const seconds = totalSeconds % 60;
+                        const seconds = Math.floor(totalSeconds % 60);
                         
                         if (hours > 0) {
-                            durationText = ` (${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')})`;
+                            durationText = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                         } else {
-                            durationText = ` (${minutes}:${seconds.toString().padStart(2, '0')})`;
+                            durationText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
                         }
                     }
 
-                    const reasonText = seg.recording_reason && seg.recording_reason !== 'Unknown' ? `<br>📝 <em>${seg.recording_reason}</em>` : '';
-                    item.innerHTML = `<strong>${startTime} - ${endTime}</strong>${durationText}<br>${sizeMB} MB${reasonText}`;
-                    item.addEventListener('click', () => {
+                    const reasonText = seg.recording_reason && seg.recording_reason !== 'Unknown' ? seg.recording_reason : '-';
+                    
+                    tableHTML += `
+                        <tr data-segment-url="${seg.url}">
+                            <td>${startTime}</td>
+                            <td>${endTime}</td>
+                            <td>${durationText}</td>
+                            <td>${sizeMB} MB</td>
+                            <td style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${reasonText}">${reasonText}</td>
+                        </tr>
+                    `;
+                });
+                
+                tableHTML += '</tbody></table>';
+                container.innerHTML = tableHTML;
+                
+                // Add click handlers for segment rows
+                const rows = container.querySelectorAll('tbody tr');
+                rows.forEach((row, index) => {
+                    const seg = segments[index];
+                    
+                    row.addEventListener('click', () => {
                         this.playVideoSegment(seg.url);
-                        document.querySelectorAll('.recording-item').forEach(el => el.classList.remove('selected'));
-                        item.classList.add('selected');
+                        rows.forEach(r => r.classList.remove('selected'));
+                        row.classList.add('selected');
+                        
+                        // Scroll to top to show the video player
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
                     });
-                    container.appendChild(item);
                 });
             }
 
