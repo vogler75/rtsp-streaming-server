@@ -49,7 +49,6 @@ pub struct ThroughputStats {
     pub bytes_per_second: i64,
     pub frame_count: i32,
     pub ffmpeg_fps: f32,
-    pub connection_count: i32,
     pub timestamp: String,
 }
 

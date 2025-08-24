@@ -162,16 +162,14 @@ impl ThroughputTracker {
                     }
                 }
                 
-                // Publish to MQTT if available
+                // Publish to MQTT if available (without connection_count in payload)
                 if let Some(ref mqtt_handle) = self.mqtt_handle {
                     let mqtt_stats = MqttThroughputStats {
                         bytes_per_second: stats.bytes_per_second,
                         frame_count: stats.frame_count,
                         ffmpeg_fps: stats.ffmpeg_fps,
-                        connection_count: stats.connection_count,
                         timestamp: now.to_rfc3339(),
                     };
-                    
                     if let Err(e) = mqtt_handle.publish_throughput_stats(camera_id, &mqtt_stats).await {
                         error!("Failed to publish throughput stats to MQTT for camera '{}': {}", camera_id, e);
                     }

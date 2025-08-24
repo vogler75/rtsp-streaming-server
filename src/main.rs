@@ -425,12 +425,11 @@ async fn main() -> Result<()> {
                                 } else {
                                     info!("Database created successfully for camera '{}'", camera_id);
                                     
-                                    // Also add database to throughput tracker if available and throughput flag is set
+                                    // Also add database to throughput tracker if available and throughput DB logging is enabled
                                     if let Some(ref throughput_tracker_ref) = throughput_tracker {
                                         if args.throughput {
                                             throughput_tracker_ref.add_camera_database(&camera_id, database.clone()).await;
                                         }
-                                        throughput_tracker_ref.register_camera(&camera_id).await;
                                     }
                                 }
                             }
@@ -457,6 +456,11 @@ async fn main() -> Result<()> {
                 // Start the video stream and get the task handle
                 let task_handle = video_stream.start().await;
                 
+                // Register camera with throughput tracker regardless of recording being enabled
+                if let Some(ref throughput_tracker_ref) = throughput_tracker {
+                    throughput_tracker_ref.register_camera(&camera_id).await;
+                }
+
                 // Store the camera stream info for this camera's path
                 camera_streams.insert(camera_config.path.clone(), CameraStreamInfo {
                     camera_id: camera_id.clone(),
@@ -1170,6 +1174,5 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
 // admin API handlers moved to api::admin
 
 // Camera management functions for dynamic reload
-
 
 
