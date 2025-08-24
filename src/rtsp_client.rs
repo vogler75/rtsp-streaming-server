@@ -73,12 +73,29 @@ impl RtspClient {
     pub async fn start(&self) -> Result<()> {
         // Main capture loop
         loop {
+            // Check for shutdown before starting new connection
+            if self.shutdown_flag.load(Ordering::Relaxed) {
+                info!("[{}] Shutdown flag detected, exiting RTSP client", self.camera_id);
+                return Ok(());
+            }
+            
             match self.connect_and_stream().await {
                 Ok(_) => {
                     info!("[{}] RTSP stream ended normally", self.camera_id);
+                    // Check for shutdown after stream ends
+                    if self.shutdown_flag.load(Ordering::Relaxed) {
+                        info!("[{}] Shutdown flag detected after stream end, exiting", self.camera_id);
+                        return Ok(());
+                    }
                 }
                 Err(e) => {
                     error!("[{}] RTSP connection error: {}", self.camera_id, e);
+                    
+                    // Check for shutdown before updating status and reconnecting
+                    if self.shutdown_flag.load(Ordering::Relaxed) {
+                        info!("[{}] Shutdown flag detected during error handling, exiting", self.camera_id);
+                        return Ok(());
+                    }
                     
                     // Update MQTT status to disconnected
                     if let Some(ref mqtt) = self.mqtt_handle {
@@ -95,7 +112,15 @@ impl RtspClient {
                     }
                     
                     info!("[{}] Reconnecting in {} seconds...", self.camera_id, self.config.reconnect_interval);
-                    sleep(Duration::from_secs(self.config.reconnect_interval)).await;
+                    
+                    // Check for shutdown during reconnect delay
+                    for _ in 0..self.config.reconnect_interval {
+                        if self.shutdown_flag.load(Ordering::Relaxed) {
+                            info!("[{}] Shutdown flag detected during reconnect delay, exiting", self.camera_id);
+                            return Ok(());
+                        }
+                        sleep(Duration::from_secs(1)).await;
+                    }
                 }
             }
         }
