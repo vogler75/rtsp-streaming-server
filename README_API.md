@@ -43,6 +43,7 @@ GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21
 ├── stream                                    # Stream page (WebSocket frames)
 ├── control                                   # Control page (WebSocket control)
 ├── live                                      # Live stream over WebSocket
+├── snapshot                                  # Current frame as JPEG
 ├── test                                      # Alternate test page
 └── control/
     ├── recording/
@@ -166,6 +167,82 @@ The playlist will reference segments available at:
 ```
 GET {camera_path}/control/recordings/hls/segments/{playlist_id}/{segment_name}
 ```
+
+---
+
+## 📸 Live Frame Snapshot
+
+### Get Current Frame
+
+**Endpoint:** `GET /{camera_path}/snapshot`
+
+Get the current live frame from a camera as a JPEG image. This endpoint captures the most recent frame from the live video stream without requiring recording to be active.
+
+- **Authentication**: Bearer token if camera has token configured
+- **Headers**:
+  - `Authorization` (optional): `Bearer <camera_token>` if camera requires authentication
+- **Query Parameters**:
+  - `token` (optional): Camera token as query parameter (alternative to Authorization header)
+- **Response**: 
+  - **Success (200)**: Raw JPEG binary data with headers:
+    - `Content-Type: image/jpeg`
+    - `Cache-Control: no-cache, no-store, must-revalidate`
+    - `Pragma: no-cache`
+    - `Expires: 0`
+  - **Service Unavailable (503)**: Camera stream not available, closed, or timeout
+  - **Unauthorized (401)**: Missing or invalid authentication
+  - **Not Found (404)**: Camera not found
+
+**Features:**
+- **Live Stream Integration**: Gets frames directly from the current video stream buffer
+- **No Recording Required**: Works independently of the recording system
+- **Fast Response**: Returns immediately if a recent frame is available, otherwise waits for the next frame
+- **Timeout Protection**: 5-second timeout prevents hanging requests
+- **Browser Compatible**: Standard JPEG format works with HTML `<img>` tags and all browsers
+
+**Examples:**
+```bash
+# Get current snapshot
+GET /cam1/snapshot
+
+# With query parameter authentication
+GET /cam1/snapshot?token=your-camera-token
+
+# With Bearer token authentication
+GET /cam1/snapshot
+Authorization: Bearer your-camera-token
+```
+
+**HTML Usage:**
+```html
+<!-- Simple image display -->
+<img src="/cam1/snapshot" alt="Camera 1 Current Frame" />
+
+<!-- With token authentication -->
+<img src="/cam1/snapshot?token=your-camera-token" alt="Camera 1 Current Frame" />
+
+<!-- JavaScript fetch with Bearer token -->
+<script>
+  fetch('/cam1/snapshot', {
+    headers: {
+      'Authorization': 'Bearer your-camera-token'
+    }
+  })
+  .then(response => response.blob())
+  .then(blob => {
+    const imageUrl = URL.createObjectURL(blob);
+    document.getElementById('snapshot').src = imageUrl;
+  });
+</script>
+```
+
+**Implementation Notes:**
+- Maintains a dedicated storage of the latest frame from each camera's live stream
+- Returns immediately with the most recent frame (no waiting required)
+- Each camera runs a background task that continuously updates its latest frame storage
+- Returns appropriate HTTP status codes for different error conditions
+- Includes cache-control headers to prevent browser caching of dynamic content
+- Provides instant response times ideal for frequent polling or real-time applications
 
 ---
 

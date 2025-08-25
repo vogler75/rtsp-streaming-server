@@ -194,6 +194,15 @@ pub async fn dynamic_camera_fallback_handler(
                         stream_info.recording_manager,
                     ).await
                 }
+                "snapshot" => {
+                    camera_snapshot_handler(
+                        headers,
+                        query,
+                        stream_info.camera_id,
+                        stream_info.camera_config,
+                        stream_info.latest_frame,
+                    ).await
+                }
                 "test" => {
                     serve_test_page(query).await.into_response()
                 }
@@ -300,6 +309,94 @@ pub async fn camera_stream_handler(
         None => {
             serve_stream_page().await.into_response()
         }
+    }
+}
+
+pub async fn camera_snapshot_handler(
+    headers: axum::http::HeaderMap,
+    query: Query<std::collections::HashMap<String, String>>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    latest_frame: Arc<tokio::sync::RwLock<Option<bytes::Bytes>>>,
+) -> axum::response::Response {
+    use tracing::{trace, info, warn, debug};
+    
+    // Check authentication if token is required
+    if let Some(expected_token) = &camera_config.token {
+        let mut token_valid = false;
+        
+        // Check Authorization header first
+        if let Some(auth_header) = headers.get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                    if token == expected_token {
+                        info!("Bearer token authentication successful for camera {} snapshot", camera_id);
+                        token_valid = true;
+                    } else {
+                        warn!("Invalid Bearer token provided for camera {} snapshot", camera_id);
+                        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid Bearer token").into_response();
+                    }
+                }
+            }
+        }
+        
+        // If not valid yet, check query parameter
+        if !token_valid {
+            if let Some(provided_token) = query.get("token") {
+                if provided_token == expected_token {
+                    info!("Query parameter token authentication successful for camera {} snapshot", camera_id);
+                    token_valid = true;
+                } else {
+                    warn!("Invalid query parameter token provided for camera {} snapshot", camera_id);
+                    return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+                }
+            }
+        }
+        
+        if !token_valid {
+            debug!("Missing or invalid authentication for camera {} snapshot", camera_id);
+            return (axum::http::StatusCode::UNAUTHORIZED, "Missing or invalid authentication - provide Bearer token in Authorization header or ?token= query parameter").into_response();
+        }
+    }
+    
+    // Get the latest stored frame
+    let frame_guard = latest_frame.read().await;
+    if let Some(frame_data) = frame_guard.as_ref() {
+        trace!("Returning stored frame for camera {} snapshot ({} bytes)", camera_id, frame_data.len());
+        axum::http::Response::builder()
+            .header("content-type", "image/jpeg")
+            .header("cache-control", "no-cache, no-store, must-revalidate")
+            .header("pragma", "no-cache")
+            .header("expires", "0")
+            .body(axum::body::Body::from(frame_data.clone()))
+            .unwrap()
+            .into_response()
+    } else {
+        warn!("No frame available yet for camera {} snapshot", camera_id);
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, "No frame available yet").into_response()
+    }
+}
+
+pub async fn dynamic_camera_snapshot_handler(
+    headers: axum::http::HeaderMap,
+    query: Query<std::collections::HashMap<String, String>>,
+    camera_id: String,
+    app_state: AppState,
+) -> axum::response::Response {
+    let camera_streams = app_state.camera_streams.read().await;
+    if let Some(stream_info) = camera_streams.get(&camera_id) {
+        let stream_info = stream_info.clone();
+        drop(camera_streams);
+        
+        camera_snapshot_handler(
+            headers,
+            query,
+            stream_info.camera_id,
+            stream_info.camera_config,
+            stream_info.latest_frame,
+        ).await
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Camera not found").into_response()
     }
 }
 

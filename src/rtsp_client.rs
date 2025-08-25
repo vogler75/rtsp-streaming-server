@@ -33,14 +33,15 @@ pub struct RtspClient {
     duplicate_frame_count: Arc<RwLock<u64>>, // Count of duplicate frames since last status update
     last_mqtt_publish_time: Arc<RwLock<Option<u128>>>, // Last MQTT image publish timestamp
     shutdown_flag: Arc<AtomicBool>,
+    latest_frame: Arc<RwLock<Option<Bytes>>>, // Latest frame for snapshot API
 }
 
 impl RtspClient {
-    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>, shutdown_flag: Option<Arc<AtomicBool>>) -> Self {
-        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle, camera_mqtt_config, shutdown_flag).await
+    pub async fn new(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>, shutdown_flag: Option<Arc<AtomicBool>>, latest_frame: Arc<RwLock<Option<Bytes>>>) -> Self {
+        Self::new_from_builder(camera_id, config, frame_sender, ffmpeg_config, transcoding_config, capture_framerate, debug_capture, debug_duplicate_frames, mqtt_handle, camera_mqtt_config, shutdown_flag, latest_frame).await
     }
 
-    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>, shutdown_flag: Option<Arc<AtomicBool>>) -> Self {
+    pub async fn new_from_builder(camera_id: String, config: RtspConfig, frame_sender: Arc<broadcast::Sender<Bytes>>, ffmpeg_config: Option<FfmpegConfig>, transcoding_config: TranscodingConfig, capture_framerate: u32, debug_capture: bool, debug_duplicate_frames: bool, mqtt_handle: Option<MqttHandle>, camera_mqtt_config: Option<CameraMqttConfig>, shutdown_flag: Option<Arc<AtomicBool>>, latest_frame: Arc<RwLock<Option<Bytes>>>) -> Self {
         Self {
             camera_id,
             config,
@@ -63,6 +64,7 @@ impl RtspClient {
             duplicate_frame_count: Arc::new(RwLock::new(0)),
             last_mqtt_publish_time: Arc::new(RwLock::new(None)),
             shutdown_flag: shutdown_flag.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+            latest_frame,
         }
     }
     
@@ -195,6 +197,9 @@ impl RtspClient {
             
             // Send frame directly to broadcast
             let _ = self.frame_sender.send(jpeg_data.clone());
+            
+            // Update latest frame storage for snapshot API
+            *self.latest_frame.write().await = Some(jpeg_data.clone());
             
             // Track picture arrival time for MQTT publishing (non-blocking)
             if let Some(ref mqtt) = self.mqtt_handle {
@@ -711,6 +716,9 @@ impl RtspClient {
                             
                             // Send frame directly to broadcast
                             let _ = self.frame_sender.send(Bytes::from(frame_data.clone()));
+                            
+                            // Update latest frame storage for snapshot API
+                            *self.latest_frame.write().await = Some(Bytes::from(frame_data.clone()));
                             
                             // Track throughput for this frame
                             crate::throughput_tracker::record_frame_globally(&self.camera_id, frame_size as i64).await;

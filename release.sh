@@ -77,17 +77,6 @@ fi
 echo "$VERSION_WITH_SHA" > version.txt
 echo -e "${GREEN}✓ Updated version.txt to ${VERSION_WITH_SHA}${NC}"
 
-# Add version.txt to git
-git add version.txt
-git commit -m "Bump version to ${NEW_VERSION}" || {
-    echo -e "${YELLOW}No changes to commit (version.txt might already be staged)${NC}"
-}
-
-# Create git tag
-echo -e "${YELLOW}Creating git tag v${NEW_VERSION}...${NC}"
-git tag -a "v${NEW_VERSION}" -m "Release version ${NEW_VERSION}"
-echo -e "${GREEN}✓ Created git tag v${NEW_VERSION}${NC}"
-
 # Create release notes file
 RELEASE_NOTES_FILE="releases/v${NEW_VERSION}.txt"
 mkdir -p releases
@@ -99,7 +88,7 @@ echo "Changes since v${BASE_VERSION}:" >> "$RELEASE_NOTES_FILE"
 echo "---" >> "$RELEASE_NOTES_FILE"
 
 # Get commit messages since last tag
-LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 if [ -n "$LAST_TAG" ]; then
     git log "${LAST_TAG}..HEAD" --oneline >> "$RELEASE_NOTES_FILE"
 else
@@ -107,6 +96,17 @@ else
 fi
 
 echo -e "${GREEN}✓ Created release notes: ${RELEASE_NOTES_FILE}${NC}"
+
+# Add version.txt and release notes to git
+git add version.txt "$RELEASE_NOTES_FILE"
+git commit -m "Bump version to ${NEW_VERSION}" || {
+    echo -e "${YELLOW}No changes to commit (files might already be staged)${NC}"
+}
+
+# Create git tag
+echo -e "${YELLOW}Creating git tag v${NEW_VERSION}...${NC}"
+git tag -a "v${NEW_VERSION}" -m "Release version ${NEW_VERSION}"
+echo -e "${GREEN}✓ Created git tag v${NEW_VERSION}${NC}"
 
 # Build release binary
 echo -e "${YELLOW}Building release binary...${NC}"

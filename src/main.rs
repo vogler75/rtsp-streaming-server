@@ -137,6 +137,7 @@ struct CameraStreamInfo {
     pre_recording_buffer: Option<crate::pre_recording_buffer::PreRecordingBuffer>,
     mp4_buffer_stats: Arc<tokio::sync::RwLock<Mp4BufferStats>>, // MP4 buffer statistics
     shutdown_flag: Arc<std::sync::atomic::AtomicBool>, // Shared shutdown signal for graceful termination
+    latest_frame: Arc<tokio::sync::RwLock<Option<bytes::Bytes>>>, // Latest frame for snapshot API
 }
 
 fn generate_random_token(length: usize) -> String {
@@ -442,6 +443,9 @@ async fn main() -> Result<()> {
         // Create shared shutdown flag
         let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         
+        // Create latest frame storage
+        let latest_frame = Arc::new(tokio::sync::RwLock::new(None));
+        
         match VideoStream::new(
             camera_id.clone(),
             camera_config.clone(),
@@ -449,6 +453,7 @@ async fn main() -> Result<()> {
             mqtt_handle.clone(),
             config.recording.as_ref(),
             Some(shutdown_flag.clone()),
+            latest_frame.clone(),
         ).await {
             Ok(video_stream) => {
                 // Create database for this camera if recording is enabled
@@ -511,6 +516,7 @@ async fn main() -> Result<()> {
                     pre_recording_buffer,
                     mp4_buffer_stats,
                     shutdown_flag,
+                    latest_frame,
                 });
                 info!("Started camera '{}' on path '{}'" , camera_id, camera_config.path);
             }
@@ -653,6 +659,20 @@ async fn main() -> Result<()> {
         // Test endpoint: /<camera_path>/test serves test.html
         let test_path = format!("{}/test", path);
         app = app.route(&test_path, axum::routing::get(handlers::serve_test_page));
+
+        // Snapshot endpoint: /<camera_path>/snapshot returns current frame as JPEG
+        let snapshot_path = format!("{}/snapshot", path);
+        let camera_id_for_snapshot = stream_info.camera_id.clone();
+        let state_for_snapshot = app_state.clone();
+        app = app.route(&snapshot_path, axum::routing::get(
+            move |headers, query| {
+                let camera_id = camera_id_for_snapshot.clone();
+                let state = state_for_snapshot.clone();
+                async move {
+                    handlers::dynamic_camera_snapshot_handler(headers, query, camera_id, state).await
+                }
+            }
+        ));
 
         // REST API endpoints: /<camera_path>/control/*
         if stream_info.recording_manager.is_some() {

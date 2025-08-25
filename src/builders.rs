@@ -19,6 +19,7 @@ pub struct RtspClientBuilder {
     debug_capture: bool,
     debug_duplicate_frames: bool,
     mqtt_handle: Option<MqttHandle>,
+    latest_frame: Option<Arc<tokio::sync::RwLock<Option<Bytes>>>>,
 }
 
 #[allow(dead_code)]
@@ -34,6 +35,7 @@ impl RtspClientBuilder {
             debug_capture: false,
             debug_duplicate_frames: false,
             mqtt_handle: None,
+            latest_frame: None,
         }
     }
 
@@ -75,6 +77,11 @@ impl RtspClientBuilder {
         self
     }
 
+    pub fn latest_frame(mut self, latest_frame: Arc<tokio::sync::RwLock<Option<Bytes>>>) -> Self {
+        self.latest_frame = Some(latest_frame);
+        self
+    }
+
     pub async fn build(self) -> Result<RtspClient> {
         let camera_id = self.camera_id.ok_or_else(|| StreamError::config("Camera ID is required"))?;
         let config = self.config.ok_or_else(|| StreamError::config("RTSP config is required"))?;
@@ -89,6 +96,8 @@ impl RtspClientBuilder {
             debug_duplicate_frames: Some(false),
         };
         
+        let latest_frame = self.latest_frame.unwrap_or_else(|| Arc::new(tokio::sync::RwLock::new(None)));
+        
         Ok(RtspClient::new_from_builder(
             camera_id,
             config,
@@ -101,6 +110,7 @@ impl RtspClientBuilder {
             self.mqtt_handle,
             None, // Camera MQTT config not available in builder pattern
             None, // No external shutdown flag in builder pattern
+            latest_frame,
         ).await)
     }
 }

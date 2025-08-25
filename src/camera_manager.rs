@@ -55,6 +55,9 @@ impl AppState {
         // Create shared shutdown flag
         let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         
+        // Create latest frame storage
+        let latest_frame = Arc::new(tokio::sync::RwLock::new(None));
+        
         // Create video stream
         match VideoStream::new(
             camera_id.clone(),
@@ -63,6 +66,7 @@ impl AppState {
             self.mqtt_handle.clone(),
             self.recording_config.as_ref().map(|arc| arc.as_ref()),
             Some(shutdown_flag.clone()),
+            latest_frame.clone(),
         ).await {
             Ok(video_stream) => {
                 // Create database for this camera if recording is enabled
@@ -118,6 +122,7 @@ impl AppState {
                     pre_recording_buffer,
                     mp4_buffer_stats,
                     shutdown_flag,
+                    latest_frame,
                 };
                 
                 // Add to camera streams
