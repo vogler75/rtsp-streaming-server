@@ -1,0 +1,9 @@
+Release v1.0.4
+Built from commit: 4d66d2a
+Date: 2025-08-25 09:21:05
+
+Changes since v1.0.3:
+---
+73215d3 Bump version to 1.0.4
+4d66d2a CWC fixed issue when changing camera stream url.
+c786b86 Create v1.0.3.txt
