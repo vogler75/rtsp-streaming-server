@@ -1,0 +1,10 @@
+Release v1.0.3
+Built from commit: 652ec28
+Date: 2025-08-24 17:29:50
+
+Changes since v1.0.2:
+---
+02fef62 Bump version to 1.0.3
+652ec28 Add option to generate random admin password during config creation
+576059f Add automated release script and version display
+87fcc0a Bump version to 1.0.3
