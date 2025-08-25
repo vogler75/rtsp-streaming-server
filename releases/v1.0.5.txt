@@ -1,0 +1,10 @@
+Release v1.0.5
+Built from commit: 1580e96
+Date: 2025-08-25 16:34:46
+
+Changes since v1.0.4:
+---
+1580e96 Auto-start livestream on WebSocket connect
+35cbfd3 Improve connection reliability and status feedback
+c7bd83d Add live snapshot API for cameras
+dff83d1 Add release notes for v1.0.4
