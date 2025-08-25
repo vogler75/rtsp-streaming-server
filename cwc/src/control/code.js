@@ -537,6 +537,12 @@ function connectToControlWebSocket(url) {
       debugLog('✅ Control WebSocket connected successfully');
       intentionalClose = false; // Reset flag on successful connection
       updateConnectionStatus(true);
+      
+      // If livestream is already enabled when we connect, start it immediately
+      if (currentEnableLivestream) {
+        debugLog('📺 Auto-starting live stream (was already enabled)');
+        sendControlCommand({ cmd: 'live' });
+      }
     };
     
     controlWebSocket.onmessage = function(event) {
