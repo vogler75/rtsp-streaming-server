@@ -258,6 +258,29 @@ If your RTSP streaming server requires authentication:
 2. The control will automatically include it in WebSocket connection headers
 3. The token can also be passed as a query parameter
 
+## Connection Reliability
+
+The VideoPlayer CWC includes robust auto-reconnection features:
+
+### Auto-Reconnection
+- **Unlimited Attempts**: Reconnects endlessly until successful or manually stopped
+- **Fixed Interval**: Simple 1-second delay between all attempts
+- **Visual Feedback**: Shows reconnection countdown and attempt counter
+- **Authentication Handling**: Won't retry on authentication failures (codes 1002, 1003)
+
+### Connection Status Messages
+- **Connected**: Status hidden in normal mode, smart status in debug mode (green):
+  - Stream mode: "Live Stream"
+  - Control mode (not live): "Connected" 
+  - Control mode (live active): "Live Stream"
+- **Disconnected**: "Disconnected" (red) or "Stopped" (gray) when connection disabled
+- **Reconnecting**: "Reconnecting in 1s... (N)" (orange) with attempt counter
+
+### Smart Connection Management
+- URL changes automatically close and reopen connections
+- Control/stream mode switching triggers reconnection with proper endpoint
+- Livestream state changes update status display in real-time
+
 ## Troubleshooting
 
 ### Enable Debug Mode
@@ -269,9 +292,17 @@ control.properties.version = true;
 ### Common Issues
 
 1. **Connection Fails**: Check URL format and server availability
-2. **Authentication Errors**: Verify token is correct and not expired
+2. **Authentication Errors**: Verify token is correct and not expired (won't auto-retry)
 3. **No Video**: Ensure camera is configured and streaming
 4. **Performance Issues**: Monitor `fps` and `kbs` properties
+5. **Frequent Reconnections**: Check network stability and server load
+
+### Connection States
+
+- **Immediate Connection**: When `connect=true` and URL is valid
+- **Auto-Reconnection**: Triggered by network errors or abnormal closures
+- **No Reconnection**: On authentication failures or normal closures
+- **Manual Reconnection**: Toggle `connect` property off/on to reset attempt counter
 
 ### SSL/TLS Issues
 

@@ -17,7 +17,6 @@ let currentCameraAuthToken = '';
 let enableConnection = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
-let reconnectInterval = 3000;
 let intentionalClose = false; // Flag to prevent reconnection on intentional close
 
 // FPS and bitrate tracking variables
@@ -128,7 +127,14 @@ function updateConnectionStatus(connected) {
       // WebSocket mode - hide status when connected unless debug mode is on
       if (enableDebug) {
         statusElement.style.display = 'block';
-        statusElement.textContent = 'Live Stream';
+        // Show different status based on control mode and livestream state
+        if (useControlStream && currentEnableLivestream) {
+          statusElement.textContent = 'Live Stream';
+        } else if (useControlStream) {
+          statusElement.textContent = 'Connected';
+        } else {
+          statusElement.textContent = 'Live Stream';
+        }
         statusElement.style.backgroundColor = 'rgba(0,128,0,0.7)';
       } else {
         statusElement.style.display = 'none';
@@ -137,9 +143,13 @@ function updateConnectionStatus(connected) {
     } else if (enableConnection) {
       // WebSocket mode - show status when disconnected but trying to connect
       statusElement.style.display = 'block';
-      const reconnectText = reconnectAttempts > 0 ? ` (Retry ${reconnectAttempts})` : '';
-      statusElement.textContent = 'Disconnected' + reconnectText;
-      statusElement.style.backgroundColor = 'rgba(128,0,0,0.7)';
+      if (reconnectAttempts > 0) {
+        statusElement.textContent = `Reconnecting in 1s... (${reconnectAttempts})`;
+        statusElement.style.backgroundColor = 'rgba(255,165,0,0.7)'; // Orange for reconnecting
+      } else {
+        statusElement.textContent = 'Disconnected';
+        statusElement.style.backgroundColor = 'rgba(128,0,0,0.7)';
+      }
     } else {
       // WebSocket mode - show status when stopped
       statusElement.style.display = 'block';
@@ -154,6 +164,7 @@ function updateConnectionStatus(connected) {
 function scheduleReconnect() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
+    reconnectTimer = null;
   }
   
   // Don't reconnect if this was an intentional close
@@ -166,7 +177,11 @@ function scheduleReconnect() {
   // Only reconnect if enableConnection is true AND not in HLS mode
   if (enableConnection && currentCameraUrl && !currentUseHlsStreaming) {
     reconnectAttempts++;
-    debugLog(`Scheduling reconnect attempt ${reconnectAttempts} in ${reconnectInterval}ms`);
+    
+    // Simple 1-second delay for all attempts
+    const delay = 1000;
+    
+    debugLog(`Scheduling reconnect attempt ${reconnectAttempts} in ${Math.round(delay/1000)}s`);
     updateConnectionStatus(false);
     
     reconnectTimer = setTimeout(() => {
@@ -174,7 +189,7 @@ function scheduleReconnect() {
         debugLog(`Attempting to reconnect (${reconnectAttempts})`);
         connectToWebSocket(currentCameraUrl);
       }
-    }, reconnectInterval);
+    }, delay);
   } else {
     debugLog('Not reconnecting: enableConnection =', enableConnection, 'currentCameraUrl =', currentCameraUrl, 'currentUseHlsStreaming =', currentUseHlsStreaming);
   }
@@ -288,7 +303,7 @@ function connectToWebSocket(url) {
     fullUrl = fullUrl + '/stream';
   }
   
-  intentionalClose = true; // Prevent automatic reconnection
+  // Close existing WebSocket if it exists (prevent duplicate connections)
   if (websocket) {
     // Remove all event handlers first to prevent them from firing after we create a new connection
     websocket.onopen = null;
@@ -303,6 +318,9 @@ function connectToWebSocket(url) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  
+  // Reset intentional close flag - we want this new connection to be able to reconnect
+  intentionalClose = false;
   
   try {
     debugLog('Attempting WebSocket connection...');
@@ -338,6 +356,7 @@ function connectToWebSocket(url) {
     
     websocket.onopen = function() {
       debugLog('WebSocket connected');
+      intentionalClose = false; // Reset flag on successful connection
       updateConnectionStatus(true);
     };
     
@@ -459,6 +478,12 @@ function connectToWebSocket(url) {
       updateConnectionStatus(false);
       websocket = null;
       
+      // Check for authentication failures - don't retry
+      if (event.code === 1002 || event.code === 1003) {
+        debugLog('Authentication failed - not attempting reconnection');
+        return;
+      }
+      
       if (event.code !== 1000) {
         scheduleReconnect();
       }
@@ -471,12 +496,12 @@ function connectToWebSocket(url) {
   }
 }
 
+
 function connectToControlWebSocket(url) {
   debugLog('🔗 Connecting to control WebSocket...');
   
   if (controlWebSocket) {
     debugLog('Closing existing control WebSocket');
-    intentionalClose = true; // Prevent automatic reconnection
     // Remove all event handlers first
     controlWebSocket.onopen = null;
     controlWebSocket.onmessage = null;
@@ -490,6 +515,9 @@ function connectToControlWebSocket(url) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  
+  // Reset intentional close flag - we want this new connection to be able to reconnect
+  intentionalClose = false;
   
   try {
     // URL already has /control appended by connectToWebSocket
@@ -507,6 +535,7 @@ function connectToControlWebSocket(url) {
     
     controlWebSocket.onopen = function() {
       debugLog('✅ Control WebSocket connected successfully');
+      intentionalClose = false; // Reset flag on successful connection
       updateConnectionStatus(true);
     };
     
@@ -659,6 +688,12 @@ function connectToControlWebSocket(url) {
       debugLog('🔌 Control WebSocket closed:', event.code, event.reason || 'No reason provided');
       updateConnectionStatus(false);
       controlWebSocket = null;
+      
+      // Check for authentication failures - don't retry
+      if (event.code === 1002 || event.code === 1003) {
+        debugLog('Authentication failed - not attempting reconnection');
+        return;
+      }
       
       if (event.code !== 1000) {
         debugLog('Scheduling reconnect due to abnormal close');
@@ -900,10 +935,7 @@ function setProperty(data) {
         // ALWAYS close existing connections first when URL changes
         debugLog('URL changed from', oldURL, 'to', currentCameraUrl, '- closing any existing connections...');
         
-        // Set flag to prevent automatic reconnection
-        intentionalClose = true;
-        
-        // Close WebSocket connection if it exists
+        // Close existing connections when URL changes
         if (websocket) {
           // Remove all event handlers first
           websocket.onopen = null;
@@ -931,7 +963,7 @@ function setProperty(data) {
           reconnectTimer = null;
         }
         
-        // Now reconnect if connection is enabled
+        // Now reconnect if connection is enabled (connectToWebSocket will reset intentionalClose)
         if (enableConnection) {
           if (currentCameraUrl) {
             connectToWebSocket(currentCameraUrl);
@@ -1000,7 +1032,6 @@ function setProperty(data) {
         if (enableConnection && currentCameraUrl) {
           if (websocket) {
             debugLog('Token changed - reconnecting with new authentication...');
-            intentionalClose = true; // Prevent automatic reconnection - we'll manually reconnect
             // Remove all event handlers first
             websocket.onopen = null;
             websocket.onmessage = null;
@@ -1016,7 +1047,7 @@ function setProperty(data) {
             reconnectTimer = null;
           }
           
-          // Reconnect with new token
+          // Reconnect with new token (connectToWebSocket will reset intentionalClose)
           connectToWebSocket(currentCameraUrl);
         }
       }
@@ -1025,10 +1056,12 @@ function setProperty(data) {
       useControlStream = data.value;
       debugLog('🔧 Control mode changed to:', useControlStream);
       
+      // Update status display when control mode changes
+      updateConnectionStatus(isConnected);
+      
       // Reconnect if URL is available and we're supposed to be connected
       if (enableConnection && currentCameraUrl) {
         debugLog('Reconnecting due to control mode change...');
-        intentionalClose = true; // Prevent automatic reconnection - we'll manually reconnect
         if (websocket) {
           // Remove all event handlers first
           websocket.onopen = null;
@@ -1047,6 +1080,7 @@ function setProperty(data) {
           controlWebSocket.close();
           controlWebSocket = null;
         }
+        // connectToWebSocket will reset intentionalClose flag
         connectToWebSocket(currentCameraUrl);
       }
       break;
@@ -1121,6 +1155,9 @@ function setProperty(data) {
     case 'enable_livestream':
       currentEnableLivestream = data.value;
       debugLog('🔧 Live stream control changed to:', currentEnableLivestream);
+      
+      // Update status display when livestream state changes
+      updateConnectionStatus(isConnected);
       
       if (useControlStream && controlWebSocket) {
         if (currentEnableLivestream) {
