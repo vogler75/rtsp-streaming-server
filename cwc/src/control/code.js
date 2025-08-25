@@ -18,6 +18,7 @@ let enableConnection = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let reconnectInterval = 3000;
+let intentionalClose = false; // Flag to prevent reconnection on intentional close
 
 // FPS and bitrate tracking variables
 let frameCount = 0;
@@ -155,6 +156,13 @@ function scheduleReconnect() {
     clearTimeout(reconnectTimer);
   }
   
+  // Don't reconnect if this was an intentional close
+  if (intentionalClose) {
+    debugLog('Skipping reconnect - connection was intentionally closed');
+    intentionalClose = false; // Reset the flag
+    return;
+  }
+  
   // Only reconnect if enableConnection is true AND not in HLS mode
   if (enableConnection && currentCameraUrl && !currentUseHlsStreaming) {
     reconnectAttempts++;
@@ -209,11 +217,22 @@ function switchPlayerMode() {
     }
     
     // Disconnect WebSocket if connected
+    intentionalClose = true; // Prevent automatic reconnection
     if (websocket) {
+      // Remove all event handlers first
+      websocket.onopen = null;
+      websocket.onmessage = null;
+      websocket.onerror = null;
+      websocket.onclose = null;
       websocket.close();
       websocket = null;
     }
     if (controlWebSocket) {
+      // Remove all event handlers first
+      controlWebSocket.onopen = null;
+      controlWebSocket.onmessage = null;
+      controlWebSocket.onerror = null;
+      controlWebSocket.onclose = null;
       controlWebSocket.close();
       controlWebSocket = null;
     }
@@ -269,7 +288,13 @@ function connectToWebSocket(url) {
     fullUrl = fullUrl + '/stream';
   }
   
+  intentionalClose = true; // Prevent automatic reconnection
   if (websocket) {
+    // Remove all event handlers first to prevent them from firing after we create a new connection
+    websocket.onopen = null;
+    websocket.onmessage = null;
+    websocket.onerror = null;
+    websocket.onclose = null;
     websocket.close();
     websocket = null;
   }
@@ -451,6 +476,12 @@ function connectToControlWebSocket(url) {
   
   if (controlWebSocket) {
     debugLog('Closing existing control WebSocket');
+    intentionalClose = true; // Prevent automatic reconnection
+    // Remove all event handlers first
+    controlWebSocket.onopen = null;
+    controlWebSocket.onmessage = null;
+    controlWebSocket.onerror = null;
+    controlWebSocket.onclose = null;
     controlWebSocket.close();
     controlWebSocket = null;
   }
@@ -866,22 +897,42 @@ function setProperty(data) {
         currentCameraUrl = data.value;
         reconnectAttempts = 0;
         
-        // If we're connected or trying to connect, disconnect first then reconnect
+        // ALWAYS close existing connections first when URL changes
+        debugLog('URL changed from', oldURL, 'to', currentCameraUrl, '- closing any existing connections...');
+        
+        // Set flag to prevent automatic reconnection
+        intentionalClose = true;
+        
+        // Close WebSocket connection if it exists
+        if (websocket) {
+          // Remove all event handlers first
+          websocket.onopen = null;
+          websocket.onmessage = null;
+          websocket.onerror = null;
+          websocket.onclose = null;
+          websocket.close();
+          websocket = null;
+        }
+        
+        // Close control WebSocket connection if it exists
+        if (controlWebSocket) {
+          // Remove all event handlers first
+          controlWebSocket.onopen = null;
+          controlWebSocket.onmessage = null;
+          controlWebSocket.onerror = null;
+          controlWebSocket.onclose = null;
+          controlWebSocket.close();
+          controlWebSocket = null;
+        }
+        
+        // Clear any pending reconnection timers
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        
+        // Now reconnect if connection is enabled
         if (enableConnection) {
-          // Disconnect from old URL if connected
-          if (websocket) {
-            debugLog('URL changed from', oldURL, 'to', currentCameraUrl, '- reconnecting...');
-            websocket.close();
-            websocket = null;
-          }
-          
-          // Clear any pending reconnection timers
-          if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-          }
-          
-          // Connect to new URL
           if (currentCameraUrl) {
             connectToWebSocket(currentCameraUrl);
           } else {
@@ -889,6 +940,10 @@ function setProperty(data) {
             updateConnectionStatus(false);
             showBlankScreen();
           }
+        } else {
+          // Connection disabled, just update status
+          updateConnectionStatus(false);
+          showBlankScreen();
         }
       }
       break;
@@ -904,11 +959,22 @@ function setProperty(data) {
         debugLog('Connect requested but in HLS mode - ignoring WebSocket connection');
       } else {
         // Disconnect and show blank screen
+        intentionalClose = true; // Prevent automatic reconnection
         if (websocket) {
+          // Remove all event handlers first
+          websocket.onopen = null;
+          websocket.onmessage = null;
+          websocket.onerror = null;
+          websocket.onclose = null;
           websocket.close();
           websocket = null;
         }
         if (controlWebSocket) {
+          // Remove all event handlers first
+          controlWebSocket.onopen = null;
+          controlWebSocket.onmessage = null;
+          controlWebSocket.onerror = null;
+          controlWebSocket.onclose = null;
           controlWebSocket.close();
           controlWebSocket = null;
         }
@@ -934,6 +1000,12 @@ function setProperty(data) {
         if (enableConnection && currentCameraUrl) {
           if (websocket) {
             debugLog('Token changed - reconnecting with new authentication...');
+            intentionalClose = true; // Prevent automatic reconnection - we'll manually reconnect
+            // Remove all event handlers first
+            websocket.onopen = null;
+            websocket.onmessage = null;
+            websocket.onerror = null;
+            websocket.onclose = null;
             websocket.close();
             websocket = null;
           }
@@ -956,11 +1028,22 @@ function setProperty(data) {
       // Reconnect if URL is available and we're supposed to be connected
       if (enableConnection && currentCameraUrl) {
         debugLog('Reconnecting due to control mode change...');
+        intentionalClose = true; // Prevent automatic reconnection - we'll manually reconnect
         if (websocket) {
+          // Remove all event handlers first
+          websocket.onopen = null;
+          websocket.onmessage = null;
+          websocket.onerror = null;
+          websocket.onclose = null;
           websocket.close();
           websocket = null;
         }
         if (controlWebSocket) {
+          // Remove all event handlers first
+          controlWebSocket.onopen = null;
+          controlWebSocket.onmessage = null;
+          controlWebSocket.onerror = null;
+          controlWebSocket.onclose = null;
           controlWebSocket.close();
           controlWebSocket = null;
         }
