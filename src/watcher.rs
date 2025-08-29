@@ -118,7 +118,7 @@ async fn handle_file_event(event: Event, app_state: &AppState) {
 
 fn get_camera_id_from_path(path: &Path) -> Option<String> {
     if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-        if file_name.ends_with(".json") || file_name.ends_with(".toml") {
+        if file_name.ends_with(".json") {
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                 return Some(stem.to_string());
             }

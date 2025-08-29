@@ -15,14 +15,6 @@ How the MP4 Recording System Works:
     }
   }
   ```
-  
-  Or in TOML format:
-  ```toml
-  [recording]
-  video_storage_enabled = true
-  mp4_segment_minutes = 5
-  mp4_storage_retention = "30d"
-  ```
 
   1. Frame Generation & Streaming
 

@@ -231,7 +231,7 @@ pub struct MqttConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraMqttConfig {
-    pub publish_interval: u64, // Interval in seconds, 0 = publish every frame
+    pub publish_interval: u64, // Interval in milliseconds, 0 = publish every frame
     pub topic_name: Option<String>, // Optional custom topic name, defaults to <base_topic>/cameras/<cam-name>/jpg
 }
 

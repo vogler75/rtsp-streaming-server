@@ -441,7 +441,7 @@ function connectToWebSocket(url) {
         debugError('If this is a self-signed certificate error:');
         debugError('1. Open the server URL in a browser: ' + fullUrl.replace('wss://', 'https://'));
         debugError('2. Accept the security warning to trust the certificate');
-        debugError('3. Or disable TLS in server config.toml and use ws:// instead');
+        debugError('3. Or disable TLS in server config.json and use ws:// instead');
         debugError('4. Or add the certificate to the system trust store');
         debugError('============================================');
       }

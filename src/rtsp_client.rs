@@ -233,7 +233,7 @@ impl RtspClient {
                         // Check if enough time has passed since last publish
                         let mut last_publish_guard = self.last_mqtt_publish_time.write().await;
                         let should_publish = if let Some(last_publish) = *last_publish_guard {
-                            let interval_ms = camera_mqtt.publish_interval * 1000;
+                            let interval_ms = camera_mqtt.publish_interval;
                             now.saturating_sub(last_publish) >= interval_ms as u128
                         } else {
                             true // First publish
@@ -759,7 +759,7 @@ impl RtspClient {
                                         // Check if enough time has passed since last publish
                                         let mut last_publish_guard = self.last_mqtt_publish_time.write().await;
                                         let should_publish = if let Some(last_publish) = *last_publish_guard {
-                                            let interval_ms = camera_mqtt.publish_interval * 1000;
+                                            let interval_ms = camera_mqtt.publish_interval;
                                             now.saturating_sub(last_publish) >= interval_ms as u128
                                         } else {
                                             true // First publish
