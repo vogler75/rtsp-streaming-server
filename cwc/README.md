@@ -16,7 +16,7 @@ The VideoPlayer CWC exposes the following properties that can be configured and 
 - **Description**: Base WebSocket URL for the camera (without endpoint suffix)
 - **Default**: `""` (empty string)
 - **Example**: `"ws://localhost:8080/cam1"` or `"wss://server.example.com/camera1"`
-- **Usage**: Set this to the base camera path. The control will automatically append `/stream` or `/control` based on the `control` property
+- **Usage**: Set this to the base camera path. The control will automatically append `/control` if the  `control` property is set to true.
 
 #### `token` (string)
 - **Description**: Authentication token for WebSocket connection (Bearer token)
@@ -63,7 +63,7 @@ The VideoPlayer CWC exposes the following properties that can be configured and 
 #### `control` (boolean)
 - **Description**: Enable control mode instead of normal video streaming
 - **Default**: `false`
-- **Usage**: Set to `true` to enable advanced playback controls for recorded video. When true, the control appends `/control` to the URL; when false, it appends `/stream`
+- **Usage**: Set to `true` to enable advanced playback controls for recorded video. When true, the control appends `/control` to the URL
 
 ### Playback Control Properties
 
@@ -230,7 +230,7 @@ if (control.properties.connected) {
 The control automatically constructs the full endpoint URL based on the base URL and control mode:
 
 - **Base URL**: Set via the `URL` property (e.g., `ws://localhost:8080/cam1`)
-- **Stream Mode** (`control=false`): Appends `/stream` to base URL
+- **Stream Mode** (`control=false`): Does not append `/stream` to base URL!
 - **Control Mode** (`control=true`): Appends `/control` to base URL
 
 ### Additional Endpoints

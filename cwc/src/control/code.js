@@ -286,7 +286,7 @@ function connectToWebSocket(url) {
   }
   
   // Build the full URL based on control mode
-  // URL should be base path like /cam1, we append /stream or /control
+  // URL should be base path like /cam1, we append /control in control mode
   let fullUrl = url;
   
   // Remove any trailing slash
@@ -299,9 +299,7 @@ function connectToWebSocket(url) {
     fullUrl = fullUrl + '/control';
     connectToControlWebSocket(fullUrl);
     return;
-  } else {
-    fullUrl = fullUrl + '/stream';
-  }
+  } 
   
   // Close existing WebSocket if it exists (prevent duplicate connections)
   if (websocket) {
