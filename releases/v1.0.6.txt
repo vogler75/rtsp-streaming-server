@@ -1,0 +1,8 @@
+Release v1.0.6
+Built from commit: 05e25f6
+Date: 2025-08-30 10:20:49
+
+Changes since v1.0.5:
+---
+05e25f6 Update control mode URL logic and version to 1.0.54
+4051e1a Switch MQTT publish interval to milliseconds
