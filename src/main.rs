@@ -210,6 +210,14 @@ async fn main() -> Result<()> {
     let config = match Config::load(&args.config) {
         Ok(cfg) => {
             info!("Loaded configuration from {}", args.config);
+            
+            // Create backup of config.json
+            let backup_path = format!("{}.bak", args.config);
+            match std::fs::copy(&args.config, &backup_path) {
+                Ok(_) => info!("Created backup: {}", backup_path),
+                Err(e) => warn!("Failed to create backup of {}: {}", args.config, e),
+            }
+            
             cfg
         }
         Err(e) => {
@@ -253,6 +261,23 @@ async fn main() -> Result<()> {
     match std::fs::create_dir_all(cameras_dir) {
         Ok(_) => {
             info!("Cameras directory '{}' is ready", cameras_dir);
+            
+            // Create backups of all camera config files
+            match std::fs::read_dir(cameras_dir) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                            let backup_path = path.with_extension("json.bak");
+                            match std::fs::copy(&path, &backup_path) {
+                                Ok(_) => info!("Created backup: {}", backup_path.display()),
+                                Err(e) => warn!("Failed to create backup of {}: {}", path.display(), e),
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to read cameras directory for backup: {}", e),
+            }
         }
         Err(e) => {
             error!("Failed to create cameras directory '{}': {}", cameras_dir, e);

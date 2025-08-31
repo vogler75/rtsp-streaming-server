@@ -46,7 +46,7 @@
     }
   },
   "transcoding": {
-    "capture_framerate": 5,
+    "capture_framerate": 0,
     "channel_buffer_size": 50,
     "debug_capture": false,
     "debug_duplicate_frames": false,

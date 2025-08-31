@@ -464,7 +464,7 @@ function collectServerConfigFromForm() {
         },
         transcoding: {
             output_format: document.getElementById('config_transcoding_output_format').value || "mjpeg",
-            capture_framerate: parseFloat(document.getElementById('config_transcoding_capture_framerate').value) || 5,
+            capture_framerate: parseFloat(document.getElementById('config_transcoding_capture_framerate').value) || 0,
             output_framerate: parseFloat(document.getElementById('config_transcoding_output_framerate').value) || 0,
             channel_buffer_size: parseInt(document.getElementById('config_transcoding_channel_buffer_size').value) || 50,
             debug_capture: document.getElementById('config_transcoding_debug_capture').value === 'true',
