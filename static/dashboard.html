@@ -102,6 +102,28 @@
             transition: all 0.3s ease;
         }
 
+        /* Ensure IX components in control groups are properly aligned */
+        .control-group ix-toggle,
+        .control-group ix-select,
+        .control-group ix-button {
+            flex-shrink: 0;
+            align-self: center;
+            margin: 0;
+        }
+
+        .control-group ix-toggle {
+            min-height: 32px;
+        }
+
+        .control-group ix-select {
+            min-height: 32px;
+            min-width: 120px;
+        }
+
+        .control-group ix-button {
+            height: 32px;
+        }
+
         .control-group:hover {
             background: rgba(255, 255, 255, 0.12);
             border-color: rgba(0, 124, 195, 0.4);
@@ -967,12 +989,9 @@
     <div class="modal-backdrop" id="modalBackdrop"></div>
 
     <!-- Camera Edit Modal -->
-    <ix-modal id="editModal" size="1000">
+    <ix-modal id="editModal" size="1000" dismissible>
         <ix-modal-header>
             Camera Configuration
-            <ix-button-group slot="header-actions">
-                <ix-button variant="ghost" size="small" id="editModalCloseBtn" aria-label="Close modal">×</ix-button>
-            </ix-button-group>
         </ix-modal-header>
         <ix-modal-content>
             <ix-message-bar type="info">
@@ -1420,13 +1439,12 @@
     </div>
 
     <!-- Server Config Modal -->
-    <ix-modal id="serverConfigModal" size="1000">
+    <ix-modal id="serverConfigModal" size="1000" dismissible>
         <ix-modal-header>
             Server Configuration
-            <ix-button-group slot="header-actions">
+            <div slot="header-actions" style="display: flex; align-items: center; gap: 8px;">
                 <ix-button variant="secondary" size="small" onclick="toggleConfigView()" id="configViewToggle">Switch to JSON</ix-button>
-                <ix-button variant="ghost" size="small" id="serverConfigCloseBtn" aria-label="Close modal">×</ix-button>
-            </ix-button-group>
+            </div>
         </ix-modal-header>
         <ix-modal-content>
             <form id="serverConfigForm">
@@ -1951,64 +1969,72 @@
             originalWarn.apply(console, args);
         };
         
-        // Function to setup close button listeners
-        function setupCloseButtonListeners() {
-            console.log('Setting up close button listeners...');
+        // Simple test to make sure our close functions work
+        console.log('Close functions available:', typeof closeEditModal, typeof closeServerConfigModal);
+        
+        // Function to enable built-in IX modal close buttons
+        function enableBuiltInCloseButtons() {
+            console.log('Setting up modal close event listeners...');
             
-            const editModalCloseBtn = document.getElementById('editModalCloseBtn');
-            const serverConfigCloseBtn = document.getElementById('serverConfigCloseBtn');
+            // Listen for modal close events
+            const editModal = document.getElementById('editModal');
+            const serverConfigModal = document.getElementById('serverConfigModal');
             
-            console.log('Edit modal close button:', editModalCloseBtn);
-            console.log('Server config close button:', serverConfigCloseBtn);
-            
-            if (editModalCloseBtn) {
-                // Remove any existing listeners first
-                editModalCloseBtn.removeEventListener('click', closeEditModal);
-                editModalCloseBtn.addEventListener('click', function(e) {
-                    console.log('Edit modal close button clicked!');
-                    e.preventDefault();
-                    e.stopPropagation();
-                    closeEditModal();
+            if (editModal) {
+                // Listen for the modal close event
+                editModal.addEventListener('close', function(e) {
+                    console.log('Edit modal close event triggered');
                 });
-                console.log('Edit modal close button listener added');
-            } else {
-                console.log('Edit modal close button not found');
+                
+                // Also listen for clicks anywhere in the modal header
+                editModal.addEventListener('click', function(e) {
+                    if (e.target.closest('button[aria-label="Close"]') || e.target.getAttribute('aria-label') === 'Close') {
+                        console.log('Edit modal close button clicked via delegation');
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeEditModal();
+                    }
+                });
             }
             
-            if (serverConfigCloseBtn) {
-                // Remove any existing listeners first
-                serverConfigCloseBtn.removeEventListener('click', closeServerConfigModal);
-                serverConfigCloseBtn.addEventListener('click', function(e) {
-                    console.log('Server config close button clicked!');
-                    e.preventDefault();
-                    e.stopPropagation();
-                    closeServerConfigModal();
+            if (serverConfigModal) {
+                // Listen for the modal close event
+                serverConfigModal.addEventListener('close', function(e) {
+                    console.log('Server config modal close event triggered');
                 });
-                console.log('Server config close button listener added');
-            } else {
-                console.log('Server config close button not found');
+                
+                // Also listen for clicks anywhere in the modal header
+                serverConfigModal.addEventListener('click', function(e) {
+                    if (e.target.closest('button[aria-label="Close"]') || e.target.getAttribute('aria-label') === 'Close') {
+                        console.log('Server config modal close button clicked via delegation');
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeServerConfigModal();
+                    }
+                });
             }
+            
+            // Global delegation for any close button
+            document.addEventListener('click', function(e) {
+                if (e.target.getAttribute('aria-label') === 'Close' || e.target.closest('button[aria-label="Close"]')) {
+                    const modal = e.target.closest('ix-modal');
+                    if (modal) {
+                        console.log('Global close button clicked for modal:', modal.id);
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        if (modal.id === 'editModal') {
+                            closeEditModal();
+                        } else if (modal.id === 'serverConfigModal') {
+                            closeServerConfigModal();
+                        }
+                    }
+                }
+            });
         }
         
-        // Try multiple approaches to ensure event listeners are attached
-        document.addEventListener('DOMContentLoaded', setupCloseButtonListeners);
-        
-        // Also use event delegation as a fallback
-        document.addEventListener('click', function(e) {
-            if (e.target.id === 'editModalCloseBtn' || e.target.closest('#editModalCloseBtn')) {
-                console.log('Edit modal close button clicked via delegation!');
-                e.preventDefault();
-                e.stopPropagation();
-                closeEditModal();
-            }
-            
-            if (e.target.id === 'serverConfigCloseBtn' || e.target.closest('#serverConfigCloseBtn')) {
-                console.log('Server config close button clicked via delegation!');
-                e.preventDefault();
-                e.stopPropagation();
-                closeServerConfigModal();
-            }
-        });
+        // Try to enable built-in close buttons on DOM load
+        document.addEventListener('DOMContentLoaded', enableBuiltInCloseButtons);
         
         // Wait for IX components to be defined
         Promise.all([
@@ -2018,11 +2044,9 @@
         ]).then(() => {
             console.log('All IX components loaded');
             
-            // Setup close button listeners after components are loaded
-            setTimeout(setupCloseButtonListeners, 100);
-            
-            // Also try again after a longer delay
-            setTimeout(setupCloseButtonListeners, 1000);
+            // Also try to enable close buttons after components are loaded
+            setTimeout(enableBuiltInCloseButtons, 100);
+            setTimeout(enableBuiltInCloseButtons, 1000);
             
             // Ensure all input groups have proper form controls
             setTimeout(() => {

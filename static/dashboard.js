@@ -406,6 +406,7 @@ function populateForm(camera) {
 }
 
 function closeEditModal() {
+    console.log('closeEditModal called');
     const modal = document.getElementById('editModal');
     if (modal) {
         // Use IX modal close method
@@ -420,6 +421,9 @@ function closeEditModal() {
         }
     }
 }
+
+// Make function globally accessible
+window.closeEditModal = closeEditModal;
 
 let originalServerConfig = {};
 
@@ -636,6 +640,7 @@ function collectServerConfigFromForm() {
 }
 
 function closeServerConfigModal() {
+    console.log('closeServerConfigModal called');
     const modal = document.getElementById('serverConfigModal');
     if (modal) {
         // Use IX modal close method
@@ -650,6 +655,9 @@ function closeServerConfigModal() {
         }
     }
 }
+
+// Make function globally accessible
+window.closeServerConfigModal = closeServerConfigModal;
 
 function resetServerConfig() {
     populateServerConfigForm(originalServerConfig);
