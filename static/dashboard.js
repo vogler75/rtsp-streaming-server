@@ -543,9 +543,9 @@ function populateServerConfigForm(config) {
     safeSetValue('config_recording_hls_segment_seconds', config.recording?.hls_segment_seconds || '');
     
     // Pre-recording buffer settings (memory-only)
-    safeSetValue('config_recording_pre_recording_enabled_new', (config.recording?.pre_recording_enabled || false).toString());
-    safeSetValue('config_recording_pre_recording_buffer_minutes_new', config.recording?.pre_recording_buffer_minutes || '');
-    safeSetValue('config_recording_pre_recording_cleanup_interval_seconds_new', config.recording?.pre_recording_cleanup_interval_seconds || '');
+    safeSetValue('config_recording_pre_recording_enabled', (config.recording?.pre_recording_enabled || false).toString());
+    safeSetValue('config_recording_pre_recording_buffer_minutes', config.recording?.pre_recording_buffer_minutes || '');
+    safeSetValue('config_recording_pre_recording_cleanup_interval_seconds', config.recording?.pre_recording_cleanup_interval_seconds || '');
     
     // Transcoding settings
     safeSetValue('config_transcoding_output_format', config.transcoding?.output_format || 'mjpeg');
@@ -620,9 +620,9 @@ function collectServerConfigFromForm() {
             hls_storage_retention: safeGetValue('config_recording_hls_storage_retention', "30d"),
             hls_segment_seconds: safeGetIntValue('config_recording_hls_segment_seconds', 6),
             // Pre-recording buffer settings (memory-only)
-            pre_recording_enabled: safeGetBoolValue('config_recording_pre_recording_enabled_new', false),
-            pre_recording_buffer_minutes: safeGetIntValue('config_recording_pre_recording_buffer_minutes_new', 1),
-            pre_recording_cleanup_interval_seconds: safeGetIntValue('config_recording_pre_recording_cleanup_interval_seconds_new', 1)
+            pre_recording_enabled: safeGetBoolValue('config_recording_pre_recording_enabled', false),
+            pre_recording_buffer_minutes: safeGetIntValue('config_recording_pre_recording_buffer_minutes', 1),
+            pre_recording_cleanup_interval_seconds: safeGetIntValue('config_recording_pre_recording_cleanup_interval_seconds', 1)
         },
         transcoding: {
             output_format: safeGetValue('config_transcoding_output_format', "mjpeg"),
