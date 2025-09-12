@@ -83,11 +83,25 @@ async function checkAdminAccess() {
 }
 
 function showAdminAuth() {
-    document.getElementById('authModal').classList.add('show');
+    const modal = document.getElementById('authModal');
+    // Try IX modal method first, fallback to simple show
+    if (modal.showModal) {
+        modal.showModal();
+    } else {
+        modal.style.display = 'flex';
+        modal.classList.add('show');
+    }
 }
 
 function closeAuthModal() {
-    document.getElementById('authModal').classList.remove('show');
+    const modal = document.getElementById('authModal');
+    // Try IX modal method first, fallback to simple hide
+    if (modal.closeModal) {
+        modal.closeModal();
+    } else {
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+    }
 }
 
 async function authenticateAdmin() {
@@ -129,10 +143,17 @@ function enableAdminMode() {
     isAdminMode = true;
     document.getElementById('addCameraBtn').style.display = 'inline-block';
     document.getElementById('serverConfigBtn').style.display = 'inline-block';
-    const adminBtn = document.querySelector('.admin-btn');
-    adminBtn.textContent = '✓ Admin Mode (Click to Disable)';
-    adminBtn.style.background = 'linear-gradient(135deg, #4caf50 0%, #8bc34a 100%)';
-    adminBtn.onclick = disableAdminMode;
+    
+    // Find admin button and update it
+    const adminBtns = document.querySelectorAll('ix-button');
+    adminBtns.forEach(btn => {
+        if (btn.onclick === showAdminAuth || btn.innerHTML.includes('🔐')) {
+            btn.innerHTML = '✅ Admin Mode';
+            btn.variant = 'success';
+            btn.onclick = disableAdminMode;
+        }
+    });
+    
     // Refresh camera list to show admin buttons (edit/delete)
     refreshStatus(true);
 }
@@ -148,10 +169,14 @@ function disableAdminMode() {
     document.getElementById('serverConfigBtn').style.display = 'none';
     
     // Reset admin button
-    const adminBtn = document.querySelector('.admin-btn');
-    adminBtn.textContent = '🔐 Admin Mode';
-    adminBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-    adminBtn.onclick = showAdminAuth;
+    const adminBtns = document.querySelectorAll('ix-button');
+    adminBtns.forEach(btn => {
+        if (btn.onclick === disableAdminMode || btn.innerHTML.includes('✅')) {
+            btn.innerHTML = '🔐 Admin Mode';
+            btn.variant = 'secondary';
+            btn.onclick = showAdminAuth;
+        }
+    });
     
     // Refresh camera list to hide admin buttons (edit/delete)
     refreshStatus(true);
@@ -160,13 +185,41 @@ function disableAdminMode() {
 }
 
 function showAlert(message, type = 'info') {
-    const alert = document.getElementById('alert');
-    alert.className = `alert ${type} show`;
-    alert.textContent = message;
+    // Create a simple, styled alert instead of IX toast
+    const alertContainer = document.getElementById('alertContainer');
     
+    const alert = document.createElement('div');
+    alert.className = `custom-alert alert-${type}`;
+    
+    // Add icon based on type
+    const icons = {
+        'success': '✅',
+        'error': '❌',
+        'warning': '⚠️',
+        'info': 'ℹ️'
+    };
+    
+    alert.innerHTML = `
+        <div class="alert-content">
+            <span class="alert-icon">${icons[type] || icons.info}</span>
+            <span class="alert-message">${message}</span>
+            <button class="alert-close" onclick="this.parentElement.parentElement.remove()">×</button>
+        </div>
+    `;
+    
+    alertContainer.appendChild(alert);
+    
+    // Auto remove after 5 seconds
     setTimeout(() => {
-        alert.classList.remove('show');
+        if (alert.parentNode) {
+            alert.remove();
+        }
     }, 5000);
+    
+    // Animate in
+    setTimeout(() => {
+        alert.classList.add('alert-show');
+    }, 10);
 }
 
 function toggleSection(element) {
@@ -175,16 +228,19 @@ function toggleSection(element) {
 }
 
 function toggleDatabaseOptions() {
-    const databaseType = document.getElementById('config_recording_database_type').value;
+    const databaseTypeElement = document.getElementById('config_recording_database_type');
+    if (!databaseTypeElement) return; // Exit if element doesn't exist
+    
+    const databaseType = databaseTypeElement.value;
     const databaseUrlGroup = document.getElementById('database_url_group');
-    const databaseExamples = document.getElementById('database_examples');
+    const databasePathGroup = document.getElementById('database_path_group');
     
     if (databaseType === 'postgresql') {
-        databaseUrlGroup.style.display = 'block';
-        databaseExamples.style.display = 'block';
+        if (databaseUrlGroup) databaseUrlGroup.style.display = 'block';
+        if (databasePathGroup) databasePathGroup.style.display = 'none';
     } else {
-        databaseUrlGroup.style.display = 'none';
-        databaseExamples.style.display = 'none';
+        if (databaseUrlGroup) databaseUrlGroup.style.display = 'none';
+        if (databasePathGroup) databasePathGroup.style.display = 'block';
     }
 }
 
@@ -197,8 +253,17 @@ function showAddCamera() {
     document.getElementById('editingCameraId').value = '';
     document.getElementById('cameraForm').reset();
     document.getElementById('cameraId').disabled = false;
-    document.querySelector('.modal-header h2').textContent = 'Add New Camera';
-    document.getElementById('editModal').classList.add('active');
+    const modal = document.getElementById('editModal');
+    const header = modal.querySelector('ix-modal-header');
+    if (header) header.textContent = 'Add New Camera';
+    
+    // Try IX modal method first, fallback to simple show
+    if (modal.showModal) {
+        modal.showModal();
+    } else {
+        modal.style.display = 'flex';
+        modal.classList.add('show');
+    }
 }
 
 function showEditCamera(cameraId) {
@@ -220,8 +285,17 @@ function showEditCamera(cameraId) {
                 document.getElementById('editingCameraId').value = cameraId;
                 document.getElementById('cameraId').value = cameraId;
                 document.getElementById('cameraId').disabled = true;
-                document.querySelector('.modal-header h2').textContent = 'Edit Camera';
-                document.getElementById('editModal').classList.add('active');
+                const modal = document.getElementById('editModal');
+                const header = modal.querySelector('ix-modal-header');
+                if (header) header.textContent = 'Edit Camera';
+                
+                // Try IX modal method first, fallback to simple show
+                if (modal.showModal) {
+                    modal.showModal();
+                } else {
+                    modal.style.display = 'flex';
+                    modal.classList.add('show');
+                }
             } else {
                 showAlert('Failed to load camera configuration', 'error');
             }
@@ -235,89 +309,109 @@ function showEditCamera(cameraId) {
 function populateForm(camera) {
     const config = camera.config;
     
+    // Helper function to safely set form values
+    const safeSetValue = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.value = value;
+        } else {
+            console.warn(`Camera form element with ID '${id}' not found`);
+        }
+    };
+    
     // Basic settings
-    document.getElementById('enabled').value = config.enabled !== false ? 'true' : 'false';
-    document.getElementById('path').value = config.path || '';
-    document.getElementById('url').value = config.url || '';
-    document.getElementById('transport').value = config.transport || 'tcp';
-    document.getElementById('reconnect_interval').value = config.reconnect_interval || 5;
-    document.getElementById('token').value = config.token || '';
+    safeSetValue('enabled', config.enabled !== false ? 'true' : 'false');
+    safeSetValue('path', config.path || '');
+    safeSetValue('url', config.url || '');
+    safeSetValue('transport', config.transport || 'tcp');
+    safeSetValue('reconnect_interval', config.reconnect_interval || 5);
+    safeSetValue('token', config.token || '');
     
     // Per-camera recording settings
     if (config.recording) {
-        document.getElementById('session_segment_minutes').value = config.recording.session_segment_minutes || '';
-        document.getElementById('frame_storage_enabled').value = (config.recording.frame_storage_enabled !== undefined && config.recording.frame_storage_enabled !== null) ? config.recording.frame_storage_enabled.toString() : '';
-        document.getElementById('frame_storage_retention').value = config.recording.frame_storage_retention || '';
-        document.getElementById('mp4_storage_type').value = config.recording.mp4_storage_type || '';
-        document.getElementById('mp4_storage_retention').value = config.recording.mp4_storage_retention || '';
-        document.getElementById('mp4_segment_minutes').value = config.recording.mp4_segment_minutes || '';
+        safeSetValue('session_segment_minutes', config.recording.session_segment_minutes || '');
+        safeSetValue('frame_storage_enabled', (config.recording.frame_storage_enabled !== undefined && config.recording.frame_storage_enabled !== null) ? config.recording.frame_storage_enabled.toString() : '');
+        safeSetValue('frame_storage_retention', config.recording.frame_storage_retention || '');
+        safeSetValue('mp4_storage_type', config.recording.mp4_storage_type || '');
+        safeSetValue('mp4_storage_retention', config.recording.mp4_storage_retention || '');
+        safeSetValue('mp4_segment_minutes', config.recording.mp4_segment_minutes || '');
         // HLS settings
-        document.getElementById('hls_storage_enabled').value = (config.recording.hls_storage_enabled !== undefined && config.recording.hls_storage_enabled !== null) ? config.recording.hls_storage_enabled.toString() : '';
-        document.getElementById('hls_storage_retention').value = config.recording.hls_storage_retention || '';
-        document.getElementById('hls_segment_seconds').value = config.recording.hls_segment_seconds || '';
+        safeSetValue('hls_storage_enabled', (config.recording.hls_storage_enabled !== undefined && config.recording.hls_storage_enabled !== null) ? config.recording.hls_storage_enabled.toString() : '');
+        safeSetValue('hls_storage_retention', config.recording.hls_storage_retention || '');
+        safeSetValue('hls_segment_seconds', config.recording.hls_segment_seconds || '');
         // Pre-recording buffer settings (memory-only, using new IDs)
-        document.getElementById('pre_recording_enabled_camera').value = (config.recording.pre_recording_enabled !== undefined && config.recording.pre_recording_enabled !== null) ? config.recording.pre_recording_enabled.toString() : '';
-        document.getElementById('pre_recording_buffer_minutes_camera').value = config.recording.pre_recording_buffer_minutes || '';
+        safeSetValue('pre_recording_enabled_camera', (config.recording.pre_recording_enabled !== undefined && config.recording.pre_recording_enabled !== null) ? config.recording.pre_recording_enabled.toString() : '');
+        safeSetValue('pre_recording_buffer_minutes_camera', config.recording.pre_recording_buffer_minutes || '');
     } else {
-        document.getElementById('session_segment_minutes').value = '';
-        document.getElementById('frame_storage_enabled').value = '';
-        document.getElementById('frame_storage_retention').value = '';
-        document.getElementById('mp4_storage_type').value = '';
-        document.getElementById('mp4_storage_retention').value = '';
-        document.getElementById('mp4_segment_minutes').value = '';
+        safeSetValue('session_segment_minutes', '');
+        safeSetValue('frame_storage_enabled', '');
+        safeSetValue('frame_storage_retention', '');
+        safeSetValue('mp4_storage_type', '');
+        safeSetValue('mp4_storage_retention', '');
+        safeSetValue('mp4_segment_minutes', '');
         // HLS settings
-        document.getElementById('hls_storage_enabled').value = '';
-        document.getElementById('hls_storage_retention').value = '';
-        document.getElementById('hls_segment_seconds').value = '';
+        safeSetValue('hls_storage_enabled', '');
+        safeSetValue('hls_storage_retention', '');
+        safeSetValue('hls_segment_seconds', '');
         // Pre-recording buffer settings reset (memory-only, using new IDs)
-        document.getElementById('pre_recording_enabled_camera').value = '';
-        document.getElementById('pre_recording_buffer_minutes_camera').value = '';
+        safeSetValue('pre_recording_enabled_camera', '');
+        safeSetValue('pre_recording_buffer_minutes_camera', '');
     }
     
     // MQTT settings
     if (config.mqtt) {
-        document.getElementById('mqtt_publish_interval').value = config.mqtt.publish_interval || 0;
-        document.getElementById('mqtt_topic_name').value = config.mqtt.topic_name || '';
+        safeSetValue('mqtt_publish_interval', config.mqtt.publish_interval || 0);
+        safeSetValue('mqtt_topic_name', config.mqtt.topic_name || '');
     }
 
     // PTZ settings
     if (config.ptz) {
-        document.getElementById('ptz_enabled').value = (config.ptz.enabled || false).toString();
-        document.getElementById('ptz_protocol').value = config.ptz.protocol || 'onvif';
-        document.getElementById('ptz_onvif_url').value = config.ptz.onvif_url || '';
-        document.getElementById('ptz_username').value = config.ptz.username || '';
-        document.getElementById('ptz_password').value = config.ptz.password || '';
-        document.getElementById('ptz_profile_token').value = config.ptz.profile_token || '';
+        safeSetValue('ptz_enabled', (config.ptz.enabled || false).toString());
+        safeSetValue('ptz_protocol', config.ptz.protocol || 'onvif');
+        safeSetValue('ptz_onvif_url', config.ptz.onvif_url || '');
+        safeSetValue('ptz_username', config.ptz.username || '');
+        safeSetValue('ptz_password', config.ptz.password || '');
+        safeSetValue('ptz_profile_token', config.ptz.profile_token || '');
     } else {
-        document.getElementById('ptz_enabled').value = 'false';
-        document.getElementById('ptz_protocol').value = 'onvif';
-        document.getElementById('ptz_onvif_url').value = '';
-        document.getElementById('ptz_username').value = '';
-        document.getElementById('ptz_password').value = '';
-        document.getElementById('ptz_profile_token').value = '';
+        safeSetValue('ptz_enabled', 'false');
+        safeSetValue('ptz_protocol', 'onvif');
+        safeSetValue('ptz_onvif_url', '');
+        safeSetValue('ptz_username', '');
+        safeSetValue('ptz_password', '');
+        safeSetValue('ptz_profile_token', '');
     }
-    togglePtzFields();
+    // Safe call to togglePtzFields if it exists
+    if (typeof togglePtzFields === 'function') {
+        togglePtzFields();
+    }
     
     // FFmpeg settings
     if (config.ffmpeg) {
-        document.getElementById('ffmpeg_command').value = config.ffmpeg.command || '';
-        document.getElementById('ffmpeg_quality').value = config.ffmpeg.quality || '';
-        document.getElementById('ffmpeg_use_wallclock_as_timestamps').value = config.ffmpeg.use_wallclock_as_timestamps !== undefined && config.ffmpeg.use_wallclock_as_timestamps !== null ? config.ffmpeg.use_wallclock_as_timestamps.toString() : 'true';
-        document.getElementById('ffmpeg_scale').value = config.ffmpeg.scale || '';
-        document.getElementById('ffmpeg_output_framerate').value = config.ffmpeg.output_framerate || '';
-        document.getElementById('ffmpeg_video_bitrate').value = config.ffmpeg.video_bitrate || '';
-        document.getElementById('ffmpeg_rtbufsize').value = config.ffmpeg.rtbufsize || '';
-        document.getElementById('ffmpeg_log_stderr').value = config.ffmpeg.log_stderr || '';
-        document.getElementById('ffmpeg_fflags').value = config.ffmpeg.fflags || '';
-        document.getElementById('ffmpeg_flags').value = config.ffmpeg.flags || '';
-        document.getElementById('ffmpeg_avioflags').value = config.ffmpeg.avioflags || '';
-        document.getElementById('ffmpeg_fps_mode').value = config.ffmpeg.fps_mode || '';
-        document.getElementById('ffmpeg_data_timeout_secs').value = config.ffmpeg.data_timeout_secs || '';
+        safeSetValue('ffmpeg_command', config.ffmpeg.command || '');
+        safeSetValue('ffmpeg_quality', config.ffmpeg.quality || '');
+        safeSetValue('ffmpeg_use_wallclock_as_timestamps', config.ffmpeg.use_wallclock_as_timestamps !== undefined && config.ffmpeg.use_wallclock_as_timestamps !== null ? config.ffmpeg.use_wallclock_as_timestamps.toString() : 'true');
+        safeSetValue('ffmpeg_scale', config.ffmpeg.scale || '');
+        safeSetValue('ffmpeg_output_framerate', config.ffmpeg.output_framerate || '');
+        safeSetValue('ffmpeg_video_bitrate', config.ffmpeg.video_bitrate || '');
+        safeSetValue('ffmpeg_rtbufsize', config.ffmpeg.rtbufsize || '');
+        safeSetValue('ffmpeg_log_stderr', config.ffmpeg.log_stderr || '');
+        safeSetValue('ffmpeg_fflags', config.ffmpeg.fflags || '');
+        safeSetValue('ffmpeg_flags', config.ffmpeg.flags || '');
+        safeSetValue('ffmpeg_avioflags', config.ffmpeg.avioflags || '');
+        safeSetValue('ffmpeg_fps_mode', config.ffmpeg.fps_mode || '');
+        safeSetValue('ffmpeg_data_timeout_secs', config.ffmpeg.data_timeout_secs || '');
     }
 }
 
 function closeEditModal() {
-    document.getElementById('editModal').classList.remove('active');
+    const modal = document.getElementById('editModal');
+    // Try IX modal method first, fallback to simple hide
+    if (modal.closeModal) {
+        modal.closeModal();
+    } else {
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+    }
 }
 
 let originalServerConfig = {};
@@ -339,11 +433,38 @@ async function showServerConfig() {
             const data = await response.json();
             if (data.status === 'success') {
                 originalServerConfig = data.data;
-                populateServerConfigForm(data.data);
-                // Also populate the JSON editor with the current config
+                
+                try {
+                    console.log('Populating form...');
+                    populateServerConfigForm(data.data);
+                    console.log('Form populated successfully');
+                } catch (formError) {
+                    console.error('Error populating form:', formError);
+                    showAlert(`Error populating form: ${formError.message}`, 'error');
+                    return;
+                }
+                
+                // Also populate the JSON editor with the current config if it exists
                 const configJson = JSON.stringify(data.data, null, 2);
-                document.getElementById('serverConfigEditor').value = configJson;
-                document.getElementById('serverConfigModal').classList.add('active');
+                const jsonEditor = document.getElementById('serverConfigEditor');
+                if (jsonEditor) {
+                    jsonEditor.value = configJson;
+                }
+                
+                console.log('Opening modal...');
+                const modal = document.getElementById('serverConfigModal');
+                
+                // Try IX modal method first, fallback to simple show
+                if (modal && modal.showModal) {
+                    modal.showModal();
+                } else if (modal) {
+                    modal.style.display = 'flex';
+                    modal.classList.add('show');
+                } else {
+                    showAlert('Server config modal not found', 'error');
+                    return;
+                }
+                console.log('Modal opened successfully');
             } else {
                 showAlert('Failed to load server configuration', 'error');
             }
@@ -356,125 +477,166 @@ async function showServerConfig() {
 }
 
 function populateServerConfigForm(config) {
+    // Helper function to safely set form values
+    const safeSetValue = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.value = value;
+        } else {
+            console.warn(`Element with ID '${id}' not found in form`);
+        }
+    };
+    
     // Server settings
-    document.getElementById('config_server_host').value = config.server?.host || '';
-    document.getElementById('config_server_port').value = config.server?.port || '';
-    document.getElementById('config_server_cors_allow_origin').value = config.server?.cors_allow_origin || '';
-    document.getElementById('config_server_admin_token').value = config.server?.admin_token || '';
-    document.getElementById('config_server_cameras_directory').value = config.server?.cameras_directory || '';
+    safeSetValue('config_server_host', config.server?.host || '');
+    safeSetValue('config_server_port', config.server?.port || '');
+    safeSetValue('config_server_cors_allow_origin', config.server?.cors_allow_origin || '');
+    safeSetValue('config_server_admin_token', config.server?.admin_token || '');
+    safeSetValue('config_server_cameras_directory', config.server?.cameras_directory || '');
     
     // TLS settings
-    document.getElementById('config_server_tls_enabled').value = (config.server?.tls?.enabled || false).toString();
-    document.getElementById('config_server_tls_cert_path').value = config.server?.tls?.cert_path || '';
-    document.getElementById('config_server_tls_key_path').value = config.server?.tls?.key_path || '';
+    safeSetValue('config_server_tls_enabled', (config.server?.tls?.enabled || false).toString());
+    safeSetValue('config_server_tls_cert_path', config.server?.tls?.cert_path || '');
+    safeSetValue('config_server_tls_key_path', config.server?.tls?.key_path || '');
     
     // MQTT settings
-    document.getElementById('config_mqtt_enabled').value = (config.mqtt?.enabled || false).toString();
-    document.getElementById('config_mqtt_broker_url').value = config.mqtt?.broker_url || '';
-    document.getElementById('config_mqtt_client_id').value = config.mqtt?.client_id || '';
-    document.getElementById('config_mqtt_base_topic').value = config.mqtt?.base_topic || '';
-    document.getElementById('config_mqtt_qos').value = (config.mqtt?.qos || 0).toString();
-    document.getElementById('config_mqtt_retain').value = (config.mqtt?.retain || false).toString();
-    document.getElementById('config_mqtt_keep_alive_secs').value = config.mqtt?.keep_alive_secs || '';
-    document.getElementById('config_mqtt_publish_interval_secs').value = config.mqtt?.publish_interval_secs || '';
-    document.getElementById('config_mqtt_publish_picture_arrival').value = (config.mqtt?.publish_picture_arrival !== undefined ? config.mqtt.publish_picture_arrival : true).toString();
-    document.getElementById('config_mqtt_max_packet_size').value = config.mqtt?.max_packet_size || '';
+    safeSetValue('config_mqtt_enabled', (config.mqtt?.enabled || false).toString());
+    safeSetValue('config_mqtt_broker_url', config.mqtt?.broker_url || '');
+    safeSetValue('config_mqtt_client_id', config.mqtt?.client_id || '');
+    safeSetValue('config_mqtt_base_topic', config.mqtt?.base_topic || '');
+    safeSetValue('config_mqtt_qos', (config.mqtt?.qos || 0).toString());
+    safeSetValue('config_mqtt_retain', (config.mqtt?.retain || false).toString());
+    safeSetValue('config_mqtt_keep_alive_secs', config.mqtt?.keep_alive_secs || '');
+    safeSetValue('config_mqtt_publish_interval_secs', config.mqtt?.publish_interval_secs || '');
+    safeSetValue('config_mqtt_publish_picture_arrival', (config.mqtt?.publish_picture_arrival !== undefined ? config.mqtt.publish_picture_arrival : true).toString());
+    safeSetValue('config_mqtt_max_packet_size', config.mqtt?.max_packet_size || '');
     
     // Recording settings
-    document.getElementById('config_recording_frame_storage_enabled').value = (config.recording?.frame_storage_enabled || false).toString();
-    document.getElementById('config_recording_mp4_storage_type').value = config.recording?.mp4_storage_type || 'filesystem';
-    document.getElementById('config_recording_mp4_framerate').value = config.recording?.mp4_framerate || '5.0';
-    document.getElementById('config_recording_database_type').value = config.recording?.database_type || 'sqlite';
-    document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
-    document.getElementById('config_recording_database_url').value = config.recording?.database_url || '';
-    document.getElementById('config_recording_session_segment_minutes').value = config.recording?.session_segment_minutes || '';
+    safeSetValue('config_recording_frame_storage_enabled', (config.recording?.frame_storage_enabled || false).toString());
+    safeSetValue('config_recording_mp4_storage_type', config.recording?.mp4_storage_type || 'filesystem');
+    safeSetValue('config_recording_mp4_framerate', config.recording?.mp4_framerate || '5.0');
+    safeSetValue('config_recording_database_type', config.recording?.database_type || 'sqlite');
+    safeSetValue('config_recording_database_path', config.recording?.database_path || '');
+    safeSetValue('config_recording_database_url', config.recording?.database_url || '');
+    safeSetValue('config_recording_session_segment_minutes', config.recording?.session_segment_minutes || '');
     
-    // Update database options display
-    toggleDatabaseOptions();
-    document.getElementById('config_recording_max_frame_size').value = config.recording?.max_frame_size || '';
-    document.getElementById('config_recording_frame_storage_retention').value = config.recording?.frame_storage_retention || '';
-    document.getElementById('config_recording_mp4_storage_retention').value = config.recording?.mp4_storage_retention || '';
-    document.getElementById('config_recording_mp4_segment_minutes').value = config.recording?.mp4_segment_minutes || '';
-    document.getElementById('config_recording_cleanup_interval_hours').value = config.recording?.cleanup_interval_hours || '';
+    // Update database options display if function exists
+    if (typeof toggleDatabaseOptions === 'function') {
+        toggleDatabaseOptions();
+    }
+    safeSetValue('config_recording_max_frame_size', config.recording?.max_frame_size || '');
+    safeSetValue('config_recording_frame_storage_retention', config.recording?.frame_storage_retention || '');
+    safeSetValue('config_recording_mp4_storage_retention', config.recording?.mp4_storage_retention || '');
+    safeSetValue('config_recording_mp4_segment_minutes', config.recording?.mp4_segment_minutes || '');
+    safeSetValue('config_recording_cleanup_interval_hours', config.recording?.cleanup_interval_hours || '');
+    
     // HLS settings
-    document.getElementById('config_recording_hls_storage_enabled').value = (config.recording?.hls_storage_enabled || false).toString();
-    document.getElementById('config_recording_hls_storage_retention').value = config.recording?.hls_storage_retention || '';
-    document.getElementById('config_recording_hls_segment_seconds').value = config.recording?.hls_segment_seconds || '';
+    safeSetValue('config_recording_hls_storage_enabled', (config.recording?.hls_storage_enabled || false).toString());
+    safeSetValue('config_recording_hls_storage_retention', config.recording?.hls_storage_retention || '');
+    safeSetValue('config_recording_hls_segment_seconds', config.recording?.hls_segment_seconds || '');
     
     // Pre-recording buffer settings (memory-only)
-    document.getElementById('config_recording_pre_recording_enabled_new').value = (config.recording?.pre_recording_enabled || false).toString();
-    document.getElementById('config_recording_pre_recording_buffer_minutes_new').value = config.recording?.pre_recording_buffer_minutes || '';
-    document.getElementById('config_recording_pre_recording_cleanup_interval_seconds_new').value = config.recording?.pre_recording_cleanup_interval_seconds || '';
+    safeSetValue('config_recording_pre_recording_enabled_new', (config.recording?.pre_recording_enabled || false).toString());
+    safeSetValue('config_recording_pre_recording_buffer_minutes_new', config.recording?.pre_recording_buffer_minutes || '');
+    safeSetValue('config_recording_pre_recording_cleanup_interval_seconds_new', config.recording?.pre_recording_cleanup_interval_seconds || '');
     
     // Transcoding settings
-    document.getElementById('config_transcoding_output_format').value = config.transcoding?.output_format || 'mjpeg';
-    document.getElementById('config_transcoding_capture_framerate').value = config.transcoding?.capture_framerate || '';
-    document.getElementById('config_transcoding_output_framerate').value = config.transcoding?.output_framerate || '';
-    document.getElementById('config_transcoding_channel_buffer_size').value = config.transcoding?.channel_buffer_size || '';
-    document.getElementById('config_transcoding_debug_capture').value = (config.transcoding?.debug_capture || false).toString();
-    document.getElementById('config_transcoding_debug_duplicate_frames').value = (config.transcoding?.debug_duplicate_frames || false).toString();
+    safeSetValue('config_transcoding_output_format', config.transcoding?.output_format || 'mjpeg');
+    safeSetValue('config_transcoding_capture_framerate', config.transcoding?.capture_framerate || '');
+    safeSetValue('config_transcoding_output_framerate', config.transcoding?.output_framerate || '');
+    safeSetValue('config_transcoding_channel_buffer_size', config.transcoding?.channel_buffer_size || '');
+    safeSetValue('config_transcoding_debug_capture', (config.transcoding?.debug_capture || false).toString());
+    safeSetValue('config_transcoding_debug_duplicate_frames', (config.transcoding?.debug_duplicate_frames || false).toString());
 }
 
 function collectServerConfigFromForm() {
+    // Helper function to safely get form values
+    const safeGetValue = (id, defaultValue = '') => {
+        const element = document.getElementById(id);
+        return element ? element.value : defaultValue;
+    };
+    
+    const safeGetIntValue = (id, defaultValue = 0) => {
+        const element = document.getElementById(id);
+        return element ? (parseInt(element.value) || defaultValue) : defaultValue;
+    };
+    
+    const safeGetFloatValue = (id, defaultValue = 0) => {
+        const element = document.getElementById(id);
+        return element ? (parseFloat(element.value) || defaultValue) : defaultValue;
+    };
+    
+    const safeGetBoolValue = (id, defaultValue = false) => {
+        const element = document.getElementById(id);
+        return element ? element.value === 'true' : defaultValue;
+    };
+    
     return {
         server: {
-            host: document.getElementById('config_server_host').value || "0.0.0.0",
-            port: parseInt(document.getElementById('config_server_port').value) || 8080,
-            cors_allow_origin: document.getElementById('config_server_cors_allow_origin').value || "*",
-            admin_token: document.getElementById('config_server_admin_token').value || "",
-            cameras_directory: document.getElementById('config_server_cameras_directory').value || null,
+            host: safeGetValue('config_server_host', "0.0.0.0"),
+            port: safeGetIntValue('config_server_port', 8080),
+            cors_allow_origin: safeGetValue('config_server_cors_allow_origin', "*"),
+            admin_token: safeGetValue('config_server_admin_token', ""),
+            cameras_directory: safeGetValue('config_server_cameras_directory') || null,
             tls: {
-                enabled: document.getElementById('config_server_tls_enabled').value === 'true',
-                cert_path: document.getElementById('config_server_tls_cert_path').value || "certs/server.crt",
-                key_path: document.getElementById('config_server_tls_key_path').value || "certs/server.key"
+                enabled: safeGetBoolValue('config_server_tls_enabled', false),
+                cert_path: safeGetValue('config_server_tls_cert_path', "certs/server.crt"),
+                key_path: safeGetValue('config_server_tls_key_path', "certs/server.key")
             }
         },
         mqtt: {
-            enabled: document.getElementById('config_mqtt_enabled').value === 'true',
-            broker_url: document.getElementById('config_mqtt_broker_url').value || "",
-            client_id: document.getElementById('config_mqtt_client_id').value || "",
-            base_topic: document.getElementById('config_mqtt_base_topic').value || "",
-            qos: parseInt(document.getElementById('config_mqtt_qos').value) || 0,
-            retain: document.getElementById('config_mqtt_retain').value === 'true',
-            keep_alive_secs: parseInt(document.getElementById('config_mqtt_keep_alive_secs').value) || 60,
-            publish_interval_secs: parseInt(document.getElementById('config_mqtt_publish_interval_secs').value) || 1,
-            publish_picture_arrival: document.getElementById('config_mqtt_publish_picture_arrival').value === 'true',
-            max_packet_size: parseInt(document.getElementById('config_mqtt_max_packet_size').value) || 268435456
+            enabled: safeGetBoolValue('config_mqtt_enabled', false),
+            broker_url: safeGetValue('config_mqtt_broker_url', ""),
+            client_id: safeGetValue('config_mqtt_client_id', ""),
+            base_topic: safeGetValue('config_mqtt_base_topic', ""),
+            qos: safeGetIntValue('config_mqtt_qos', 0),
+            retain: safeGetBoolValue('config_mqtt_retain', false),
+            keep_alive_secs: safeGetIntValue('config_mqtt_keep_alive_secs', 60),
+            publish_interval_secs: safeGetIntValue('config_mqtt_publish_interval_secs', 1),
+            publish_picture_arrival: safeGetBoolValue('config_mqtt_publish_picture_arrival', true),
+            max_packet_size: safeGetIntValue('config_mqtt_max_packet_size', 268435456)
         },
         recording: {
-            frame_storage_enabled: document.getElementById('config_recording_frame_storage_enabled').value === 'true',
-            mp4_storage_type: document.getElementById('config_recording_mp4_storage_type').value || 'filesystem',
-            mp4_framerate: parseFloat(document.getElementById('config_recording_mp4_framerate').value) || 5.0,
-            database_type: document.getElementById('config_recording_database_type').value || 'sqlite',
-            database_path: document.getElementById('config_recording_database_path').value || "recordings",
-            database_url: document.getElementById('config_recording_database_url').value || null,
-            session_segment_minutes: parseInt(document.getElementById('config_recording_session_segment_minutes').value) || 60,
-            max_frame_size: parseInt(document.getElementById('config_recording_max_frame_size').value) || 10485760,
-            frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
-            mp4_storage_retention: document.getElementById('config_recording_mp4_storage_retention').value || "30d",
-            mp4_segment_minutes: parseInt(document.getElementById('config_recording_mp4_segment_minutes').value) || 5,
-            cleanup_interval_hours: parseInt(document.getElementById('config_recording_cleanup_interval_hours').value) || 1,
-            hls_storage_enabled: document.getElementById('config_recording_hls_storage_enabled').value === 'true',
-            hls_storage_retention: document.getElementById('config_recording_hls_storage_retention').value || "30d",
-            hls_segment_seconds: parseInt(document.getElementById('config_recording_hls_segment_seconds').value) || 6,
+            frame_storage_enabled: safeGetBoolValue('config_recording_frame_storage_enabled', false),
+            mp4_storage_type: safeGetValue('config_recording_mp4_storage_type', 'filesystem'),
+            mp4_framerate: safeGetFloatValue('config_recording_mp4_framerate', 5.0),
+            database_type: safeGetValue('config_recording_database_type', 'sqlite'),
+            database_path: safeGetValue('config_recording_database_path', "recordings"),
+            database_url: safeGetValue('config_recording_database_url') || null,
+            session_segment_minutes: safeGetIntValue('config_recording_session_segment_minutes', 60),
+            max_frame_size: safeGetIntValue('config_recording_max_frame_size', 10485760),
+            frame_storage_retention: safeGetValue('config_recording_frame_storage_retention', "7d"),
+            mp4_storage_retention: safeGetValue('config_recording_mp4_storage_retention', "30d"),
+            mp4_segment_minutes: safeGetIntValue('config_recording_mp4_segment_minutes', 5),
+            cleanup_interval_hours: safeGetIntValue('config_recording_cleanup_interval_hours', 1),
+            hls_storage_enabled: safeGetBoolValue('config_recording_hls_storage_enabled', false),
+            hls_storage_retention: safeGetValue('config_recording_hls_storage_retention', "30d"),
+            hls_segment_seconds: safeGetIntValue('config_recording_hls_segment_seconds', 6),
             // Pre-recording buffer settings (memory-only)
-            pre_recording_enabled: document.getElementById('config_recording_pre_recording_enabled_new').value === 'true',
-            pre_recording_buffer_minutes: parseInt(document.getElementById('config_recording_pre_recording_buffer_minutes_new').value) || 1,
-            pre_recording_cleanup_interval_seconds: parseInt(document.getElementById('config_recording_pre_recording_cleanup_interval_seconds_new').value) || 1
+            pre_recording_enabled: safeGetBoolValue('config_recording_pre_recording_enabled_new', false),
+            pre_recording_buffer_minutes: safeGetIntValue('config_recording_pre_recording_buffer_minutes_new', 1),
+            pre_recording_cleanup_interval_seconds: safeGetIntValue('config_recording_pre_recording_cleanup_interval_seconds_new', 1)
         },
         transcoding: {
-            output_format: document.getElementById('config_transcoding_output_format').value || "mjpeg",
-            capture_framerate: parseFloat(document.getElementById('config_transcoding_capture_framerate').value) || 0,
-            output_framerate: parseFloat(document.getElementById('config_transcoding_output_framerate').value) || 0,
-            channel_buffer_size: parseInt(document.getElementById('config_transcoding_channel_buffer_size').value) || 50,
-            debug_capture: document.getElementById('config_transcoding_debug_capture').value === 'true',
-            debug_duplicate_frames: document.getElementById('config_transcoding_debug_duplicate_frames').value === 'true'
+            output_format: safeGetValue('config_transcoding_output_format', "mjpeg"),
+            capture_framerate: safeGetFloatValue('config_transcoding_capture_framerate', 0),
+            output_framerate: safeGetFloatValue('config_transcoding_output_framerate', 0),
+            channel_buffer_size: safeGetIntValue('config_transcoding_channel_buffer_size', 50),
+            debug_capture: safeGetBoolValue('config_transcoding_debug_capture', false),
+            debug_duplicate_frames: safeGetBoolValue('config_transcoding_debug_duplicate_frames', false)
         }
     };
 }
 
 function closeServerConfigModal() {
-    document.getElementById('serverConfigModal').classList.remove('active');
+    const modal = document.getElementById('serverConfigModal');
+    // Try IX modal method first, fallback to simple hide
+    if (modal.closeModal) {
+        modal.closeModal();
+    } else {
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+    }
 }
 
 function resetServerConfig() {
@@ -537,11 +699,25 @@ function toggleConfigView() {
     const jsonView = document.getElementById('serverConfigJson');
     const toggleBtn = document.getElementById('configViewToggle');
     
+    // Button elements for visibility control
+    const resetJsonBtn = document.getElementById('resetJsonBtn');
+    const validateJsonBtn = document.getElementById('validateJsonBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const saveFormBtn = document.getElementById('saveFormBtn');
+    const saveJsonBtn = document.getElementById('saveJsonBtn');
+    
     if (formView.style.display === 'none') {
         // Switch to form view
         formView.style.display = 'block';
         jsonView.style.display = 'none';
-        toggleBtn.textContent = '📝 Switch to JSON';
+        toggleBtn.textContent = 'Switch to JSON';
+        
+        // Show form buttons, hide JSON buttons
+        if (resetJsonBtn) resetJsonBtn.style.display = 'none';
+        if (validateJsonBtn) validateJsonBtn.style.display = 'none';
+        if (resetBtn) resetBtn.style.display = '';
+        if (saveFormBtn) saveFormBtn.style.display = '';
+        if (saveJsonBtn) saveJsonBtn.style.display = 'none';
         
         // Sync JSON to form when switching to form view
         try {
@@ -557,7 +733,14 @@ function toggleConfigView() {
         // Switch to JSON view
         formView.style.display = 'none';
         jsonView.style.display = 'block';
-        toggleBtn.textContent = '📄 Switch to Form';
+        toggleBtn.textContent = 'Switch to Form';
+        
+        // Show JSON buttons, hide form buttons
+        if (resetJsonBtn) resetJsonBtn.style.display = '';
+        if (validateJsonBtn) validateJsonBtn.style.display = '';
+        if (resetBtn) resetBtn.style.display = 'none';
+        if (saveFormBtn) saveFormBtn.style.display = 'none';
+        if (saveJsonBtn) saveJsonBtn.style.display = '';
         
         // Sync form to JSON when switching to JSON view
         const config = collectServerConfigFromForm();
@@ -893,7 +1076,10 @@ function updateServerStatus(statusData, cameras) {
     
     // Update version display if available
     if (statusData.version) {
-        document.getElementById('versionDisplay').textContent = `Version: ${statusData.version}`;
+        const versionChip = document.getElementById('versionDisplay');
+        if (versionChip) {
+            versionChip.textContent = `v${statusData.version}`;
+        }
     }
     
     // Calculate recording cameras from camera data
@@ -1058,9 +1244,9 @@ async function createCameraTileWithRecording(camera) {
     return createCameraTile(camera, recordingStatus, recordingActive, dbSize, recordingBtnText, recordingBtnColor, recordingAvailable);
 }
 
-function createCameraTile(camera, recordingStatus = 'Loading...', recordingActive = false, dbSize = 'Loading...', recordingBtnText = '🔴 Recording', recordingBtnColor = '#27ae60', recordingAvailable = false) {
+function createCameraTile(camera, recordingStatus = 'Loading...', recordingActive = false, dbSize = 'Loading...', recordingBtnText = 'Recording', recordingBtnColor = '#27ae60', recordingAvailable = false) {
     const tile = document.createElement('div');
-    tile.className = 'camera-tile';
+    tile.className = 'camera-card';
     
     const isOnline = camera.connected || camera.ffmpeg_running;
     const streamId = `stream-${camera.id}`;
@@ -1127,7 +1313,7 @@ function createCameraTile(camera, recordingStatus = 'Loading...', recordingActiv
             <div class="info-row">
                 <span class="info-label">Recording:</span>
                 <span id="recording-status-${camera.id}" class="recording-status-badge ${recordingActive ? 'active' : 'stopped'}">${recordingStatus}</span>
-                <button id="recording-btn-${camera.id}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})" style="background: ${recordingBtnColor}; margin-left: 10px; padding: 2px 8px; font-size: 12px; border: none; border-radius: 3px; color: white; cursor: pointer;">${recordingBtnText}</button>
+                <ix-button size="small" id="recording-btn-${camera.id}" variant="${recordingActive ? 'danger' : 'success'}" onclick="toggleRecording('${camera.id}', '${camera.path}', ${requiresToken})">${recordingBtnText}</ix-button>
             </div>
             <div class="info-row">
                 <span class="info-label">DB Size:</span>
@@ -1136,10 +1322,10 @@ function createCameraTile(camera, recordingStatus = 'Loading...', recordingActiv
             ${tokenSection}
         </div>
         <div id="actions-${camera.id}" class="camera-actions">
-            <button onclick="openCameraStream('${camera.id}', '${camera.path}', ${requiresToken})">🔗 Stream</button>
-            <button onclick="openCameraControl('${camera.id}', '${camera.path}', ${requiresToken})">🎮 Control</button>
-            <button onclick="showEditCamera('${camera.id}')" style="display: ${isAdminMode ? 'inline-block' : 'none'};">✏️ Edit</button>
-            <button class="delete-btn" onclick="deleteCamera('${camera.id}')" style="display: ${isAdminMode ? 'inline-block' : 'none'};">🗑️ Delete</button>
+            <ix-button size="small" variant="primary" onclick="openCameraStream('${camera.id}', '${camera.path}', ${requiresToken})">Stream</ix-button>
+            <ix-button size="small" variant="secondary" onclick="openCameraControl('${camera.id}', '${camera.path}', ${requiresToken})">Control</ix-button>
+            <ix-button size="small" variant="secondary" onclick="showEditCamera('${camera.id}')" style="display: ${isAdminMode ? 'inline-block' : 'none'};">Edit</ix-button>
+            <ix-button size="small" variant="danger" onclick="deleteCamera('${camera.id}')" style="display: ${isAdminMode ? 'inline-block' : 'none'};">Delete</ix-button>
         </div>
     `;
     
@@ -1197,12 +1383,12 @@ function openCameraControl(cameraId, cameraPath, requiresToken) {
 }
 
 function toggleAllStreams() {
-    const masterCheckbox = document.getElementById('allStreamsToggle');
-    const isEnabled = masterCheckbox.checked;
+    const masterToggle = document.getElementById('allStreamsToggle');
+    const isEnabled = masterToggle.checked;
     
     if (!currentCameras || currentCameras.length === 0) {
         showAlert('No cameras available', 'warning');
-        masterCheckbox.checked = false;
+        masterToggle.checked = false;
         return;
     }
     
@@ -1510,6 +1696,50 @@ async function updateRecordingStatus(cameraId, cameraPath, requiresToken) {
 }
 
 
-// Initial load
-refreshStatus(true); // Force full rebuild on initial load
-startAutoRefresh();
+// Wait for IX components to be ready
+function initializeDashboard() {
+    // Setup event listeners for IX components
+    const autoRefreshToggle = document.getElementById('autoRefresh');
+    if (autoRefreshToggle) {
+        autoRefreshToggle.addEventListener('checkedChange', (e) => {
+            if (e.detail) {
+                refreshStatus();
+                setRefreshTimer();
+            } else {
+                clearTimeout(refreshTimer);
+            }
+        });
+    }
+    
+    const refreshIntervalSelect = document.getElementById('refreshInterval');
+    if (refreshIntervalSelect) {
+        refreshIntervalSelect.addEventListener('valueChange', (e) => {
+            clearTimeout(refreshTimer);
+            if (document.getElementById('autoRefresh').checked) {
+                setRefreshTimer();
+            }
+        });
+    }
+    
+    const allStreamsToggle = document.getElementById('allStreamsToggle');
+    if (allStreamsToggle) {
+        allStreamsToggle.addEventListener('checkedChange', (e) => {
+            toggleAllStreams();
+        });
+    }
+    
+    // Initial load
+    refreshStatus(true); // Force full rebuild on initial load
+    startAutoRefresh();
+}
+
+// Wait for custom elements to be defined
+if (window.customElements) {
+    customElements.whenDefined('ix-modal').then(() => {
+        // All IX components should be ready
+        initializeDashboard();
+    });
+} else {
+    // Fallback for older browsers
+    setTimeout(initializeDashboard, 1000);
+}
