@@ -391,7 +391,7 @@ function populateForm(camera) {
     if (config.ffmpeg) {
         safeSetValue('ffmpeg_command', config.ffmpeg.command || '');
         safeSetValue('ffmpeg_quality', config.ffmpeg.quality || '');
-        safeSetValue('ffmpeg_use_wallclock_as_timestamps', config.ffmpeg.use_wallclock_as_timestamps !== undefined && config.ffmpeg.use_wallclock_as_timestamps !== null ? config.ffmpeg.use_wallclock_as_timestamps.toString() : 'true');
+        safeSetValue('ffmpeg_use_wallclock_as_timestamps', config.ffmpeg.use_wallclock_as_timestamps !== undefined ? config.ffmpeg.use_wallclock_as_timestamps.toString() : 'true');
         safeSetValue('ffmpeg_scale', config.ffmpeg.scale || '');
         safeSetValue('ffmpeg_output_framerate', config.ffmpeg.output_framerate || '');
         safeSetValue('ffmpeg_video_bitrate', config.ffmpeg.video_bitrate || '');
@@ -855,10 +855,35 @@ async function deleteCamera(cameraId) {
     }
 }
 
-document.getElementById('cameraForm').addEventListener('submit', async (e) => {
+// Function to manually submit camera form
+function submitCameraForm() {
+    console.log('submitCameraForm called');
+    const cameraForm = document.getElementById('cameraForm');
+    if (cameraForm) {
+        // Create and dispatch a submit event
+        const submitEvent = new Event('submit', {
+            bubbles: true,
+            cancelable: true
+        });
+        cameraForm.dispatchEvent(submitEvent);
+    } else {
+        console.error('Camera form not found when trying to submit!');
+    }
+}
+
+// Make function globally accessible
+window.submitCameraForm = submitCameraForm;
+
+// Ensure camera form event listener is attached after DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    const cameraForm = document.getElementById('cameraForm');
+    if (cameraForm) {
+        cameraForm.addEventListener('submit', async (e) => {
+    console.log('Camera form submit triggered');
     e.preventDefault();
     
     const formData = new FormData(e.target);
+    console.log('Form data collected:', Object.fromEntries(formData));
     const isEditing = document.getElementById('editingCameraId').value;
     const cameraId = isEditing || formData.get('cameraId');
     
@@ -957,11 +982,12 @@ document.getElementById('cameraForm').addEventListener('submit', async (e) => {
     
     ffmpegFields.forEach(field => {
         const value = formData.get(`ffmpeg_${field}`);
-        if (value) {
+        if (field === 'use_wallclock_as_timestamps') {
+            // Always process use_wallclock_as_timestamps, default to true
+            ffmpegConfig[field] = value ? value === 'true' : true;
+        } else if (value) {
             if (field === 'quality' || field === 'output_framerate' || field === 'rtbufsize' || field === 'data_timeout_secs') {
                 ffmpegConfig[field] = parseInt(value);
-            } else if (field === 'use_wallclock_as_timestamps') {
-                ffmpegConfig[field] = value === 'true';
             } else {
                 ffmpegConfig[field] = value;
             }
@@ -1017,6 +1043,11 @@ document.getElementById('cameraForm').addEventListener('submit', async (e) => {
         }
     } catch (error) {
         showAlert('Error saving camera', 'error');
+        console.error('Camera save error:', error);
+    }
+        });
+    } else {
+        console.error('Camera form not found!');
     }
 });
 

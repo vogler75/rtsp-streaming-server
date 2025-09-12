@@ -923,6 +923,7 @@
 
                 <div class="control-group">
                     <ix-toggle id="allStreamsToggle" label="Enable All Streams" onchange="toggleAllStreams()"></ix-toggle>
+                    <span style="color: #ccc; font-size: 0.9em; margin-left: 0.5rem;">Turn on/off streaming for all cameras simultaneously</span>
                 </div>
 
                 <div class="control-group">
@@ -1309,9 +1310,8 @@
                                     <label class="field-label">Use Wallclock as Timestamps
                                         <span class="description">Use system time for timestamps (recommended)</span>
                                     </label>
-                                    <ix-select id="ffmpeg_use_wallclock_as_timestamps" name="ffmpeg_use_wallclock_as_timestamps">
-                                        <ix-select-item label="Default" value=""></ix-select-item>
-                                        <ix-select-item label="True" value="true" selected></ix-select-item>
+                                    <ix-select id="ffmpeg_use_wallclock_as_timestamps" name="ffmpeg_use_wallclock_as_timestamps" value="true">
+                                        <ix-select-item label="True (Recommended)" value="true"></ix-select-item>
                                         <ix-select-item label="False" value="false"></ix-select-item>
                                     </ix-select>
                                 </ix-col>
@@ -1421,7 +1421,7 @@
         </ix-modal-content>
         <ix-modal-footer>
             <ix-button variant="secondary" onclick="closeEditModal()">Cancel</ix-button>
-            <ix-button variant="primary" type="submit" form="cameraForm">Save Camera</ix-button>
+            <ix-button variant="primary" onclick="submitCameraForm()">Save Camera</ix-button>
         </ix-modal-footer>
     </ix-modal>
 
