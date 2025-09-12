@@ -257,10 +257,10 @@ function showAddCamera() {
     const header = modal.querySelector('ix-modal-header');
     if (header) header.textContent = 'Add New Camera';
     
-    // Try IX modal method first, fallback to simple show
-    if (modal.showModal) {
-        modal.showModal();
-    } else {
+    // Use IX modal show method
+    if (modal && modal.show) {
+        modal.show();
+    } else if (modal) {
         modal.style.display = 'flex';
         modal.classList.add('show');
     }
@@ -289,10 +289,10 @@ function showEditCamera(cameraId) {
                 const header = modal.querySelector('ix-modal-header');
                 if (header) header.textContent = 'Edit Camera';
                 
-                // Try IX modal method first, fallback to simple show
-                if (modal.showModal) {
-                    modal.showModal();
-                } else {
+                // Use IX modal show method
+                if (modal && modal.show) {
+                    modal.show();
+                } else if (modal) {
                     modal.style.display = 'flex';
                     modal.classList.add('show');
                 }
@@ -340,8 +340,9 @@ function populateForm(camera) {
         safeSetValue('hls_storage_retention', config.recording.hls_storage_retention || '');
         safeSetValue('hls_segment_seconds', config.recording.hls_segment_seconds || '');
         // Pre-recording buffer settings (memory-only, using new IDs)
-        safeSetValue('pre_recording_enabled_camera', (config.recording.pre_recording_enabled !== undefined && config.recording.pre_recording_enabled !== null) ? config.recording.pre_recording_enabled.toString() : '');
-        safeSetValue('pre_recording_buffer_minutes_camera', config.recording.pre_recording_buffer_minutes || '');
+        safeSetValue('pre_recording_enabled', (config.recording.pre_recording_enabled !== undefined && config.recording.pre_recording_enabled !== null) ? config.recording.pre_recording_enabled.toString() : '');
+        safeSetValue('pre_recording_buffer_minutes', config.recording.pre_recording_buffer_minutes || '');
+        safeSetValue('pre_recording_memory_only', (config.recording.pre_recording_memory_only !== undefined && config.recording.pre_recording_memory_only !== null) ? config.recording.pre_recording_memory_only.toString() : '');
     } else {
         safeSetValue('session_segment_minutes', '');
         safeSetValue('frame_storage_enabled', '');
@@ -354,8 +355,9 @@ function populateForm(camera) {
         safeSetValue('hls_storage_retention', '');
         safeSetValue('hls_segment_seconds', '');
         // Pre-recording buffer settings reset (memory-only, using new IDs)
-        safeSetValue('pre_recording_enabled_camera', '');
-        safeSetValue('pre_recording_buffer_minutes_camera', '');
+        safeSetValue('pre_recording_enabled', '');
+        safeSetValue('pre_recording_buffer_minutes', '');
+        safeSetValue('pre_recording_memory_only', '');
     }
     
     // MQTT settings
@@ -405,10 +407,10 @@ function populateForm(camera) {
 
 function closeEditModal() {
     const modal = document.getElementById('editModal');
-    // Try IX modal method first, fallback to simple hide
-    if (modal.closeModal) {
-        modal.closeModal();
-    } else {
+    // Use IX modal close method
+    if (modal && modal.close) {
+        modal.close();
+    } else if (modal) {
         modal.style.display = 'none';
         modal.classList.remove('show');
     }
@@ -454,9 +456,9 @@ async function showServerConfig() {
                 console.log('Opening modal...');
                 const modal = document.getElementById('serverConfigModal');
                 
-                // Try IX modal method first, fallback to simple show
-                if (modal && modal.showModal) {
-                    modal.showModal();
+                // Use IX modal show method
+                if (modal && modal.show) {
+                    modal.show();
                 } else if (modal) {
                     modal.style.display = 'flex';
                     modal.classList.add('show');
@@ -630,10 +632,10 @@ function collectServerConfigFromForm() {
 
 function closeServerConfigModal() {
     const modal = document.getElementById('serverConfigModal');
-    // Try IX modal method first, fallback to simple hide
-    if (modal.closeModal) {
-        modal.closeModal();
-    } else {
+    // Use IX modal close method
+    if (modal && modal.close) {
+        modal.close();
+    } else if (modal) {
         modal.style.display = 'none';
         modal.classList.remove('show');
     }
@@ -864,15 +866,17 @@ document.getElementById('cameraForm').addEventListener('submit', async (e) => {
     const hlsStorageRetention = formData.get('hls_storage_retention');
     const hlsSegmentSeconds = formData.get('hls_segment_seconds');
     // Pre-recording buffer settings
-    const preRecordingEnabled = formData.get('pre_recording_enabled_camera');
-    const preRecordingBufferMinutes = formData.get('pre_recording_buffer_minutes_camera');
+    const preRecordingEnabled = formData.get('pre_recording_enabled');
+    const preRecordingBufferMinutes = formData.get('pre_recording_buffer_minutes');
+    const preRecordingMemoryOnly = formData.get('pre_recording_memory_only');
     
     // Only add recording section if at least one setting is configured
     if (sessionSegmentMinutes || 
         (frameStorageEnabled !== '' && frameStorageEnabled !== null) ||
         frameStorageRetention || videoStorageType || videoStorageRetention || videoSegmentMinutes ||
         (hlsStorageEnabled !== '' && hlsStorageEnabled !== null) || hlsStorageRetention || hlsSegmentSeconds ||
-        (preRecordingEnabled !== '' && preRecordingEnabled !== null) || preRecordingBufferMinutes) {
+        (preRecordingEnabled !== '' && preRecordingEnabled !== null) || preRecordingBufferMinutes || 
+        (preRecordingMemoryOnly !== '' && preRecordingMemoryOnly !== null)) {
         config.recording = {};
         
         if (sessionSegmentMinutes) {
@@ -904,12 +908,15 @@ document.getElementById('cameraForm').addEventListener('submit', async (e) => {
             config.recording.hls_segment_seconds = parseInt(hlsSegmentSeconds);
         }
         
-        // Pre-recording buffer settings (memory-only, using new field names)
+        // Pre-recording buffer settings (using correct field names)
         if (preRecordingEnabled !== '' && preRecordingEnabled !== null) {
             config.recording.pre_recording_enabled = preRecordingEnabled === 'true';
         }
         if (preRecordingBufferMinutes) {
             config.recording.pre_recording_buffer_minutes = parseInt(preRecordingBufferMinutes);
+        }
+        if (preRecordingMemoryOnly !== '' && preRecordingMemoryOnly !== null) {
+            config.recording.pre_recording_memory_only = preRecordingMemoryOnly === 'true';
         }
     }
     

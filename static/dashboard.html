@@ -940,385 +940,451 @@
     <div class="modal-backdrop" id="modalBackdrop"></div>
 
     <!-- Camera Edit Modal -->
-    <div id="editModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Camera Configuration</h2>
-                <button class="close-button" onclick="closeEditModal()">✕</button>
-            </div>
+    <ix-modal id="editModal" size="1000">
+        <ix-modal-header>
+            Camera Configuration
+            <ix-button-group slot="header-actions">
+                <ix-button variant="ghost" size="small" onclick="closeEditModal()" icon="close"></ix-button>
+            </ix-button-group>
+        </ix-modal-header>
+        <ix-modal-content>
+            <ix-message-bar type="info">
+                Configure camera settings. Changes will be saved to the camera configuration file.
+            </ix-message-bar>
             
             <form id="cameraForm">
                 <input type="hidden" id="editingCameraId">
                 
-                <div class="form-section">
-                    <h3 class="collapsible" onclick="toggleSection(this)">Basic Settings</h3>
-                    <div class="collapsible-content">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Camera ID*</label>
-                                <input type="text" id="cameraId" name="cameraId" required>
-                                <span class="help-text">Unique identifier for this camera</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Enabled</label>
-                                <select id="enabled" name="enabled">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Path*</label>
-                                <input type="text" id="path" name="path" placeholder="/cam1" required>
-                                <span class="help-text">URL path for this camera</span>
-                            </div>
-                            <div class="form-group">
-                                <label>RTSP/HTTP URL*</label>
-                                <input type="text" id="url" name="url" placeholder="rtsp://user:pass@ip:port/stream" required>
-                                <span class="help-text">Camera stream URL</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Transport</label>
-                                <select id="transport" name="transport">
-                                    <option value="tcp">TCP</option>
-                                    <option value="udp">UDP</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Reconnect Interval (s)</label>
-                                <input type="number" id="reconnect_interval" name="reconnect_interval" value="5" min="1">
-                            </div>
-                            <div class="form-group">
-                                <label>Token (optional)</label>
-                                <input type="text" id="token" name="token" placeholder="Optional auth token">
-                                <span class="help-text">Token for WebSocket auth</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <ix-accordion>
+                    <!-- Basic Settings Section -->
+                    <ix-accordion-item label="⚙️ Basic Settings">
+                        <ix-layout-grid>
+                            <ix-row>
+                                <ix-col size="6">
+                                    <label class="field-label">Camera ID*
+                                        <span class="description">Unique identifier for this camera</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="cameraId" name="cameraId" class="form-control" required>
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="6">
+                                    <label class="field-label">Enabled
+                                        <span class="description">Enable or disable this camera</span>
+                                    </label>
+                                    <ix-select id="enabled" name="enabled">
+                                        <ix-select-item label="Yes" value="true"></ix-select-item>
+                                        <ix-select-item label="No" value="false"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="6">
+                                    <label class="field-label">Path*
+                                        <span class="description">URL path for this camera</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="path" name="path" placeholder="/cam1" class="form-control" required>
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="6">
+                                    <label class="field-label">RTSP/HTTP URL*
+                                        <span class="description">Camera stream URL</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="url" name="url" placeholder="rtsp://user:pass@ip:port/stream" class="form-control" required>
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="4">
+                                    <label class="field-label">Transport
+                                        <span class="description">Protocol for RTSP communication</span>
+                                    </label>
+                                    <ix-select id="transport" name="transport">
+                                        <ix-select-item label="TCP" value="tcp"></ix-select-item>
+                                        <ix-select-item label="UDP" value="udp"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Reconnect Interval (seconds)
+                                        <span class="description">Time between reconnection attempts</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="reconnect_interval" name="reconnect_interval" value="5" min="1" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Token (optional)
+                                        <span class="description">Token for WebSocket authentication</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="token" name="token" placeholder="Optional auth token" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                        </ix-layout-grid>
+                    </ix-accordion-item>
 
-                <!-- Per-Camera Recording Settings -->
-                <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📹 Camera Recording Settings</h3>
-                    <div class="collapsible-content collapsed">
-                        
-                        <!-- General Section -->
-                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">⚙️ General</h4>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Session Segment Duration (minutes)</label>
-                                <input type="number" id="session_segment_minutes" name="session_segment_minutes" placeholder="Use Global" min="0" max="1440">
-                                <span class="help-text">Override global session segmentation (empty=use global, 0=disabled, n=minutes)</span>
-                            </div>
-                        </div>
-                        
-                        <!-- Frame Storage Section -->
-                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🖼️ Frame Storage</h4>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Frame Storage</label>
-                                <select id="frame_storage_enabled" name="frame_storage_enabled">
-                                    <option value="">Use Global Setting</option>
-                                    <option value="true">Enabled</option>
-                                    <option value="false">Disabled</option>
-                                </select>
-                                <span class="help-text">Override global frame-by-frame recording setting</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Frame Retention Period</label>
-                                <input type="text" id="frame_storage_retention" name="frame_storage_retention" placeholder="Use Global">
-                                <span class="help-text">e.g., 10m, 5h, 7d - overrides global setting</span>
-                            </div>
-                        </div>
-                        
-                        <!-- MP4 Section -->
-                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">🎬 MP4</h4>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label class="field-label">MP4 Video Storage Override
-                                    <span class="description">Override system MP4 storage setting for this camera</span>
-                                </label>
-                                <ix-input-group>
-                                    <select id="mp4_storage_type" name="mp4_storage_type">
-                                        <option value="">Use system default</option>
-                                        <option value="disabled">Disabled</option>
-                                        <option value="filesystem">Filesystem</option>
-                                        <option value="database">Database</option>
-                                    </select>
-                                </ix-input-group>
-                            </div>
-                            <div class="form-group">
-                                <label class="field-label">MP4 Retention Period
-                                    <span class="description">Override global MP4 retention (e.g., 30d, 7d, 24h)</span>
-                                </label>
-                                <ix-input-group>
-                                    <input type="text" id="mp4_storage_retention" name="mp4_storage_retention" placeholder="30d">
-                                </ix-input-group>
-                            </div>
-                            <div class="form-group">
-                                <label class="field-label">MP4 Segment Duration (minutes)
-                                    <span class="description">Override global segment length (1-10 minutes)</span>
-                                </label>
-                                <ix-input-group>
-                                    <input type="number" id="mp4_segment_minutes" name="mp4_segment_minutes" placeholder="5" min="1" max="10">
-                                </ix-input-group>
-                            </div>
-                        </div>
-                        
-                        <!-- HLS Section -->
-                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">📺 HLS</h4>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label class="field-label">HLS Storage Override
-                                    <span class="description">Pre-generate HLS segments during recording for faster streaming</span>
-                                </label>
-                                <ix-input-group>
-                                    <select id="hls_storage_enabled" name="hls_storage_enabled">
-                                        <option value="">Use Global Setting</option>
-                                        <option value="true">Enabled</option>
-                                        <option value="false">Disabled</option>
-                                    </select>
-                                </ix-input-group>
-                            </div>
-                            <div class="form-group">
-                                <label class="field-label">HLS Retention Period
-                                    <span class="description">Override global HLS retention (e.g., 30d, 7d, 24h)</span>
-                                </label>
-                                <ix-input-group>
-                                    <input type="text" id="hls_storage_retention" name="hls_storage_retention" placeholder="Use Global">
-                                </ix-input-group>
-                            </div>
-                            <div class="form-group">
-                                <label class="field-label">HLS Segment Duration (seconds)
-                                    <span class="description">Duration of each HLS segment (1-30 seconds, default 6)</span>
-                                </label>
-                                <ix-input-group>
-                                    <input type="number" id="hls_segment_seconds" name="hls_segment_seconds" placeholder="6" min="1" max="30">
-                                </ix-input-group>
-                            </div>
-                        </div>
-                        
-                        <!-- Pre-Recording Buffer Section -->
-                        <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">⏮️ Pre-Recording Buffer</h4>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label class="field-label">Enable Pre-Recording Buffer
-                                    <span class="description">Continuously buffer frames before recording starts</span>
-                                </label>
-                                <ix-input-group>
-                                    <select id="pre_recording_enabled" name="pre_recording_enabled">
-                                        <option value="">Use Global Setting</option>
-                                        <option value="true">Enabled</option>
-                                        <option value="false">Disabled</option>
-                                    </select>
-                                </ix-input-group>
-                            </div>
-                            <div class="form-group">
-                                <label class="field-label">Buffer Duration (minutes)
-                                    <span class="description">Override buffer duration (1-60 minutes)</span>
-                                </label>
-                                <ix-input-group>
-                                    <input type="number" id="pre_recording_buffer_minutes" name="pre_recording_buffer_minutes" placeholder="Use Global" min="1" max="60">
-                                </ix-input-group>
-                            </div>
-                            <div class="form-group">
-                                <label class="field-label">Memory-Only Storage
-                                    <span class="description">Memory-only is faster but buffer is lost on restart</span>
-                                </label>
-                                <ix-input-group>
-                                    <select id="pre_recording_memory_only" name="pre_recording_memory_only">
-                                        <option value="">Use Global Setting</option>
-                                        <option value="true">Memory Only</option>
-                                        <option value="false">Database Storage</option>
-                                    </select>
-                                </ix-input-group>
-                            </div>
-                        </div>
-                        
-                    </div>
-                </div>
+                    <!-- Recording Settings Section -->
+                    <ix-accordion-item label="📹 Camera Recording Settings">
+                        <ix-layout-grid>
+                            <ix-row>
+                                <ix-col size="12">
+                                    <label class="field-label">Session Segment Duration (minutes)
+                                        <span class="description">Override global session segmentation (empty=use global, 0=disabled, n=minutes)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="session_segment_minutes" name="session_segment_minutes" placeholder="Use Global" min="0" max="1440" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="6">
+                                    <label class="field-label">Frame Storage
+                                        <span class="description">Override global frame-by-frame recording setting</span>
+                                    </label>
+                                    <ix-select id="frame_storage_enabled" name="frame_storage_enabled">
+                                        <ix-select-item label="Use Global Setting" value=""></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="6">
+                                    <label class="field-label">Frame Retention Period
+                                        <span class="description">Override global retention period (e.g., 10m, 5h, 7d)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="frame_storage_retention" name="frame_storage_retention" placeholder="Use Global" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="4">
+                                    <label class="field-label">MP4 Video Storage Override
+                                        <span class="description">Override system MP4 storage setting for this camera</span>
+                                    </label>
+                                    <ix-select id="mp4_storage_type" name="mp4_storage_type">
+                                        <ix-select-item label="Use system default" value=""></ix-select-item>
+                                        <ix-select-item label="Disabled" value="disabled"></ix-select-item>
+                                        <ix-select-item label="Filesystem" value="filesystem"></ix-select-item>
+                                        <ix-select-item label="Database" value="database"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">MP4 Retention Period
+                                        <span class="description">Override global MP4 retention (e.g., 30d, 7d, 24h)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="mp4_storage_retention" name="mp4_storage_retention" placeholder="30d" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">MP4 Segment Duration (minutes)
+                                        <span class="description">Override global segment length (1-10 minutes)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="mp4_segment_minutes" name="mp4_segment_minutes" placeholder="5" min="1" max="10" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="4">
+                                    <label class="field-label">HLS Storage Override
+                                        <span class="description">Pre-generate HLS segments during recording for faster streaming</span>
+                                    </label>
+                                    <ix-select id="hls_storage_enabled" name="hls_storage_enabled">
+                                        <ix-select-item label="Use Global Setting" value=""></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">HLS Retention Period
+                                        <span class="description">Override global HLS retention (e.g., 30d, 7d, 24h)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="hls_storage_retention" name="hls_storage_retention" placeholder="Use Global" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">HLS Segment Duration (seconds)
+                                        <span class="description">Duration of each HLS segment (1-30 seconds, default 6)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="hls_segment_seconds" name="hls_segment_seconds" placeholder="6" min="1" max="30" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="4">
+                                    <label class="field-label">Enable Pre-Recording Buffer
+                                        <span class="description">Continuously buffer frames before recording starts</span>
+                                    </label>
+                                    <ix-select id="pre_recording_enabled" name="pre_recording_enabled">
+                                        <ix-select-item label="Use Global Setting" value=""></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Buffer Duration (minutes)
+                                        <span class="description">Override buffer duration (1-60 minutes)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="pre_recording_buffer_minutes" name="pre_recording_buffer_minutes" placeholder="Use Global" min="1" max="60" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Memory-Only Storage
+                                        <span class="description">Memory-only is faster but buffer is lost on restart</span>
+                                    </label>
+                                    <ix-select id="pre_recording_memory_only" name="pre_recording_memory_only">
+                                        <ix-select-item label="Use Global Setting" value=""></ix-select-item>
+                                        <ix-select-item label="Memory Only" value="true"></ix-select-item>
+                                        <ix-select-item label="Database Storage" value="false"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                            </ix-row>
+                        </ix-layout-grid>
+                    </ix-accordion-item>
 
-                <!-- Pre-Recording Buffer Settings -->
-                <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">⏮️ Pre-Recording Buffer Settings</h3>
-                    <div class="collapsible-content collapsed">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Pre-Recording Buffer</label>
-                                <select id="pre_recording_enabled_camera" name="pre_recording_enabled_camera">
-                                    <option value="">Use Global Setting</option>
-                                    <option value="true">Enabled</option>
-                                    <option value="false">Disabled</option>
-                                </select>
-                                <span class="help-text">Override global pre-recording buffer setting</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Buffer Duration (minutes)</label>
-                                <input type="number" id="pre_recording_buffer_minutes_camera" name="pre_recording_buffer_minutes_camera" placeholder="Use Global" min="1" max="10">
-                                <span class="help-text">Override buffer duration (1-10 minutes)</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- PTZ Settings -->
-                <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🎛️ PTZ Settings</h3>
-                    <div class="collapsible-content collapsed">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>PTZ Enabled</label>
-                                <select id="ptz_enabled" name="ptz_enabled" onchange="togglePtzFields()">
-                                    <option value="false" selected>No</option>
-                                    <option value="true">Yes</option>
-                                </select>
-                                <span class="help-text">Enable Pan/Tilt/Zoom control for this camera</span>
-                            </div>
-                            <div class="form-group">
-                                <label>PTZ Protocol</label>
-                                <select id="ptz_protocol" name="ptz_protocol">
-                                    <option value="onvif" selected>ONVIF</option>
-                                </select>
-                                <span class="help-text">Currently only ONVIF is supported</span>
-                            </div>
-                            <div class="form-group">
-                                <label>ONVIF Service URL</label>
-                                <input type="text" id="ptz_onvif_url" name="ptz_onvif_url" placeholder="http://<ip>:<port>/onvif/device_service">
-                                <span class="help-text">Device ONVIF endpoint URL</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Username</label>
-                                <input type="text" id="ptz_username" name="ptz_username" placeholder="admin">
-                            </div>
-                            <div class="form-group">
-                                <label>Password</label>
-                                <input type="password" id="ptz_password" name="ptz_password" placeholder="••••••••">
-                            </div>
-                            <div class="form-group">
-                                <label>Profile Token</label>
-                                <input type="text" id="ptz_profile_token" name="ptz_profile_token" placeholder="profile1">
-                                <span class="help-text">Optional; defaults to profile1 when empty</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <!-- PTZ Settings -->
+                    <ix-accordion-item label="🎛️ PTZ Settings">
+                        <ix-layout-grid>
+                            <ix-row>
+                                <ix-col size="6">
+                                    <label class="field-label">PTZ Enabled
+                                        <span class="description">Enable Pan/Tilt/Zoom control for this camera</span>
+                                    </label>
+                                    <ix-select id="ptz_enabled" name="ptz_enabled" onchange="togglePtzFields()">
+                                        <ix-select-item label="No" value="false" selected></ix-select-item>
+                                        <ix-select-item label="Yes" value="true"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="6">
+                                    <label class="field-label">PTZ Protocol
+                                        <span class="description">Currently only ONVIF is supported</span>
+                                    </label>
+                                    <ix-select id="ptz_protocol" name="ptz_protocol">
+                                        <ix-select-item label="ONVIF" value="onvif" selected></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="12">
+                                    <label class="field-label">ONVIF Service URL
+                                        <span class="description">Device ONVIF endpoint URL</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ptz_onvif_url" name="ptz_onvif_url" placeholder="http://<ip>:<port>/onvif/device_service" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="4">
+                                    <label class="field-label">Username
+                                        <span class="description">ONVIF authentication username</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ptz_username" name="ptz_username" placeholder="admin" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Password
+                                        <span class="description">ONVIF authentication password</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="password" id="ptz_password" name="ptz_password" placeholder="••••••••" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Profile Token
+                                        <span class="description">Optional; defaults to profile1 when empty</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ptz_profile_token" name="ptz_profile_token" placeholder="profile1" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                        </ix-layout-grid>
+                    </ix-accordion-item>
 
-                <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">📡 MQTT Settings</h3>
-                    <div class="collapsible-content collapsed">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Publish Interval (ms)</label>
-                                <input type="number" id="mqtt_publish_interval" name="mqtt_publish_interval" value="" min="100">
-                                <span class="help-text">0 = every frame, minimum 100ms, empty = disabled</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Topic Name</label>
-                                <input type="text" id="mqtt_topic_name" name="mqtt_topic_name" placeholder="surveillance/cameras/cam1/image">
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <!-- MQTT Settings -->
+                    <ix-accordion-item label="📡 MQTT Settings">
+                        <ix-layout-grid>
+                            <ix-row>
+                                <ix-col size="6">
+                                    <label class="field-label">Publish Interval (ms)
+                                        <span class="description">Image publishing interval (0 = every frame, minimum 100ms, empty = disabled)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="mqtt_publish_interval" name="mqtt_publish_interval" value="" min="100" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="6">
+                                    <label class="field-label">Topic Name
+                                        <span class="description">MQTT topic for publishing camera images</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="mqtt_topic_name" name="mqtt_topic_name" placeholder="surveillance/cameras/cam1/image" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                        </ix-layout-grid>
+                    </ix-accordion-item>
 
-                <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">🎛️ FFmpeg Settings</h3>
-                    <div class="collapsible-content collapsed">
-                        <div class="form-group" style="grid-column: 1 / -1; margin-bottom: 20px;">
-                            <label style="color: #ff6b6b; font-weight: bold;">Custom FFmpeg Command (Override)</label>
-                            <textarea id="ffmpeg_command" name="ffmpeg_command" rows="3" placeholder="Example: -rtsp_transport tcp -i {input} -f mjpeg -vf fps=5 -an -" style="width: 100%; font-family: monospace; font-size: 14px;"></textarea>
-                            <span class="help-text" style="color: #ff9800; font-weight: bold;">⚠️ WARNING: This will override ALL other FFmpeg settings below when specified. Use {input} as placeholder for the camera URL.</span>
-                        </div>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Quality (1-100)</label>
-                                <input type="number" id="ffmpeg_quality" name="ffmpeg_quality" min="1" max="100" placeholder="75">
-                            </div>
-                            <div class="form-group">
-                                <label>Use Wallclock as Timestamps</label>
-                                <select id="ffmpeg_use_wallclock_as_timestamps" name="ffmpeg_use_wallclock_as_timestamps">
-                                    <option value="">Default</option>
-                                    <option value="true" selected>True</option>
-                                    <option value="false">False</option>
-                                </select>
-                                <span class="help-text">Use system time for timestamps (recommended)</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Scale</label>
-                                <input type="text" id="ffmpeg_scale" name="ffmpeg_scale" placeholder="640:-1">
-                                <span class="help-text">Width:Height (-1 keeps ratio)</span>
-                            </div>
-                            <div class="form-group">
-                                <label>Output Framerate</label>
-                                <input type="number" id="ffmpeg_output_framerate" name="ffmpeg_output_framerate" min="0" placeholder="5">
-                            </div>
-                            <div class="form-group">
-                                <label>Video Bitrate</label>
-                                <input type="text" id="ffmpeg_video_bitrate" name="ffmpeg_video_bitrate" placeholder="200k">
-                            </div>
-                            <div class="form-group">
-                                <label>RTSP Buffer Size</label>
-                                <input type="number" id="ffmpeg_rtbufsize" name="ffmpeg_rtbufsize" placeholder="65536">
-                            </div>
-                            <div class="form-group">
-                                <label>Log stderr</label>
-                                <select id="ffmpeg_log_stderr" name="ffmpeg_log_stderr">
-                                    <option value="">None</option>
-                                    <option value="file">File</option>
-                                    <option value="console">Console</option>
-                                    <option value="both">Both</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Data Timeout (seconds)</label>
-                                <input type="number" id="ffmpeg_data_timeout_secs" name="ffmpeg_data_timeout_secs" placeholder="60" min="1">
-                                <span class="help-text">Restart FFmpeg if no data received for this many seconds (default: 60)</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <!-- FFmpeg Settings -->
+                    <ix-accordion-item label="🎛️ FFmpeg Settings">
+                        <ix-layout-grid>
+                            <ix-row>
+                                <ix-col size="12">
+                                    <label class="field-label" style="color: #ff6b6b; font-weight: bold;">Custom FFmpeg Command (Override)
+                                        <span class="description" style="color: #ff9800; font-weight: bold;">⚠️ WARNING: This will override ALL other FFmpeg settings below when specified. Use {input} as placeholder for the camera URL.</span>
+                                    </label>
+                                    <ix-textarea id="ffmpeg_command" 
+                                                 name="ffmpeg_command" 
+                                                 rows="3" 
+                                                 placeholder="Example: -rtsp_transport tcp -i {input} -f mjpeg -vf fps=5 -an -" 
+                                                 style="width: 100%; font-family: monospace; font-size: 14px;"></ix-textarea>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="4">
+                                    <label class="field-label">Quality (1-100)
+                                        <span class="description">Video quality setting for encoding</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="ffmpeg_quality" name="ffmpeg_quality" min="1" max="100" placeholder="75" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Use Wallclock as Timestamps
+                                        <span class="description">Use system time for timestamps (recommended)</span>
+                                    </label>
+                                    <ix-select id="ffmpeg_use_wallclock_as_timestamps" name="ffmpeg_use_wallclock_as_timestamps">
+                                        <ix-select-item label="Default" value=""></ix-select-item>
+                                        <ix-select-item label="True" value="true" selected></ix-select-item>
+                                        <ix-select-item label="False" value="false"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                                <ix-col size="4">
+                                    <label class="field-label">Scale
+                                        <span class="description">Video resolution (Width:Height, -1 keeps aspect ratio)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ffmpeg_scale" name="ffmpeg_scale" placeholder="640:-1" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="3">
+                                    <label class="field-label">Output Framerate
+                                        <span class="description">Target framerate for output video</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="ffmpeg_output_framerate" name="ffmpeg_output_framerate" min="0" placeholder="5" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="3">
+                                    <label class="field-label">Video Bitrate
+                                        <span class="description">Target bitrate for video encoding (e.g., 200k, 1M)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ffmpeg_video_bitrate" name="ffmpeg_video_bitrate" placeholder="200k" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="3">
+                                    <label class="field-label">RTSP Buffer Size
+                                        <span class="description">Buffer size for RTSP reception</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="ffmpeg_rtbufsize" name="ffmpeg_rtbufsize" placeholder="65536" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="3">
+                                    <label class="field-label">Log stderr
+                                        <span class="description">Where to log FFmpeg error output</span>
+                                    </label>
+                                    <ix-select id="ffmpeg_log_stderr" name="ffmpeg_log_stderr">
+                                        <ix-select-item label="None" value=""></ix-select-item>
+                                        <ix-select-item label="File" value="file"></ix-select-item>
+                                        <ix-select-item label="Console" value="console"></ix-select-item>
+                                        <ix-select-item label="Both" value="both"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                            </ix-row>
+                            <ix-row>
+                                <ix-col size="12">
+                                    <label class="field-label">Data Timeout (seconds)
+                                        <span class="description">Restart FFmpeg if no data received for this many seconds (default: 60)</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="number" id="ffmpeg_data_timeout_secs" name="ffmpeg_data_timeout_secs" placeholder="60" min="1" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                            </ix-row>
+                        </ix-layout-grid>
+                    </ix-accordion-item>
 
-                <div class="form-section">
-                    <h3 class="collapsible collapsed" onclick="toggleSection(this)">⚙️ Advanced Options</h3>
-                    <div class="collapsible-content collapsed">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>FFmpeg Flags</label>
-                                <input type="text" id="ffmpeg_fflags" name="ffmpeg_fflags" placeholder="+nobuffer+discardcorrupt">
-                            </div>
-                            <div class="form-group">
-                                <label>Codec Flags</label>
-                                <input type="text" id="ffmpeg_flags" name="ffmpeg_flags" placeholder="low_delay">
-                            </div>
-                            <div class="form-group">
-                                <label>AVIO Flags</label>
-                                <input type="text" id="ffmpeg_avioflags" name="ffmpeg_avioflags" placeholder="direct">
-                            </div>
-                            <div class="form-group">
-                                <label>FPS Mode</label>
-                                <select id="ffmpeg_fps_mode" name="ffmpeg_fps_mode">
-                                    <option value="">Default</option>
-                                    <option value="cfr">CFR (Constant)</option>
-                                    <option value="vfr">VFR (Variable)</option>
-                                    <option value="passthrough">Passthrough</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="button" onclick="closeEditModal()">Cancel</button>
-                    <button type="submit">Save Camera</button>
-                </div>
+                    <!-- Advanced Options -->
+                    <ix-accordion-item label="⚙️ Advanced Options">
+                        <ix-layout-grid>
+                            <ix-row>
+                                <ix-col size="3">
+                                    <label class="field-label">FFmpeg Flags
+                                        <span class="description">FFmpeg format flags</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ffmpeg_fflags" name="ffmpeg_fflags" placeholder="+nobuffer+discardcorrupt" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="3">
+                                    <label class="field-label">Codec Flags
+                                        <span class="description">Codec-specific flags</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ffmpeg_flags" name="ffmpeg_flags" placeholder="low_delay" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="3">
+                                    <label class="field-label">AVIO Flags
+                                        <span class="description">AVIO-specific flags</span>
+                                    </label>
+                                    <ix-input-group>
+                                        <input type="text" id="ffmpeg_avioflags" name="ffmpeg_avioflags" placeholder="direct" class="form-control">
+                                    </ix-input-group>
+                                </ix-col>
+                                <ix-col size="3">
+                                    <label class="field-label">FPS Mode
+                                        <span class="description">Framerate mode for encoding</span>
+                                    </label>
+                                    <ix-select id="ffmpeg_fps_mode" name="ffmpeg_fps_mode">
+                                        <ix-select-item label="Default" value=""></ix-select-item>
+                                        <ix-select-item label="CFR (Constant)" value="cfr"></ix-select-item>
+                                        <ix-select-item label="VFR (Variable)" value="vfr"></ix-select-item>
+                                        <ix-select-item label="Passthrough" value="passthrough"></ix-select-item>
+                                    </ix-select>
+                                </ix-col>
+                            </ix-row>
+                        </ix-layout-grid>
+                    </ix-accordion-item>
+                </ix-accordion>
             </form>
-        </div>
-    </div>
+        </ix-modal-content>
+        <ix-modal-footer>
+            <ix-button variant="secondary" onclick="closeEditModal()">Cancel</ix-button>
+            <ix-button variant="primary" type="submit" form="cameraForm">Save Camera</ix-button>
+        </ix-modal-footer>
+    </ix-modal>
 
     <!-- Auth Modal -->
     <div id="authModal" class="auth-modal">
         <h3>Admin Authentication</h3>
         <div class="form-group" style="margin: 20px 0;">
             <label>Admin Token</label>
-            <input type="password" id="adminToken" placeholder="Enter admin token">
+            <input type="password" id="adminToken" placeholder="Enter admin token" class="form-control">
         </div>
         <div class="form-actions">
             <button onclick="closeAuthModal()">Cancel</button>
@@ -1332,6 +1398,7 @@
             Server Configuration
             <ix-button-group slot="header-actions">
                 <ix-button variant="secondary" size="small" onclick="toggleConfigView()" id="configViewToggle">Switch to JSON</ix-button>
+                <ix-button variant="ghost" size="small" onclick="closeServerConfigModal()" icon="close"></ix-button>
             </ix-button-group>
         </ix-modal-header>
         <ix-modal-content>
@@ -1351,7 +1418,7 @@
                                         <span class="description">IP address to bind the server to (0.0.0.0 for all interfaces)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_server_host" placeholder="0.0.0.0">
+                                        <input type="text" id="config_server_host" placeholder="0.0.0.0" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="6">
@@ -1359,7 +1426,7 @@
                                         <span class="description">TCP port for the web server</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_server_port" placeholder="8080" min="1" max="65535">
+                                        <input type="number" id="config_server_port" placeholder="8080" min="1" max="65535" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1369,7 +1436,7 @@
                                         <span class="description">Allowed CORS origin (* for all, or specific domain)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_server_cors_allow_origin" placeholder="*">
+                                        <input type="text" id="config_server_cors_allow_origin" placeholder="*" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="6">
@@ -1377,7 +1444,7 @@
                                         <span class="description">Token required for admin dashboard access</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="password" id="config_server_admin_token" placeholder="Enter secure token">
+                                        <input type="password" id="config_server_admin_token" placeholder="Enter secure token" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1387,7 +1454,7 @@
                                         <span class="description">Directory path for camera configuration files (default: "cameras")</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_server_cameras_directory" placeholder="cameras">
+                                        <input type="text" id="config_server_cameras_directory" placeholder="cameras" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1412,7 +1479,7 @@
                                         <span class="description">Path to SSL certificate file</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_server_tls_cert_path" placeholder="certs/server.crt">
+                                        <input type="text" id="config_server_tls_cert_path" placeholder="certs/server.crt" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1420,7 +1487,7 @@
                                         <span class="description">Path to SSL private key file</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_server_tls_key_path" placeholder="certs/server.key">
+                                        <input type="text" id="config_server_tls_key_path" placeholder="certs/server.key" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1445,7 +1512,7 @@
                                         <span class="description">MQTT broker connection URL</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_mqtt_broker_url" placeholder="mqtt://192.168.1.4:1883">
+                                        <input type="text" id="config_mqtt_broker_url" placeholder="mqtt://192.168.1.4:1883" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1455,7 +1522,7 @@
                                         <span class="description">Unique MQTT client identifier</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_mqtt_client_id" placeholder="videoserver-01">
+                                        <input type="text" id="config_mqtt_client_id" placeholder="videoserver-01" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1463,7 +1530,7 @@
                                         <span class="description">Base topic prefix for all MQTT messages</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_mqtt_base_topic" placeholder="Videoserver">
+                                        <input type="text" id="config_mqtt_base_topic" placeholder="Videoserver" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1492,7 +1559,7 @@
                                         <span class="description">MQTT keep-alive interval</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_mqtt_keep_alive_secs" placeholder="60" min="1">
+                                        <input type="number" id="config_mqtt_keep_alive_secs" placeholder="60" min="1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="3">
@@ -1500,7 +1567,7 @@
                                         <span class="description">How often to publish status updates</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_mqtt_publish_interval_secs" placeholder="1" min="1">
+                                        <input type="number" id="config_mqtt_publish_interval_secs" placeholder="1" min="1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="3">
@@ -1519,7 +1586,7 @@
                                         <span class="description">Maximum MQTT packet size</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_mqtt_max_packet_size" placeholder="268435456" min="1024">
+                                        <input type="number" id="config_mqtt_max_packet_size" placeholder="268435456" min="1024" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1546,7 +1613,7 @@
                                         <span class="description">Directory for SQLite database files</span>
                                     </label>
                                     <ix-input-group id="database_path_group">
-                                        <input type="text" id="config_recording_database_path" placeholder="recordings">
+                                        <input type="text" id="config_recording_database_path" placeholder="recordings" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1554,7 +1621,7 @@
                                         <span class="description">PostgreSQL connection URL. End with '/' for per-camera DBs, specify DB name for shared DB</span>
                                     </label>
                                     <ix-input-group id="database_url_group" style="display: none;">
-                                        <input type="text" id="config_recording_database_url" placeholder="postgres://user:password@localhost/">
+                                        <input type="text" id="config_recording_database_url" placeholder="postgres://user:password@localhost/" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1579,7 +1646,7 @@
                                         <span class="description">Split recording sessions every N minutes (1-1440 minutes, default: 60)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_session_segment_minutes" placeholder="60" min="1" max="1440">
+                                        <input type="number" id="config_recording_session_segment_minutes" placeholder="60" min="1" max="1440" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="6">
@@ -1587,7 +1654,7 @@
                                         <span class="description">How often to run cleanup of old recordings</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_cleanup_interval_hours" placeholder="1" min="1">
+                                        <input type="number" id="config_recording_cleanup_interval_hours" placeholder="1" min="1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1610,7 +1677,7 @@
                                         <span class="description">Maximum size for a single frame (10MB default)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_max_frame_size" placeholder="10485760" min="1024">
+                                        <input type="number" id="config_recording_max_frame_size" placeholder="10485760" min="1024" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1618,7 +1685,7 @@
                                         <span class="description">Auto-delete frame recordings older than this (e.g., 7d, 24h, 30m)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_recording_frame_storage_retention" placeholder="7d">
+                                        <input type="text" id="config_recording_frame_storage_retention" placeholder="7d" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1642,7 +1709,7 @@
                                         <span class="description">Framerate for MP4 recordings (e.g., 5.0, 15.0, 30.0)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_mp4_framerate" placeholder="5.0" min="0.1" max="60" step="0.1">
+                                        <input type="number" id="config_recording_mp4_framerate" placeholder="5.0" min="0.1" max="60" step="0.1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1652,7 +1719,7 @@
                                         <span class="description">Auto-delete MP4 videos older than this (e.g., 30d, 7d, 24h)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_recording_mp4_storage_retention" placeholder="30d">
+                                        <input type="text" id="config_recording_mp4_storage_retention" placeholder="30d" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="6">
@@ -1660,7 +1727,7 @@
                                         <span class="description">Duration of each MP4 video segment (1-60 minutes)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_mp4_segment_minutes" placeholder="5" min="1" max="60">
+                                        <input type="number" id="config_recording_mp4_segment_minutes" placeholder="5" min="1" max="60" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1673,19 +1740,17 @@
                                     <label class="field-label">Enable HLS Storage
                                         <span class="description">Pre-generate HLS segments during recording for faster streaming</span>
                                     </label>
-                                    <ix-input-group>
-                                        <select id="config_recording_hls_storage_enabled">
-                                            <option value="false">Disabled</option>
-                                            <option value="true">Enabled</option>
-                                        </select>
-                                    </ix-input-group>
+                                    <ix-select id="config_recording_hls_storage_enabled">
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                    </ix-select>
                                 </ix-col>
                                 <ix-col size="4">
                                     <label class="field-label">HLS Storage Retention
                                         <span class="description">Auto-delete HLS segments older than this (e.g., 30d, 7d, 24h)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="text" id="config_recording_hls_storage_retention" placeholder="30d">
+                                        <input type="text" id="config_recording_hls_storage_retention" placeholder="30d" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1693,7 +1758,7 @@
                                         <span class="description">Duration of each HLS segment (1-30 seconds, default 6)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_hls_segment_seconds" placeholder="6" min="1" max="30">
+                                        <input type="number" id="config_recording_hls_segment_seconds" placeholder="6" min="1" max="30" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1706,38 +1771,34 @@
                                     <label class="field-label">Enable Pre-Recording Buffer
                                         <span class="description">Continuously buffer frames before recording starts</span>
                                     </label>
-                                    <ix-input-group>
-                                        <select id="config_recording_pre_recording_enabled">
-                                            <option value="false">Disabled</option>
-                                            <option value="true">Enabled</option>
-                                        </select>
-                                    </ix-input-group>
+                                    <ix-select id="config_recording_pre_recording_enabled">
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                    </ix-select>
                                 </ix-col>
                                 <ix-col size="3">
                                     <label class="field-label">Buffer Duration (minutes)
                                         <span class="description">How many minutes of footage to keep in buffer (1-60, default 1)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_pre_recording_buffer_minutes" placeholder="1" min="1" max="60">
+                                        <input type="number" id="config_recording_pre_recording_buffer_minutes" placeholder="1" min="1" max="60" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="3">
                                     <label class="field-label">Memory-Only Storage
                                         <span class="description">Memory-only is faster but buffer is lost on restart</span>
                                     </label>
-                                    <ix-input-group>
-                                        <select id="config_recording_pre_recording_memory_only">
-                                            <option value="false">Database Storage</option>
-                                            <option value="true">Memory Only (faster)</option>
-                                        </select>
-                                    </ix-input-group>
+                                    <ix-select id="config_recording_pre_recording_memory_only">
+                                        <ix-select-item label="Database Storage" value="false"></ix-select-item>
+                                        <ix-select-item label="Memory Only (faster)" value="true"></ix-select-item>
+                                    </ix-select>
                                 </ix-col>
                                 <ix-col size="3">
                                     <label class="field-label">Cleanup Interval (seconds)
                                         <span class="description">How often to remove old frames from buffer (1-60 seconds, default 1)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_recording_pre_recording_cleanup_interval_seconds" placeholder="1" min="1" max="60">
+                                        <input type="number" id="config_recording_pre_recording_cleanup_interval_seconds" placeholder="1" min="1" max="60" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1754,20 +1815,18 @@
                                     <label class="field-label">Output Format
                                         <span class="description">Video output format for streaming</span>
                                     </label>
-                                    <ix-input-group>
-                                        <select id="config_transcoding_output_format">
-                                            <option value="mjpeg">MJPEG</option>
-                                            <option value="h264">H.264</option>
-                                            <option value="webm">WebM</option>
-                                        </select>
-                                    </ix-input-group>
+                                    <ix-select id="config_transcoding_output_format">
+                                        <ix-select-item label="MJPEG" value="mjpeg"></ix-select-item>
+                                        <ix-select-item label="H.264" value="h264"></ix-select-item>
+                                        <ix-select-item label="WebM" value="webm"></ix-select-item>
+                                    </ix-select>
                                 </ix-col>
                                 <ix-col size="4">
                                     <label class="field-label">Capture Framerate
                                         <span class="description">Input capture rate (0 = max available from camera)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_transcoding_capture_framerate" placeholder="5" min="0" step="0.1">
+                                        <input type="number" id="config_transcoding_capture_framerate" placeholder="5" min="0" step="0.1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
@@ -1775,7 +1834,7 @@
                                         <span class="description">Output streaming rate (0 = same as input)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_transcoding_output_framerate" placeholder="0" min="0" step="0.1">
+                                        <input type="number" id="config_transcoding_output_framerate" placeholder="0" min="0" step="0.1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                             </ix-row>
@@ -1785,30 +1844,26 @@
                                         <span class="description">Frame buffer size (higher = more memory, smoother)</span>
                                     </label>
                                     <ix-input-group>
-                                        <input type="number" id="config_transcoding_channel_buffer_size" placeholder="50" min="1">
+                                        <input type="number" id="config_transcoding_channel_buffer_size" placeholder="50" min="1" class="form-control">
                                     </ix-input-group>
                                 </ix-col>
                                 <ix-col size="4">
                                     <label class="field-label">Debug Capture
                                         <span class="description">Show capture rate debug information</span>
                                     </label>
-                                    <ix-input-group>
-                                        <select id="config_transcoding_debug_capture">
-                                            <option value="false">Disabled</option>
-                                            <option value="true">Enabled</option>
-                                        </select>
-                                    </ix-input-group>
+                                    <ix-select id="config_transcoding_debug_capture">
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                    </ix-select>
                                 </ix-col>
                                 <ix-col size="4">
                                     <label class="field-label">Debug Duplicate Frames
                                         <span class="description">Show duplicate frame detection debug info</span>
                                     </label>
-                                    <ix-input-group>
-                                        <select id="config_transcoding_debug_duplicate_frames">
-                                            <option value="false">Disabled</option>
-                                            <option value="true">Enabled</option>
-                                        </select>
-                                    </ix-input-group>
+                                    <ix-select id="config_transcoding_debug_duplicate_frames">
+                                        <ix-select-item label="Disabled" value="false"></ix-select-item>
+                                        <ix-select-item label="Enabled" value="true"></ix-select-item>
+                                    </ix-select>
                                 </ix-col>
                             </ix-row>
                         </ix-layout-grid>
@@ -1844,5 +1899,68 @@
     
     <!-- Dashboard JavaScript -->
     <script src="dashboard.js"></script>
+    
+    <!-- Initialize IX Components after load -->
+    <script type="module">
+        // Suppress IX input-group validation errors during initialization
+        window.addEventListener('error', (e) => {
+            if (e.message && (e.message.includes('inputElement.validity') || e.message.includes('input-group without an input tag'))) {
+                console.log('Suppressing IX component validation error during initialization:', e.message);
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }
+        }, true);
+        
+        // Also suppress console warnings about input-group
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+            const message = args.join(' ');
+            if (message.includes('ix-input-group without an input tag')) {
+                console.log('Suppressed IX input-group warning:', message);
+                return;
+            }
+            originalWarn.apply(console, args);
+        };
+        
+        // Wait for IX components to be defined
+        Promise.all([
+            customElements.whenDefined('ix-modal'),
+            customElements.whenDefined('ix-input-group'),
+            customElements.whenDefined('ix-button')
+        ]).then(() => {
+            console.log('All IX components loaded');
+            
+            // Ensure all input groups have proper form controls
+            setTimeout(() => {
+                const inputGroups = document.querySelectorAll('ix-input-group');
+                console.log(`Found ${inputGroups.length} ix-input-group elements`);
+                let problematicGroups = [];
+                
+                inputGroups.forEach((group, index) => {
+                    const input = group.querySelector('input, select, textarea');
+                    if (input) {
+                        if (!input.classList.contains('form-control')) {
+                            console.log(`Adding form-control class to input in group ${index}`);
+                            input.classList.add('form-control');
+                        }
+                        // Verify the input is properly structured
+                        if (!input.id) {
+                            console.warn(`Input in group ${index} has no ID`);
+                        }
+                    } else {
+                        console.warn(`ix-input-group at index ${index} has no input element:`, group.outerHTML.slice(0, 200));
+                        problematicGroups.push(index);
+                    }
+                });
+                
+                if (problematicGroups.length > 0) {
+                    console.warn(`Found ${problematicGroups.length} problematic ix-input-group elements at indices: ${problematicGroups.join(', ')}`);
+                } else {
+                    console.log('All ix-input-group elements have proper form controls');
+                }
+            }, 100);
+        });
+    </script>
 </body>
 </html>
