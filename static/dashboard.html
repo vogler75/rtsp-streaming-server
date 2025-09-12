@@ -777,6 +777,25 @@
             animation: spin 1s linear infinite;
         }
 
+        /* Modal close button styling */
+        ix-modal-header ix-button-group[slot="header-actions"] {
+            margin-left: auto;
+        }
+        
+        ix-modal-header ix-button[icon="close"] {
+            --ix-color-std-text: #666;
+            --ix-color-ghost: transparent;
+            --ix-color-ghost--hover: rgba(0, 0, 0, 0.1);
+            --ix-color-ghost--active: rgba(0, 0, 0, 0.2);
+            min-width: 32px !important;
+            height: 32px !important;
+            cursor: pointer;
+        }
+
+        ix-modal-header ix-button[icon="close"]:hover {
+            --ix-color-std-text: #333;
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .header-title h1 {
@@ -944,7 +963,7 @@
         <ix-modal-header>
             Camera Configuration
             <ix-button-group slot="header-actions">
-                <ix-button variant="ghost" size="small" onclick="closeEditModal()" icon="close"></ix-button>
+                <ix-button variant="ghost" size="small" onclick="closeEditModal()" icon="close" aria-label="Close modal"></ix-button>
             </ix-button-group>
         </ix-modal-header>
         <ix-modal-content>
@@ -1398,7 +1417,7 @@
             Server Configuration
             <ix-button-group slot="header-actions">
                 <ix-button variant="secondary" size="small" onclick="toggleConfigView()" id="configViewToggle">Switch to JSON</ix-button>
-                <ix-button variant="ghost" size="small" onclick="closeServerConfigModal()" icon="close"></ix-button>
+                <ix-button variant="ghost" size="small" onclick="closeServerConfigModal()" icon="close" aria-label="Close modal"></ix-button>
             </ix-button-group>
         </ix-modal-header>
         <ix-modal-content>
@@ -1887,6 +1906,7 @@
         <ix-modal-footer>
             <ix-button variant="secondary" onclick="resetServerConfigJson()" id="resetJsonBtn" style="display: none;">Reset JSON</ix-button>
             <ix-button variant="secondary" onclick="validateServerConfig()" id="validateJsonBtn" style="display: none;">Validate JSON</ix-button>
+            <ix-button variant="secondary" onclick="closeServerConfigModal()">Cancel</ix-button>
             <ix-button variant="secondary" onclick="resetServerConfig()" id="resetBtn">Reset to Original</ix-button>
             <ix-button variant="secondary" onclick="exportServerConfig()">Export JSON</ix-button>
             <ix-button variant="primary" onclick="saveServerConfig()" id="saveFormBtn">Save Configuration</ix-button>

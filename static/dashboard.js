@@ -407,12 +407,17 @@ function populateForm(camera) {
 
 function closeEditModal() {
     const modal = document.getElementById('editModal');
-    // Use IX modal close method
-    if (modal && modal.close) {
-        modal.close();
-    } else if (modal) {
-        modal.style.display = 'none';
-        modal.classList.remove('show');
+    if (modal) {
+        // Use IX modal close method
+        if (typeof modal.close === 'function') {
+            modal.close();
+        } else if (typeof modal.hide === 'function') {
+            modal.hide();
+        } else {
+            // Fallback method
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+        }
     }
 }
 
@@ -632,12 +637,17 @@ function collectServerConfigFromForm() {
 
 function closeServerConfigModal() {
     const modal = document.getElementById('serverConfigModal');
-    // Use IX modal close method
-    if (modal && modal.close) {
-        modal.close();
-    } else if (modal) {
-        modal.style.display = 'none';
-        modal.classList.remove('show');
+    if (modal) {
+        // Use IX modal close method
+        if (typeof modal.close === 'function') {
+            modal.close();
+        } else if (typeof modal.hide === 'function') {
+            modal.hide();
+        } else {
+            // Fallback method
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+        }
     }
 }
 
