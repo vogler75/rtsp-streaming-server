@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Camera Control Interface</title>
-
+    <title>RTSP Camera Control</title>
+    <link rel="stylesheet" href="/dark-theme.css">
     <script src="../hls.js"></script>
 
     <!--
@@ -23,36 +23,24 @@
     -->
 
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
+            padding: var(--spacing-xl);
         }
         
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
+        /* Container handled by dark-theme.css */
         
         h1 {
             text-align: center;
-            margin-bottom: 20px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: var(--spacing-xl);
+            font-size: 2rem;
+            color: var(--text-primary);
         }
         
         .main-grid {
             display: grid;
             grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
+            gap: var(--spacing-lg);
+            margin-bottom: var(--spacing-xl);
         }
         
         @media (max-width: 1200px) {
@@ -64,7 +52,7 @@
         .left-column {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: var(--spacing-lg);
         }
         
         .right-column {
@@ -79,25 +67,27 @@
         }
         
         .panel {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-md);
         }
         
         .panel h2 {
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            margin-bottom: var(--spacing-md);
+            padding-bottom: var(--spacing-sm);
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 1.25rem;
         }
         
         #videoContainer {
             position: relative;
             width: 100%;
             aspect-ratio: 16/9;
-            background: #000;
-            border-radius: 8px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
             overflow: hidden;
             display: flex;
             align-items: center;

@@ -37,6 +37,15 @@ pub async fn dashboardjs_handler() -> axum::http::Response<String> {
         .unwrap()
 }
 
+pub async fn dark_theme_css_handler() -> axum::http::Response<String> {
+    trace!("Dark theme CSS requested");
+    let css = include_str!("../static/dark-theme.css").to_string();
+    axum::http::Response::builder()
+        .header("content-type", "text/css")
+        .body(css)
+        .unwrap()
+}
+
 pub async fn serve_control_page() -> axum::response::Html<String> {
     let html = include_str!("../static/control.html").to_string();
     axum::response::Html(html)
