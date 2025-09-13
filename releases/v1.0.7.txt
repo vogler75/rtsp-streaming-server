@@ -1,0 +1,8 @@
+Release v1.0.7
+Built from commit: e455e9a
+Date: 2025-09-13 07:30:47
+
+Changes since v1.0.6:
+---
+e455e9a Add dark theme CSS and apply to all HTML pages
+93c8eef Fix capture_framerate default and add config backups at startup
