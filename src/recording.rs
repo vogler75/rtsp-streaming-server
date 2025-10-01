@@ -977,26 +977,39 @@ impl RecordingManager {
         frames: Vec<Bytes>,
     ) -> crate::errors::Result<()> {
         let recordings_dir = &config.database_path;
-        
+
         // Create hierarchical directory structure: recordings/cam1/2025/08/19/
         let year = start_time.year();
         let month = start_time.month();
         let day = start_time.day();
-        
-        let camera_dir = format!("{}/{}/{:04}/{:02}/{:02}", 
+
+        let camera_dir = format!("{}/{}/{:04}/{:02}/{:02}",
             recordings_dir, camera_id, year, month, day);
-        
+
         // Create directory structure if it doesn't exist
         if let Err(e) = tokio::fs::create_dir_all(&camera_dir).await {
             error!("Failed to create directory structure '{}': {}", camera_dir, e);
             return Err(crate::errors::StreamError::Io { source: e });
         }
-        
+
         // Use ISO 8601 format for filename (filesystem-safe): 2025-08-19T10-54-00Z.mp4
         let iso_timestamp = start_time.format("%Y-%m-%dT%H-%M-%SZ");
         let file_path = format!("{}/{}.mp4", camera_dir, iso_timestamp);
 
-        let mp4_data = Self::create_mp4_from_frames(frames, config.mp4_framerate).await?;
+        // Calculate actual framerate from frame count and duration
+        let duration_secs = (end_time - start_time).num_milliseconds() as f32 / 1000.0;
+        let actual_framerate = if duration_secs > 0.1 { // At least 100ms duration
+            frames.len() as f32 / duration_secs
+        } else {
+            warn!("Invalid segment duration {:.3}s for camera '{}', using fallback framerate 10.0",
+                  duration_secs, camera_id);
+            10.0 // Fallback - should rarely happen
+        };
+
+        debug!("Creating MP4 segment for camera '{}': {} frames over {:.2}s = {:.2} FPS",
+               camera_id, frames.len(), duration_secs, actual_framerate);
+
+        let mp4_data = Self::create_mp4_from_frames(frames, actual_framerate).await?;
         
         // Write MP4 data to file
         tokio::fs::write(&file_path, &mp4_data).await?;
@@ -1017,15 +1030,28 @@ impl RecordingManager {
     }
 
     async fn create_database_video_segment(
-        config: Arc<RecordingConfig>,
+        _config: Arc<RecordingConfig>,
         database: Arc<dyn DatabaseProvider>,
-        _camera_id: String,  // Not needed for database storage
+        camera_id: String,
         session_id: i64,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
     ) -> crate::errors::Result<()> {
-        let mp4_data = Self::create_mp4_from_frames(frames, config.mp4_framerate).await?;
+        // Calculate actual framerate from frame count and duration
+        let duration_secs = (end_time - start_time).num_milliseconds() as f32 / 1000.0;
+        let actual_framerate = if duration_secs > 0.1 { // At least 100ms duration
+            frames.len() as f32 / duration_secs
+        } else {
+            warn!("Invalid segment duration {:.3}s for camera '{}', using fallback framerate 10.0",
+                  duration_secs, camera_id);
+            10.0 // Fallback - should rarely happen
+        };
+
+        debug!("Creating MP4 segment for camera '{}': {} frames over {:.2}s = {:.2} FPS",
+               camera_id, frames.len(), duration_secs, actual_framerate);
+
+        let mp4_data = Self::create_mp4_from_frames(frames, actual_framerate).await?;
         
         let segment = VideoSegment {
             session_id,
@@ -1046,11 +1072,11 @@ impl RecordingManager {
         let mut cmd = Command::new("ffmpeg");
         cmd.args([
             "-f", "mjpeg",
-            "-r", &framerate.to_string(), // Input framerate
+            "-framerate", &framerate.to_string(), // Input framerate
             "-i", "-",
             "-c:v", "libx264",
             "-preset", "ultrafast",
-            "-r", &framerate.to_string(), // Output framerate
+            // No output framerate - use same as input
             "-f", "mp4", // Output format
             "-movflags", "frag_keyframe+empty_moov", // Enable streaming-friendly MP4
             "-", // Output to stdout
@@ -1266,11 +1292,24 @@ impl RecordingManager {
             return Ok(());
         }
 
-        trace!("Creating HLS segment {} for camera '{}' session {} with {} frames", 
+        trace!("Creating HLS segment {} for camera '{}' session {} with {} frames",
                segment_index, camera_id, session_id, frames.len());
 
+        // Calculate actual framerate from frame count and duration
+        let duration_secs = (end_time - start_time).num_milliseconds() as f32 / 1000.0;
+        let actual_framerate = if duration_secs > 0.1 { // At least 100ms duration
+            frames.len() as f32 / duration_secs
+        } else {
+            warn!("Invalid HLS segment duration {:.3}s for camera '{}', using fallback framerate 10.0",
+                  duration_secs, camera_id);
+            10.0 // Fallback - should rarely happen
+        };
+
+        debug!("Creating HLS segment {} for camera '{}': {} frames over {:.2}s = {:.2} FPS",
+               segment_index, camera_id, frames.len(), duration_secs, actual_framerate);
+
         // Convert frames to MPEG-TS segment using FFmpeg
-        let segment_data = Self::create_hls_segment_from_frames(config.clone(), frames).await?;
+        let segment_data = Self::create_hls_segment_from_frames(config.clone(), frames, actual_framerate).await?;
         
         if segment_data.is_empty() {
             warn!("Generated empty HLS segment for camera '{}' segment {}", camera_id, segment_index);
@@ -1316,24 +1355,22 @@ impl RecordingManager {
     }
 
     async fn create_hls_segment_from_frames(
-        config: Arc<RecordingConfig>,
+        _config: Arc<RecordingConfig>,
         frames: Vec<Bytes>,
+        framerate: f32,
     ) -> crate::errors::Result<Vec<u8>> {
         use tokio::process::Command;
-        
-        // Calculate framerate based on the recording config
-        let framerate = config.mp4_framerate;
 
         let mut cmd = Command::new("ffmpeg");
-        
+
         // Configure FFmpeg to create MPEG-TS segment from MJPEG frames
         cmd.args([
             "-f", "mjpeg",
-            "-r", &framerate.to_string(), // Input framerate
+            "-framerate", &framerate.to_string(), // Input framerate
             "-i", "-", // Input from stdin
             "-c:v", "libx264", // H.264 codec
             "-preset", "ultrafast", // Fast encoding
-            "-r", &framerate.to_string(), // Output framerate
+            // No output framerate - use same as input
             "-f", "mpegts", // MPEG-TS format for HLS
             "-", // Output to stdout
         ]);

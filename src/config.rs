@@ -317,9 +317,7 @@ pub struct RecordingConfig {
     pub mp4_storage_retention: String, // Max age for video recordings (e.g., "30d")
     #[serde(default = "default_mp4_segment_minutes")]
     pub mp4_segment_minutes: u64, // Duration of each video segment in minutes
-    #[serde(default = "default_mp4_framerate")]
-    pub mp4_framerate: f32, // Framerate for MP4 recordings (e.g., 5.0, 15.0, 30.0)
-    
+
     // HLS storage settings
     #[serde(default)]
     pub hls_storage_enabled: bool, // Enable HLS segment storage in database
@@ -339,7 +337,6 @@ fn default_pre_recording_buffer_minutes() -> u64 { 1 } // 5 minutes default buff
 fn default_pre_recording_cleanup_interval_seconds() -> u64 { 1 } // Check every 1 second
 fn default_mp4_storage_retention() -> String { "30d".to_string() }
 fn default_mp4_segment_minutes() -> u64 { 5 }
-fn default_mp4_framerate() -> f32 { 5.0 }
 fn default_hls_storage_retention() -> String { "30d".to_string() }
 fn default_hls_segment_seconds() -> u64 { 6 }
 fn default_cleanup_interval_hours() -> u64 { 1 }
@@ -413,7 +410,6 @@ impl Default for Config {
                 mp4_storage_type: Mp4StorageType::Disabled,
                 mp4_storage_retention: default_mp4_storage_retention(),
                 mp4_segment_minutes: default_mp4_segment_minutes(),
-                mp4_framerate: default_mp4_framerate(),
                 cleanup_interval_hours: default_cleanup_interval_hours(),
                 hls_storage_enabled: false,
                 hls_storage_retention: default_hls_storage_retention(),

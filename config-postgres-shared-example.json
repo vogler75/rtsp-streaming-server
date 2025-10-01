@@ -21,7 +21,6 @@
     "mp4_storage_type": "database",
     "mp4_storage_retention": "30d",
     "mp4_segment_minutes": 5,
-    "mp4_framerate": 15,
     "cleanup_interval_hours": 24,
     "hls_storage_enabled": true,
     "hls_storage_retention": "24h",

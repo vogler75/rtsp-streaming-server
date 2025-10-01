@@ -383,7 +383,6 @@ function populateServerConfigForm(config) {
     // Recording settings
     document.getElementById('config_recording_frame_storage_enabled').value = (config.recording?.frame_storage_enabled || false).toString();
     document.getElementById('config_recording_mp4_storage_type').value = config.recording?.mp4_storage_type || 'filesystem';
-    document.getElementById('config_recording_mp4_framerate').value = config.recording?.mp4_framerate || '5.0';
     document.getElementById('config_recording_database_type').value = config.recording?.database_type || 'sqlite';
     document.getElementById('config_recording_database_path').value = config.recording?.database_path || '';
     document.getElementById('config_recording_database_url').value = config.recording?.database_url || '';
@@ -444,7 +443,6 @@ function collectServerConfigFromForm() {
         recording: {
             frame_storage_enabled: document.getElementById('config_recording_frame_storage_enabled').value === 'true',
             mp4_storage_type: document.getElementById('config_recording_mp4_storage_type').value || 'filesystem',
-            mp4_framerate: parseFloat(document.getElementById('config_recording_mp4_framerate').value) || 5.0,
             database_type: document.getElementById('config_recording_database_type').value || 'sqlite',
             database_path: document.getElementById('config_recording_database_path').value || "recordings",
             database_url: document.getElementById('config_recording_database_url').value || null,
