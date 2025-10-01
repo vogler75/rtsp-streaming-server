@@ -860,6 +860,72 @@ async fn main() -> Result<()> {
                     hls_segment_info.recording_manager.clone().unwrap()
                 )
             ));
+
+            // DELETE endpoints for recordings
+            // Delete entire recording session
+            let delete_session_path = format!("{}/control/recordings/sessions/:session_id", path);
+            let delete_session_info = api_info.clone();
+            app = app.route(&delete_session_path, axum::routing::delete(
+                move |headers, path| api_recording::api_delete_recording_session(
+                    headers,
+                    path,
+                    delete_session_info.camera_id.clone(),
+                    delete_session_info.camera_config.clone(),
+                    delete_session_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // Delete single MP4 segment
+            let delete_mp4_path = format!("{}/control/recordings/mp4/segments/:filename", path);
+            let delete_mp4_info = api_info.clone();
+            app = app.route(&delete_mp4_path, axum::routing::delete(
+                move |headers, path| api_recording::api_delete_mp4_segment(
+                    headers,
+                    path,
+                    delete_mp4_info.camera_id.clone(),
+                    delete_mp4_info.camera_config.clone(),
+                    delete_mp4_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // Bulk delete MP4 segments
+            let bulk_delete_mp4_path = format!("{}/control/recordings/mp4/segments", path);
+            let bulk_delete_mp4_info = api_info.clone();
+            app = app.route(&bulk_delete_mp4_path, axum::routing::delete(
+                move |headers, json| api_recording::api_delete_mp4_segments_bulk(
+                    headers,
+                    bulk_delete_mp4_info.camera_id.clone(),
+                    bulk_delete_mp4_info.camera_config.clone(),
+                    bulk_delete_mp4_info.recording_manager.clone().unwrap(),
+                    json
+                )
+            ));
+
+            // Delete HLS segments by session
+            let delete_hls_session_path = format!("{}/control/recordings/hls/sessions/:session_id", path);
+            let delete_hls_session_info = api_info.clone();
+            app = app.route(&delete_hls_session_path, axum::routing::delete(
+                move |headers, path| api_recording::api_delete_hls_segments_by_session(
+                    headers,
+                    path,
+                    delete_hls_session_info.camera_id.clone(),
+                    delete_hls_session_info.camera_config.clone(),
+                    delete_hls_session_info.recording_manager.clone().unwrap()
+                )
+            ));
+
+            // Delete HLS segments by timerange
+            let delete_hls_timerange_path = format!("{}/control/recordings/hls/timerange", path);
+            let delete_hls_timerange_info = api_info.clone();
+            app = app.route(&delete_hls_timerange_path, axum::routing::delete(
+                move |headers, query| api_recording::api_delete_hls_segments_by_timerange(
+                    headers,
+                    query,
+                    delete_hls_timerange_info.camera_id.clone(),
+                    delete_hls_timerange_info.camera_config.clone(),
+                    delete_hls_timerange_info.recording_manager.clone().unwrap()
+                )
+            ));
         }
 
         // PTZ control endpoints (handlers will validate if enabled in camera config)

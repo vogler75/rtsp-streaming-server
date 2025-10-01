@@ -141,6 +141,21 @@ pub struct RecordingQuery {
     pub to: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct DeletedRecordingStats {
+    pub session_id: i64,
+    pub frames_deleted: u64,
+    pub mp4_segments_deleted: u64,
+    pub hls_segments_deleted: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BulkDeleteResult {
+    pub deleted_count: usize,
+    pub failed: Vec<String>, // filenames that failed to delete
+    pub total_size_bytes: i64,
+}
+
 #[async_trait]
 pub trait DatabaseProvider: Send + Sync {
     async fn initialize(&self) -> Result<()>;
@@ -284,12 +299,19 @@ pub trait DatabaseProvider: Send + Sync {
         &self,
         session_id: i64,
     ) -> Result<Option<i32>>;
-    
+
     async fn set_session_keep_flag(
         &self,
         session_id: i64,
         keep_session: bool,
     ) -> Result<()>;
+
+    // Delete functions for manual recording management
+    async fn delete_recording_session(&self, session_id: i64) -> Result<DeletedRecordingStats>;
+    async fn delete_mp4_segment_by_filename(&self, camera_id: &str, filename: &str) -> Result<i64>;
+    async fn delete_mp4_segments_bulk(&self, camera_id: &str, filenames: Vec<String>) -> Result<BulkDeleteResult>;
+    async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64>;
+    async fn delete_hls_segments_by_timerange(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<u64>;
     
     // Throughput tracking methods
     async fn record_throughput_stats(
@@ -2113,14 +2135,214 @@ impl DatabaseProvider for SqliteDatabase {
             "UPDATE {} SET keep_session = ? WHERE id = ?",
             TABLE_RECORDING_SESSIONS
         );
-        
+
         sqlx::query(&query)
             .bind(keep_session)
             .bind(session_id)
             .execute(&self.pool)
             .await?;
-        
+
         Ok(())
+    }
+
+    async fn delete_recording_session(&self, session_id: i64) -> Result<DeletedRecordingStats> {
+        // First check if session is stopped
+        let session_query = format!(
+            "SELECT status FROM {} WHERE id = ?",
+            TABLE_RECORDING_SESSIONS
+        );
+        let status: String = sqlx::query_scalar(&session_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        if status == "active" {
+            return Err(crate::errors::StreamError::database(
+                "Cannot delete active recording session. Stop it first.".to_string()
+            ));
+        }
+
+        // Count items before deletion
+        let frames_count_query = format!("SELECT COUNT(*) FROM {} WHERE session_id = ?", TABLE_RECORDING_MJPEG);
+        let frames_deleted: i64 = sqlx::query_scalar(&frames_count_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let mp4_count_query = format!("SELECT COUNT(*) FROM {} WHERE session_id = ?", TABLE_RECORDING_MP4);
+        let mp4_segments_deleted: i64 = sqlx::query_scalar(&mp4_count_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let hls_count_query = format!("SELECT COUNT(*) FROM {} WHERE session_id = ?", TABLE_RECORDING_HLS);
+        let hls_segments_deleted: i64 = sqlx::query_scalar(&hls_count_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        // Get MP4 file paths for filesystem deletion
+        let mp4_files_query = format!(
+            "SELECT file_path FROM {} WHERE session_id = ? AND file_path IS NOT NULL",
+            TABLE_RECORDING_MP4
+        );
+        let file_paths: Vec<String> = sqlx::query_scalar(&mp4_files_query)
+            .bind(session_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        // Delete from database in correct order (due to foreign keys)
+        let delete_frames = format!("DELETE FROM {} WHERE session_id = ?", TABLE_RECORDING_MJPEG);
+        sqlx::query(&delete_frames).bind(session_id).execute(&self.pool).await?;
+
+        let delete_mp4 = format!("DELETE FROM {} WHERE session_id = ?", TABLE_RECORDING_MP4);
+        sqlx::query(&delete_mp4).bind(session_id).execute(&self.pool).await?;
+
+        let delete_hls = format!("DELETE FROM {} WHERE session_id = ?", TABLE_RECORDING_HLS);
+        sqlx::query(&delete_hls).bind(session_id).execute(&self.pool).await?;
+
+        let delete_session = format!("DELETE FROM {} WHERE id = ?", TABLE_RECORDING_SESSIONS);
+        sqlx::query(&delete_session).bind(session_id).execute(&self.pool).await?;
+
+        // Delete MP4 files from filesystem
+        for file_path in file_paths {
+            if let Err(e) = tokio::fs::remove_file(&file_path).await {
+                tracing::warn!("Failed to delete MP4 file {}: {}", file_path, e);
+            }
+        }
+
+        info!("Deleted recording session {} (frames: {}, mp4: {}, hls: {})",
+              session_id, frames_deleted, mp4_segments_deleted, hls_segments_deleted);
+
+        Ok(DeletedRecordingStats {
+            session_id,
+            frames_deleted: frames_deleted as u64,
+            mp4_segments_deleted: mp4_segments_deleted as u64,
+            hls_segments_deleted: hls_segments_deleted as u64,
+        })
+    }
+
+    async fn delete_mp4_segment_by_filename(&self, camera_id: &str, filename: &str) -> Result<i64> {
+        // Get the segment info before deletion
+        let query = format!(
+            "SELECT s.file_path, s.size_bytes, s.session_id
+             FROM {} s
+             JOIN {} r ON s.session_id = r.id
+             WHERE r.camera_id = ? AND s.file_path LIKE ?",
+            TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+        );
+
+        let pattern = format!("%/{}", filename);
+        let row: Option<(Option<String>, i64, i64)> = sqlx::query_as(&query)
+            .bind(camera_id)
+            .bind(&pattern)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if let Some((file_path, size_bytes, session_id)) = row {
+            // Check if session is stopped
+            let status_query = format!("SELECT status FROM {} WHERE id = ?", TABLE_RECORDING_SESSIONS);
+            let status: String = sqlx::query_scalar(&status_query)
+                .bind(session_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+            if status == "active" {
+                return Err(crate::errors::StreamError::database(
+                    "Cannot delete MP4 from active recording session".to_string()
+                ));
+            }
+
+            // Delete from database
+            let delete_query = format!(
+                "DELETE FROM {} WHERE session_id = ? AND file_path LIKE ?",
+                TABLE_RECORDING_MP4
+            );
+            sqlx::query(&delete_query)
+                .bind(session_id)
+                .bind(&pattern)
+                .execute(&self.pool)
+                .await?;
+
+            // Delete file from filesystem if it exists
+            if let Some(path) = file_path {
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!("Failed to delete MP4 file {}: {}", path, e);
+                }
+            }
+
+            Ok(size_bytes)
+        } else {
+            Err(crate::errors::StreamError::database(format!("MP4 segment {} not found", filename)))
+        }
+    }
+
+    async fn delete_mp4_segments_bulk(&self, camera_id: &str, filenames: Vec<String>) -> Result<BulkDeleteResult> {
+        let mut deleted_count = 0;
+        let mut failed = Vec::new();
+        let mut total_size_bytes = 0i64;
+
+        for filename in filenames {
+            match self.delete_mp4_segment_by_filename(camera_id, &filename).await {
+                Ok(size) => {
+                    deleted_count += 1;
+                    total_size_bytes += size;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to delete {}: {}", filename, e);
+                    failed.push(filename);
+                }
+            }
+        }
+
+        Ok(BulkDeleteResult {
+            deleted_count,
+            failed,
+            total_size_bytes,
+        })
+    }
+
+    async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64> {
+        // Check if session is stopped
+        let status_query = format!("SELECT status FROM {} WHERE id = ?", TABLE_RECORDING_SESSIONS);
+        let status: String = sqlx::query_scalar(&status_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        if status == "active" {
+            return Err(crate::errors::StreamError::database(
+                "Cannot delete HLS from active recording session".to_string()
+            ));
+        }
+
+        let delete_query = format!("DELETE FROM {} WHERE session_id = ?", TABLE_RECORDING_HLS);
+        let result = sqlx::query(&delete_query)
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn delete_hls_segments_by_timerange(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<u64> {
+        let delete_query = format!(
+            "DELETE FROM {}
+             WHERE session_id IN (
+                 SELECT id FROM {} WHERE camera_id = ? AND status != 'active'
+             )
+             AND start_time >= ? AND end_time <= ?",
+            TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+        );
+
+        let result = sqlx::query(&delete_query)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
     }
 
     async fn record_throughput_stats(
@@ -4113,14 +4335,214 @@ impl DatabaseProvider for PostgreSqlDatabase {
             "UPDATE {} SET keep_session = $1 WHERE id = $2",
             TABLE_RECORDING_SESSIONS
         );
-        
+
         sqlx::query(&query)
             .bind(keep_session)
             .bind(session_id)
             .execute(&self.pool)
             .await?;
-        
+
         Ok(())
+    }
+
+    async fn delete_recording_session(&self, session_id: i64) -> Result<DeletedRecordingStats> {
+        // First check if session is stopped
+        let session_query = format!(
+            "SELECT status FROM {} WHERE id = $1",
+            TABLE_RECORDING_SESSIONS
+        );
+        let status: String = sqlx::query_scalar(&session_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        if status == "active" {
+            return Err(crate::errors::StreamError::database(
+                "Cannot delete active recording session. Stop it first.".to_string()
+            ));
+        }
+
+        // Count items before deletion
+        let frames_count_query = format!("SELECT COUNT(*) FROM {} WHERE session_id = $1", TABLE_RECORDING_MJPEG);
+        let frames_deleted: i64 = sqlx::query_scalar(&frames_count_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let mp4_count_query = format!("SELECT COUNT(*) FROM {} WHERE session_id = $1", TABLE_RECORDING_MP4);
+        let mp4_segments_deleted: i64 = sqlx::query_scalar(&mp4_count_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let hls_count_query = format!("SELECT COUNT(*) FROM {} WHERE session_id = $1", TABLE_RECORDING_HLS);
+        let hls_segments_deleted: i64 = sqlx::query_scalar(&hls_count_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        // Get MP4 file paths for filesystem deletion
+        let mp4_files_query = format!(
+            "SELECT file_path FROM {} WHERE session_id = $1 AND file_path IS NOT NULL",
+            TABLE_RECORDING_MP4
+        );
+        let file_paths: Vec<String> = sqlx::query_scalar(&mp4_files_query)
+            .bind(session_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        // Delete from database in correct order (due to foreign keys)
+        let delete_frames = format!("DELETE FROM {} WHERE session_id = $1", TABLE_RECORDING_MJPEG);
+        sqlx::query(&delete_frames).bind(session_id).execute(&self.pool).await?;
+
+        let delete_mp4 = format!("DELETE FROM {} WHERE session_id = $1", TABLE_RECORDING_MP4);
+        sqlx::query(&delete_mp4).bind(session_id).execute(&self.pool).await?;
+
+        let delete_hls = format!("DELETE FROM {} WHERE session_id = $1", TABLE_RECORDING_HLS);
+        sqlx::query(&delete_hls).bind(session_id).execute(&self.pool).await?;
+
+        let delete_session = format!("DELETE FROM {} WHERE id = $1", TABLE_RECORDING_SESSIONS);
+        sqlx::query(&delete_session).bind(session_id).execute(&self.pool).await?;
+
+        // Delete MP4 files from filesystem
+        for file_path in file_paths {
+            if let Err(e) = tokio::fs::remove_file(&file_path).await {
+                tracing::warn!("Failed to delete MP4 file {}: {}", file_path, e);
+            }
+        }
+
+        info!("Deleted recording session {} (frames: {}, mp4: {}, hls: {})",
+              session_id, frames_deleted, mp4_segments_deleted, hls_segments_deleted);
+
+        Ok(DeletedRecordingStats {
+            session_id,
+            frames_deleted: frames_deleted as u64,
+            mp4_segments_deleted: mp4_segments_deleted as u64,
+            hls_segments_deleted: hls_segments_deleted as u64,
+        })
+    }
+
+    async fn delete_mp4_segment_by_filename(&self, camera_id: &str, filename: &str) -> Result<i64> {
+        // Get the segment info before deletion
+        let query = format!(
+            "SELECT s.file_path, s.size_bytes, s.session_id
+             FROM {} s
+             JOIN {} r ON s.session_id = r.id
+             WHERE r.camera_id = $1 AND s.file_path LIKE $2",
+            TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
+        );
+
+        let pattern = format!("%/{}", filename);
+        let row: Option<(Option<String>, i64, i64)> = sqlx::query_as(&query)
+            .bind(camera_id)
+            .bind(&pattern)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if let Some((file_path, size_bytes, session_id)) = row {
+            // Check if session is stopped
+            let status_query = format!("SELECT status FROM {} WHERE id = $1", TABLE_RECORDING_SESSIONS);
+            let status: String = sqlx::query_scalar(&status_query)
+                .bind(session_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+            if status == "active" {
+                return Err(crate::errors::StreamError::database(
+                    "Cannot delete MP4 from active recording session".to_string()
+                ));
+            }
+
+            // Delete from database
+            let delete_query = format!(
+                "DELETE FROM {} WHERE session_id = $1 AND file_path LIKE $2",
+                TABLE_RECORDING_MP4
+            );
+            sqlx::query(&delete_query)
+                .bind(session_id)
+                .bind(&pattern)
+                .execute(&self.pool)
+                .await?;
+
+            // Delete file from filesystem if it exists
+            if let Some(path) = file_path {
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!("Failed to delete MP4 file {}: {}", path, e);
+                }
+            }
+
+            Ok(size_bytes)
+        } else {
+            Err(crate::errors::StreamError::database(format!("MP4 segment {} not found", filename)))
+        }
+    }
+
+    async fn delete_mp4_segments_bulk(&self, camera_id: &str, filenames: Vec<String>) -> Result<BulkDeleteResult> {
+        let mut deleted_count = 0;
+        let mut failed = Vec::new();
+        let mut total_size_bytes = 0i64;
+
+        for filename in filenames {
+            match self.delete_mp4_segment_by_filename(camera_id, &filename).await {
+                Ok(size) => {
+                    deleted_count += 1;
+                    total_size_bytes += size;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to delete {}: {}", filename, e);
+                    failed.push(filename);
+                }
+            }
+        }
+
+        Ok(BulkDeleteResult {
+            deleted_count,
+            failed,
+            total_size_bytes,
+        })
+    }
+
+    async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64> {
+        // Check if session is stopped
+        let status_query = format!("SELECT status FROM {} WHERE id = $1", TABLE_RECORDING_SESSIONS);
+        let status: String = sqlx::query_scalar(&status_query)
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        if status == "active" {
+            return Err(crate::errors::StreamError::database(
+                "Cannot delete HLS from active recording session".to_string()
+            ));
+        }
+
+        let delete_query = format!("DELETE FROM {} WHERE session_id = $1", TABLE_RECORDING_HLS);
+        let result = sqlx::query(&delete_query)
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn delete_hls_segments_by_timerange(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<u64> {
+        let delete_query = format!(
+            "DELETE FROM {}
+             WHERE session_id IN (
+                 SELECT id FROM {} WHERE camera_id = $1 AND status != 'active'
+             )
+             AND start_time >= $2 AND end_time <= $3",
+            TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+        );
+
+        let result = sqlx::query(&delete_query)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected())
     }
 
     async fn record_throughput_stats(

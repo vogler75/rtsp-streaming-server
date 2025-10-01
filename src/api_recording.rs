@@ -670,3 +670,212 @@ pub async fn api_set_session_keep_flag(
         }
     }
 }
+
+// DELETE /cam1/control/recordings/sessions/:session_id
+pub async fn api_delete_recording_session(
+    headers: axum::http::HeaderMap,
+    AxumPath(session_id): AxumPath<i64>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> impl IntoResponse {
+    // Check authentication
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    let databases = recording_manager.databases.read().await;
+
+    if let Some(database) = databases.get(&camera_id) {
+        match database.delete_recording_session(session_id).await {
+            Ok(stats) => {
+                let data = serde_json::json!({
+                    "success": true,
+                    "deleted": {
+                        "session_id": stats.session_id,
+                        "frames": stats.frames_deleted,
+                        "mp4_segments": stats.mp4_segments_deleted,
+                        "hls_segments": stats.hls_segments_deleted
+                    }
+                });
+                Json(ApiResponse::success(data)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Delete error: {}", e), 500)))
+                    .into_response()
+            }
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("Camera database not found", 404)))
+            .into_response()
+    }
+}
+
+// DELETE /cam1/control/recordings/mp4/segments/:filename
+pub async fn api_delete_mp4_segment(
+    headers: axum::http::HeaderMap,
+    AxumPath(filename): AxumPath<String>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> impl IntoResponse {
+    // Check authentication
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    let databases = recording_manager.databases.read().await;
+
+    if let Some(database) = databases.get(&camera_id) {
+        match database.delete_mp4_segment_by_filename(&camera_id, &filename).await {
+            Ok(size_bytes) => {
+                let data = serde_json::json!({
+                    "success": true,
+                    "deleted": {
+                        "filename": filename,
+                        "size_bytes": size_bytes
+                    }
+                });
+                Json(ApiResponse::success(data)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Delete error: {}", e), 500)))
+                    .into_response()
+            }
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("Camera database not found", 404)))
+            .into_response()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkDeleteMp4Request {
+    pub filenames: Vec<String>,
+}
+
+// DELETE /cam1/control/recordings/mp4/segments (with JSON body)
+pub async fn api_delete_mp4_segments_bulk(
+    headers: axum::http::HeaderMap,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+    Json(request): Json<BulkDeleteMp4Request>,
+) -> impl IntoResponse {
+    // Check authentication
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    let databases = recording_manager.databases.read().await;
+
+    if let Some(database) = databases.get(&camera_id) {
+        match database.delete_mp4_segments_bulk(&camera_id, request.filenames).await {
+            Ok(result) => {
+                let data = serde_json::json!({
+                    "success": true,
+                    "deleted_count": result.deleted_count,
+                    "total_size_bytes": result.total_size_bytes,
+                    "failed": result.failed
+                });
+                Json(ApiResponse::success(data)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Delete error: {}", e), 500)))
+                    .into_response()
+            }
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("Camera database not found", 404)))
+            .into_response()
+    }
+}
+
+// DELETE /cam1/control/recordings/hls/sessions/:session_id
+pub async fn api_delete_hls_segments_by_session(
+    headers: axum::http::HeaderMap,
+    AxumPath(session_id): AxumPath<i64>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> impl IntoResponse {
+    // Check authentication
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    let databases = recording_manager.databases.read().await;
+
+    if let Some(database) = databases.get(&camera_id) {
+        match database.delete_hls_segments_by_session(session_id).await {
+            Ok(deleted_count) => {
+                let data = serde_json::json!({
+                    "success": true,
+                    "deleted_segments": deleted_count,
+                    "session_id": session_id
+                });
+                Json(ApiResponse::success(data)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Delete error: {}", e), 500)))
+                    .into_response()
+            }
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("Camera database not found", 404)))
+            .into_response()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteHlsTimerangeQuery {
+    pub from: chrono::DateTime<chrono::Utc>,
+    pub to: chrono::DateTime<chrono::Utc>,
+}
+
+// DELETE /cam1/control/recordings/hls/timerange?from=...&to=...
+pub async fn api_delete_hls_segments_by_timerange(
+    headers: axum::http::HeaderMap,
+    Query(query): Query<DeleteHlsTimerangeQuery>,
+    camera_id: String,
+    camera_config: config::CameraConfig,
+    recording_manager: Arc<RecordingManager>,
+) -> impl IntoResponse {
+    // Check authentication
+    if let Err(response) = check_api_auth(&headers, &camera_config) {
+        return response;
+    }
+
+    let databases = recording_manager.databases.read().await;
+
+    if let Some(database) = databases.get(&camera_id) {
+        match database.delete_hls_segments_by_timerange(&camera_id, query.from, query.to).await {
+            Ok(deleted_count) => {
+                let data = serde_json::json!({
+                    "success": true,
+                    "deleted_segments": deleted_count,
+                    "from": query.from,
+                    "to": query.to
+                });
+                Json(ApiResponse::success(data)).into_response()
+            }
+            Err(e) => {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(ApiResponse::<()>::error(&format!("Delete error: {}", e), 500)))
+                    .into_response()
+            }
+        }
+    } else {
+        (axum::http::StatusCode::NOT_FOUND,
+         Json(ApiResponse::<()>::error("Camera database not found", 404)))
+            .into_response()
+    }
+}
