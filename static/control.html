@@ -523,6 +523,17 @@
                     </select>
                 </div>
             </div>
+
+            <!-- Bulk actions toolbar -->
+            <div id="bulkActionsToolbar" style="display: none; background: var(--bg-secondary); padding: var(--spacing-md); border-radius: var(--radius-md); margin-bottom: var(--spacing-md); border: 1px solid var(--border-color); display: flex; gap: var(--spacing-md); align-items: center; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: var(--spacing-xs); cursor: pointer;">
+                    <input type="checkbox" id="selectAllCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+                    <span>Select All</span>
+                </label>
+                <span id="selectedCount" style="color: var(--text-secondary); margin-left: auto;">0 selected</span>
+                <button id="deleteSelectedBtn" class="danger" style="padding: 8px 16px;" disabled>🗑️ Delete Selected</button>
+            </div>
+
             <div class="recordings-list" id="recordingsList">
                 <div class="info-text">Select a date range and click "Refresh List"</div>
             </div>
@@ -552,6 +563,7 @@
                 this.wasLiveBeforeSeek = false; // Track if we were in live mode before seeking
                 
                 this.setupEventListeners();
+                this.setupDeleteEventListeners();
                 this.updateRecordingControlsVisibility();
                 this.connectWebSocket();
                 this.checkActiveRecording();
@@ -917,17 +929,24 @@
                     return;
                 }
                 
+                // Show bulk actions toolbar
+                document.getElementById('bulkActionsToolbar').style.display = 'flex';
+
                 // Create table HTML
                 let tableHTML = `
                     <table class="recordings-table">
                         <thead>
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="select-all-recordings" style="width: 18px; height: 18px; cursor: pointer;">
+                                </th>
                                 <th>Session</th>
                                 <th>Start Time</th>
                                 <th>End Time</th>
                                 <th>Duration</th>
                                 <th>Reason</th>
                                 <th>Status</th>
+                                <th style="width: 80px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -974,19 +993,29 @@
                         '<span class="keep-status protected">🔒 Protected</span>' : 
                         '<span class="keep-status normal">📄 Normal</span>';
                     
-                    const toggleButton = `<button class="keep-toggle-btn" data-session-id="${rec.id}" data-keep-session="${rec.keep_session}" 
+                    const toggleButton = `<button class="keep-toggle-btn" data-session-id="${rec.id}" data-keep-session="${rec.keep_session}"
                                                   title="${rec.keep_session ? 'Remove protection' : 'Protect from purging'}">
                                               ${rec.keep_session ? '🔓' : '🔒'}
                                           </button>`;
-                    
+
+                    const isActive = rec.status === 'active';
+                    const canDelete = !isActive;
+                    const deleteButton = canDelete ?
+                        `<button class="danger delete-recording-btn" data-session-id="${rec.id}" title="Delete this recording session">🗑️</button>` :
+                        `<span style="color: var(--text-secondary); font-size: 11px;" title="Cannot delete active recording">Active</span>`;
+
                     tableHTML += `
-                        <tr data-session-id="${rec.id}">
+                        <tr data-session-id="${rec.id}" class="recording-row ${isActive ? 'active-recording' : ''}">
+                            <td>
+                                ${canDelete ? `<input type="checkbox" class="recording-checkbox" data-session-id="${rec.id}" data-status="${rec.status}" style="width: 18px; height: 18px; cursor: pointer;">` : ''}
+                            </td>
                             <td>${rec.id}</td>
                             <td>${startTime}</td>
                             <td>${endTime}</td>
                             <td>${durationText}</td>
                             <td style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${reasonText}">${reasonText}</td>
                             <td>${keepStatus}${toggleButton}</td>
+                            <td>${deleteButton}</td>
                         </tr>
                     `;
                 });
@@ -1024,22 +1053,30 @@
 
             displayVideoSegments(segments) {
                 const container = document.getElementById('recordingsList');
-                
+
                 if (segments.length === 0) {
                     container.innerHTML = '<div class="info-text" style="padding: 20px;">No video segments found.</div>';
+                    document.getElementById('bulkActionsToolbar').style.display = 'none';
                     return;
                 }
+
+                // Show bulk actions toolbar
+                document.getElementById('bulkActionsToolbar').style.display = 'flex';
 
                 // Create table HTML for segments
                 let tableHTML = `
                     <table class="recordings-table">
                         <thead>
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="select-all-segments" style="width: 18px; height: 18px; cursor: pointer;">
+                                </th>
                                 <th>Start Time</th>
                                 <th>End Time</th>
                                 <th>Duration</th>
                                 <th>Size</th>
                                 <th>Reason</th>
+                                <th style="width: 80px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1076,14 +1113,20 @@
                     }
 
                     const reasonText = seg.recording_reason && seg.recording_reason !== 'Unknown' ? seg.recording_reason : '-';
-                    
+                    const filename = seg.url ? seg.url.split('/').pop() : '';
+                    const deleteButton = `<button class="danger delete-mp4-btn" data-filename="${filename}" title="Delete this MP4 segment">🗑️</button>`;
+
                     tableHTML += `
-                        <tr data-segment-url="${seg.url}">
+                        <tr data-segment-url="${seg.url}" class="segment-row">
+                            <td>
+                                <input type="checkbox" class="segment-checkbox" data-filename="${filename}" style="width: 18px; height: 18px; cursor: pointer;">
+                            </td>
                             <td>${startTime}</td>
                             <td>${endTime}</td>
                             <td>${durationText}</td>
                             <td>${sizeMB} MB</td>
                             <td style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${reasonText}">${reasonText}</td>
+                            <td>${deleteButton}</td>
                         </tr>
                     `;
                 });
@@ -1651,20 +1694,20 @@
             async toggleKeepSession(sessionId, keepSession) {
                 const queryParam = keepSession ? '' : '?keep=false';
                 const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings/${sessionId}/keep${queryParam}`;
-                
+
                 try {
                     const headers = {};
                     const token = document.getElementById('bearerToken').value.trim();
                     if (token) headers['Authorization'] = `Bearer ${token}`;
-                    
+
                     const response = await fetch(url, {
                         method: 'PUT',
                         headers
                     });
-                    
+
                     const result = await response.json();
                     this.logJson({ toggleKeepSession: result });
-                    
+
                     if (result.status === 'success') {
                         // Refresh recordings list to show updated status
                         this.fetchRecordings();
@@ -1675,6 +1718,223 @@
                     this.logJson({ error: 'Network error toggling keep session', details: error.message });
                     alert(`Network error: ${error.message}`);
                 }
+            }
+
+            async deleteRecordingSession(sessionId) {
+                if (!confirm(`Delete recording session ${sessionId}?\n\nThis will permanently delete:\n- All frames\n- All MP4 segments\n- All HLS segments\n\nThis action cannot be undone!`)) {
+                    return;
+                }
+
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings/sessions/${sessionId}`;
+
+                try {
+                    const headers = {};
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                    const response = await fetch(url, {
+                        method: 'DELETE',
+                        headers
+                    });
+
+                    const result = await response.json();
+                    this.logJson({ deleteSession: result });
+
+                    if (result.status === 'success') {
+                        alert(`Session ${sessionId} deleted successfully!\n\nDeleted:\n- ${result.data.deleted.frames} frames\n- ${result.data.deleted.mp4_segments} MP4 segments\n- ${result.data.deleted.hls_segments} HLS segments`);
+                        this.fetchRecordings();
+                    } else {
+                        alert(`Failed to delete session: ${result.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    this.logJson({ error: 'Network error deleting session', details: error.message });
+                    alert(`Network error: ${error.message}`);
+                }
+            }
+
+            async deleteMp4Segment(filename) {
+                if (!confirm(`Delete MP4 segment "${filename}"?\n\nThis action cannot be undone!`)) {
+                    return;
+                }
+
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings/mp4/segments/${filename}`;
+
+                try {
+                    const headers = {};
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                    const response = await fetch(url, {
+                        method: 'DELETE',
+                        headers
+                    });
+
+                    const result = await response.json();
+                    this.logJson({ deleteMp4: result });
+
+                    if (result.status === 'success') {
+                        const sizeMB = (result.data.deleted.size_bytes / (1024 * 1024)).toFixed(1);
+                        alert(`MP4 segment deleted successfully!\n\nFreed: ${sizeMB} MB`);
+                        this.fetchVideoSegments();
+                    } else {
+                        alert(`Failed to delete MP4: ${result.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    this.logJson({ error: 'Network error deleting MP4', details: error.message });
+                    alert(`Network error: ${error.message}`);
+                }
+            }
+
+            async deleteBulkMp4Segments(filenames) {
+                if (!confirm(`Delete ${filenames.length} MP4 segments?\n\nThis action cannot be undone!`)) {
+                    return;
+                }
+
+                const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings/mp4/segments`;
+
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                    const response = await fetch(url, {
+                        method: 'DELETE',
+                        headers,
+                        body: JSON.stringify({ filenames })
+                    });
+
+                    const result = await response.json();
+                    this.logJson({ deleteBulkMp4: result });
+
+                    if (result.status === 'success') {
+                        const sizeMB = (result.data.total_size_bytes / (1024 * 1024)).toFixed(1);
+                        let message = `Deleted ${result.data.deleted_count} MP4 segments!\n\nFreed: ${sizeMB} MB`;
+                        if (result.data.failed.length > 0) {
+                            message += `\n\nFailed to delete ${result.data.failed.length} segments:\n${result.data.failed.join(', ')}`;
+                        }
+                        alert(message);
+                        this.fetchVideoSegments();
+                    } else {
+                        alert(`Failed to delete MP4s: ${result.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    this.logJson({ error: 'Network error bulk deleting MP4s', details: error.message });
+                    alert(`Network error: ${error.message}`);
+                }
+            }
+
+            async deleteBulkRecordingSessions(sessionIds) {
+                if (!confirm(`Delete ${sessionIds.length} recording sessions?\n\nThis will permanently delete all frames, MP4s, and HLS segments for these sessions.\n\nThis action cannot be undone!`)) {
+                    return;
+                }
+
+                let successCount = 0;
+                let failCount = 0;
+
+                for (const sessionId of sessionIds) {
+                    const url = `${window.location.origin}${window.location.pathname.replace('control.html', '')}/recordings/sessions/${sessionId}`;
+
+                    try {
+                        const headers = {};
+                        const token = document.getElementById('bearerToken').value.trim();
+                        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                        const response = await fetch(url, {
+                            method: 'DELETE',
+                            headers
+                        });
+
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            successCount++;
+                        } else {
+                            failCount++;
+                        }
+                    } catch (error) {
+                        failCount++;
+                    }
+                }
+
+                alert(`Bulk delete completed!\n\nSuccessful: ${successCount}\nFailed: ${failCount}`);
+                this.fetchRecordings();
+            }
+
+            setupDeleteEventListeners() {
+                // Individual delete buttons
+                document.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('delete-recording-btn')) {
+                        const sessionId = e.target.dataset.sessionId;
+                        this.deleteRecordingSession(sessionId);
+                    } else if (e.target.classList.contains('delete-mp4-btn')) {
+                        const filename = e.target.dataset.filename;
+                        this.deleteMp4Segment(filename);
+                    }
+                });
+
+                // Bulk delete button
+                document.getElementById('deleteSelectedBtn').addEventListener('click', () => {
+                    const mode = document.getElementById('playbackMode').value;
+
+                    if (mode === 'segments') {
+                        // Delete MP4 segments
+                        const checkboxes = document.querySelectorAll('.segment-checkbox:checked');
+                        const filenames = Array.from(checkboxes).map(cb => cb.dataset.filename);
+                        if (filenames.length > 0) {
+                            this.deleteBulkMp4Segments(filenames);
+                        }
+                    } else {
+                        // Delete recording sessions
+                        const checkboxes = document.querySelectorAll('.recording-checkbox:checked');
+                        const sessionIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.sessionId));
+                        if (sessionIds.length > 0) {
+                            this.deleteBulkRecordingSessions(sessionIds);
+                        }
+                    }
+                });
+
+                // Select all checkboxes
+                document.addEventListener('change', (e) => {
+                    if (e.target.classList.contains('select-all-recordings')) {
+                        const checkboxes = document.querySelectorAll('.recording-checkbox');
+                        checkboxes.forEach(cb => cb.checked = e.target.checked);
+                        this.updateBulkActionUI();
+                    } else if (e.target.classList.contains('select-all-segments')) {
+                        const checkboxes = document.querySelectorAll('.segment-checkbox');
+                        checkboxes.forEach(cb => cb.checked = e.target.checked);
+                        this.updateBulkActionUI();
+                    } else if (e.target.classList.contains('recording-checkbox') || e.target.classList.contains('segment-checkbox')) {
+                        this.updateBulkActionUI();
+                    }
+                });
+
+                // Sync with main select-all checkbox in toolbar
+                document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
+                    const mode = document.getElementById('playbackMode').value;
+                    if (mode === 'segments') {
+                        const checkboxes = document.querySelectorAll('.segment-checkbox');
+                        checkboxes.forEach(cb => cb.checked = e.target.checked);
+                        document.querySelectorAll('.select-all-segments').forEach(cb => cb.checked = e.target.checked);
+                    } else {
+                        const checkboxes = document.querySelectorAll('.recording-checkbox');
+                        checkboxes.forEach(cb => cb.checked = e.target.checked);
+                        document.querySelectorAll('.select-all-recordings').forEach(cb => cb.checked = e.target.checked);
+                    }
+                    this.updateBulkActionUI();
+                });
+            }
+
+            updateBulkActionUI() {
+                const mode = document.getElementById('playbackMode').value;
+                let selectedCount = 0;
+
+                if (mode === 'segments') {
+                    selectedCount = document.querySelectorAll('.segment-checkbox:checked').length;
+                } else {
+                    selectedCount = document.querySelectorAll('.recording-checkbox:checked').length;
+                }
+
+                document.getElementById('selectedCount').textContent = `${selectedCount} selected`;
+                document.getElementById('deleteSelectedBtn').disabled = selectedCount === 0;
             }
         }
         

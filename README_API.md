@@ -53,15 +53,20 @@ GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21
     │   └── GET size                          # Recording DB size
     ├── recordings/
     │   ├── GET /                             # List recordings
+    │   ├── DELETE sessions/{session_id}      # Delete recording session
     │   ├── GET /{session_id}/frames          # Frame metadata
     │   ├── PUT /{session_id}/keep            # Set session keep/protect flag
     │   ├── GET frames/{timestamp}            # Get single frame by timestamp
     │   ├── mp4/
     │   │   ├── GET segments                  # List MP4 segments
-    │   │   └── GET segments/{filename}       # Stream single MP4
+    │   │   ├── GET segments/{filename}       # Stream single MP4
+    │   │   ├── DELETE segments/{filename}    # Delete single MP4 segment
+    │   │   └── DELETE segments               # Bulk delete MP4 segments
     │   └── hls/
     │       ├── GET timerange                 # Generate HLS playlist
-    │       └── GET segments/{playlist_id}/{segment_name} # Serve HLS segments
+    │       ├── GET segments/{playlist_id}/{segment_name} # Serve HLS segments
+    │       ├── DELETE sessions/{session_id}  # Delete HLS segments by session
+    │       └── DELETE timerange              # Delete HLS segments by time range
     └── ptz/                                  # PTZ controls (if enabled)
         ├── POST move                         # Pan/tilt/zoom
         ├── POST stop                         # Stop movement
@@ -340,6 +345,136 @@ These endpoints control individual cameras using their configured path. Authenti
 **Endpoint:** `GET /{camera_path}/control/recording/active`
 
 **Response:** Active recording info or message indicating none active
+
+#### Delete Recording Session
+**Endpoint:** `DELETE /{camera_path}/control/recordings/sessions/{session_id}`
+
+Deletes a complete recording session including all frames, MP4 segments, and HLS segments. Only stopped sessions can be deleted.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "session_id": 123,
+    "frames_deleted": 1500,
+    "mp4_segments_deleted": 3,
+    "hls_segments_deleted": 150
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "status": "error",
+  "error": "Cannot delete active recording session",
+  "code": 400
+}
+```
+
+#### Delete Single MP4 Segment
+**Endpoint:** `DELETE /{camera_path}/control/recordings/mp4/segments/{filename}`
+
+Deletes a specific MP4 segment by filename.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "filename": "cam1_20240819_140000.mp4",
+    "size_bytes": 5242880
+  }
+}
+```
+
+#### Bulk Delete MP4 Segments
+**Endpoint:** `DELETE /{camera_path}/control/recordings/mp4/segments`
+
+Deletes multiple MP4 segments in a single operation.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+- `Content-Type: application/json`
+
+**Request Body:**
+```json
+{
+  "filenames": [
+    "cam1_20240819_140000.mp4",
+    "cam1_20240819_140500.mp4",
+    "cam1_20240819_141000.mp4"
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "deleted_count": 3,
+    "failed": [],
+    "total_size_bytes": 15728640
+  }
+}
+```
+
+#### Delete HLS Segments by Session
+**Endpoint:** `DELETE /{camera_path}/control/recordings/hls/sessions/{session_id}`
+
+Deletes all HLS segments for a specific recording session.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "session_id": 123,
+    "segments_deleted": 150
+  }
+}
+```
+
+#### Delete HLS Segments by Time Range
+**Endpoint:** `DELETE /{camera_path}/control/recordings/hls/timerange`
+
+Deletes all HLS segments within a specific time range.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Query Parameters:**
+- `from` (required): Start time in ISO 8601 format
+- `to` (required): End time in ISO 8601 format
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "segments_deleted": 600,
+    "from": "2025-08-15T10:00:00.000Z",
+    "to": "2025-08-15T11:00:00.000Z"
+  }
+}
+```
+
+**Example:**
+```bash
+DELETE /cam1/control/recordings/hls/timerange?from=2025-08-15T10:00:00.000Z&to=2025-08-15T11:00:00.000Z
+Authorization: Bearer your-camera-token
+```
 
 #### Get Recording Database Size
 **Endpoint:** `GET /{camera_path}/control/recording/size`

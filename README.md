@@ -1186,6 +1186,8 @@ GET /<camera_path>/control/recordings/<session_id>/frames?from=2025-08-15T10:00:
 GET /<camera_path>/control/recording/active
 ```
 
+For complete API documentation including DELETE endpoints, see [README_API.md](README_API.md).
+
 #### Response Format
 
 All REST API responses follow this format:
