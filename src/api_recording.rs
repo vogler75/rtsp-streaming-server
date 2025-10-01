@@ -96,7 +96,7 @@ impl<T> ApiResponse<T> {
     }
 }
 
-fn check_api_auth(headers: &axum::http::HeaderMap, camera_config: &config::CameraConfig) -> std::result::Result<(), axum::response::Response> {
+pub fn check_api_auth(headers: &axum::http::HeaderMap, camera_config: &config::CameraConfig) -> std::result::Result<(), axum::response::Response> {
     if let Some(expected_token) = &camera_config.token {
         if let Some(auth_header) = headers.get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
@@ -476,7 +476,10 @@ pub async fn api_serve_hls_timerange(
             cors_allow_origin: None,
             admin_token: None,
             cameras_directory: None,
+            mp4_export_path: "exports".to_string(),
+            mp4_export_max_jobs: 100,
         }),
+        export_manager: None,
     };
 
     // Call the existing HLS playlist function
@@ -527,7 +530,10 @@ pub async fn api_serve_hls_segment(
             cors_allow_origin: None,
             admin_token: None,
             cameras_directory: None,
+            mp4_export_path: "exports".to_string(),
+            mp4_export_max_jobs: 100,
         }),
+        export_manager: None,
     };
 
     // Call the existing HLS segment function

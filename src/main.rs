@@ -32,6 +32,8 @@ mod pre_recording_buffer;
 mod throughput_tracker;
 mod ptz;
 mod api_ptz;
+mod export_jobs;
+mod api_export;
 
 use config::Config;
 use errors::{Result, StreamError};
@@ -174,6 +176,7 @@ pub struct AppState {
     pub cameras_directory: String,
     start_time: std::time::Instant,
     pub server_config: Arc<config::ServerConfig>, // Store full server config for API access
+    pub export_manager: Option<Arc<export_jobs::ExportJobManager>>,
 }
 
 // CreateCameraRequest moved to api::admin
@@ -423,6 +426,18 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize ExportJobManager if recording is enabled
+    let export_manager = if recording_manager.is_some() {
+        info!("Initializing export job manager");
+        let manager = export_jobs::ExportJobManager::new(
+            config.server.mp4_export_path.clone(),
+            config.server.mp4_export_max_jobs,
+        );
+        Some(Arc::new(manager))
+    } else {
+        None
+    };
+
     // Initialize throughput tracker if MQTT is enabled (always publish to MQTT) or --throughput flag is set (database logging)
     let throughput_tracker: Option<Arc<throughput_tracker::ThroughputTracker>> = 
         if mqtt_handle.is_some() || args.throughput {
@@ -621,6 +636,7 @@ async fn main() -> Result<()> {
         cameras_directory: config.server.cameras_directory.clone().unwrap_or_else(|| "cameras".to_string()),
         start_time: std::time::Instant::now(),
         server_config: Arc::new(config.server.clone()),
+        export_manager: export_manager.clone(),
     };
 
     // Build router with camera paths
@@ -926,6 +942,65 @@ async fn main() -> Result<()> {
                     delete_hls_timerange_info.recording_manager.clone().unwrap()
                 )
             ));
+
+            // Export endpoints (only if export_manager is available)
+            if let Some(ref export_mgr) = export_manager {
+                // Start export job
+                let export_start_path = format!("{}/control/recordings/mp4/export", path);
+                let export_start_info = api_info.clone();
+                let export_start_mgr = export_mgr.clone();
+                app = app.route(&export_start_path, axum::routing::post(
+                    move |headers, query| api_export::api_export_start(
+                        headers,
+                        query,
+                        export_start_info.camera_id.clone(),
+                        export_start_info.camera_config.clone(),
+                        export_start_mgr.clone()
+                    )
+                ));
+
+                // List export jobs
+                let export_list_path = format!("{}/control/recordings/mp4/export/jobs", path);
+                let export_list_info = api_info.clone();
+                let export_list_mgr = export_mgr.clone();
+                app = app.route(&export_list_path, axum::routing::get(
+                    move |headers, query| api_export::api_export_list_jobs(
+                        headers,
+                        query,
+                        export_list_info.camera_id.clone(),
+                        export_list_info.camera_config.clone(),
+                        export_list_mgr.clone()
+                    )
+                ));
+
+                // Get export job status
+                let export_get_path = format!("{}/control/recordings/mp4/export/jobs/:job_id", path);
+                let export_get_info = api_info.clone();
+                let export_get_mgr = export_mgr.clone();
+                app = app.route(&export_get_path, axum::routing::get(
+                    move |headers, path_param| api_export::api_export_get_job(
+                        headers,
+                        path_param,
+                        export_get_info.camera_id.clone(),
+                        export_get_info.camera_config.clone(),
+                        export_get_mgr.clone()
+                    )
+                ));
+
+                // Download exported file
+                let export_download_path = format!("{}/control/recordings/mp4/export/download/:job_id", path);
+                let export_download_info = api_info.clone();
+                let export_download_mgr = export_mgr.clone();
+                app = app.route(&export_download_path, axum::routing::get(
+                    move |headers, path_param| api_export::api_export_download(
+                        headers,
+                        path_param,
+                        export_download_info.camera_id.clone(),
+                        export_download_info.camera_config.clone(),
+                        export_download_mgr.clone()
+                    )
+                ));
+            }
         }
 
         // PTZ control endpoints (handlers will validate if enabled in camera config)
@@ -1208,6 +1283,52 @@ async fn main() -> Result<()> {
     // Start camera configuration file watcher
     if let Err(e) = watcher::start_camera_config_watcher(app_state.clone()).await {
         error!("Failed to start camera configuration watcher: {}", e);
+    }
+
+    // Start export job processor background worker
+    if let (Some(export_mgr), Some(rec_mgr), Some(rec_config)) = (&export_manager, &recording_manager, &config.recording) {
+        info!("Starting export job processor background worker");
+        let export_mgr_clone = export_mgr.clone();
+        let rec_mgr_clone = rec_mgr.clone();
+        let recording_base_path = rec_config.database_path.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+
+            loop {
+                interval.tick().await;
+
+                // Get all camera IDs from recording manager
+                let camera_ids = rec_mgr_clone.get_all_camera_ids().await;
+
+                for camera_id in camera_ids {
+                    // Check if there's already a running job for this camera
+                    if export_mgr_clone.has_running_job(&camera_id).await {
+                        continue; // Skip if already processing
+                    }
+
+                    // Get next queued job for this camera
+                    if let Some(job) = export_mgr_clone.get_next_queued_job(&camera_id).await {
+                        info!("[{}] Processing export job {}", camera_id, job.job_id);
+
+                        // Get database for this camera
+                        if let Some(database) = rec_mgr_clone.get_camera_database(&camera_id).await {
+                            if let Err(e) = export_mgr_clone
+                                .process_job(&job.job_id, database, &recording_base_path)
+                                .await
+                            {
+                                error!("[{}] Failed to process export job {}: {}", camera_id, job.job_id, e);
+                            }
+                        } else {
+                            error!("[{}] No database found for camera, cannot process export job {}", camera_id, job.job_id);
+                        }
+                    }
+                }
+
+                // Periodic cleanup of old jobs
+                export_mgr_clone.cleanup_old_jobs().await;
+            }
+        });
     }
 
     let addr = format!("{}:{}", config.server.host, config.server.port);

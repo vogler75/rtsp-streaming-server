@@ -55,6 +55,12 @@ pub enum StreamError {
         #[from]
         source: sqlx::Error,
     },
+
+    #[error("Not found: {message}")]
+    NotFound { message: String },
+
+    #[error("Internal error: {message}")]
+    Internal { message: String },
 }
 
 impl StreamError {
@@ -84,6 +90,14 @@ impl StreamError {
         // Create a custom sqlx error for the message
         let custom_error = sqlx::Error::Configuration(message.into().into());
         Self::Database { source: custom_error }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::NotFound { message: message.into() }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal { message: message.into() }
     }
 }
 

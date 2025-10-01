@@ -140,6 +140,8 @@ pub struct PtzConfig {
 }
 
 fn default_ptz_protocol() -> String { "onvif".to_string() }
+fn default_mp4_export_path() -> String { "exports".to_string() }
+fn default_mp4_export_max_jobs() -> usize { 100 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FfmpegConfig {
@@ -186,6 +188,10 @@ pub struct ServerConfig {
     pub cors_allow_origin: Option<String>,
     pub admin_token: Option<String>,  // Optional token for admin operations
     pub cameras_directory: Option<String>,  // Directory path for camera configuration files (default: "cameras")
+    #[serde(default = "default_mp4_export_path")]
+    pub mp4_export_path: String,  // Directory path for exported MP4 files (default: "exports")
+    #[serde(default = "default_mp4_export_max_jobs")]
+    pub mp4_export_max_jobs: usize,  // Maximum number of export jobs to keep in memory (default: 100)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -372,6 +378,8 @@ impl Default for Config {
                 cors_allow_origin: Some("*".to_string()),
                 admin_token: None,
                 cameras_directory: None,  // Default: "cameras"
+                mp4_export_path: "exports".to_string(),
+                mp4_export_max_jobs: 100,
             },
             cameras,
             transcoding: TranscodingConfig {

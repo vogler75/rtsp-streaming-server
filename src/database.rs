@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, PgPool, Row, FromRow};
 use tracing::{error, info, debug};
 use std::sync::Arc;
-use crate::errors::Result;
+use crate::errors::{Result, StreamError};
 
 // Table name constants for easy configuration
 const TABLE_RECORDING_SESSIONS: &str = "recording_sessions";
@@ -312,7 +312,11 @@ pub trait DatabaseProvider: Send + Sync {
     async fn delete_mp4_segments_bulk(&self, camera_id: &str, filenames: Vec<String>) -> Result<BulkDeleteResult>;
     async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64>;
     async fn delete_hls_segments_by_timerange(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<u64>;
-    
+
+    // Export methods
+    async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>>;
+    async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()>;
+
     // Throughput tracking methods
     async fn record_throughput_stats(
         &self,
@@ -2422,6 +2426,57 @@ impl DatabaseProvider for SqliteDatabase {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>> {
+        let query = format!(
+            r#"
+            SELECT id, start_time, end_time, storage_path
+            FROM {}
+            WHERE camera_id = ? AND end_time >= ? AND start_time <= ?
+            ORDER BY start_time ASC
+            "#,
+            TABLE_RECORDING_MP4
+        );
+
+        let rows = sqlx::query(&query)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut segments = Vec::new();
+        for row in rows {
+            segments.push(crate::export_jobs::Mp4SegmentInfo {
+                id: row.get("id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                storage_path: row.get("storage_path"),
+            });
+        }
+
+        Ok(segments)
+    }
+
+    async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()> {
+        let query = format!(
+            "SELECT data FROM {} WHERE id = ?",
+            TABLE_RECORDING_MP4
+        );
+
+        let row = sqlx::query(&query)
+            .bind(segment_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| StreamError::not_found(format!("MP4 segment {} not found", segment_id)))?;
+
+        let data: Vec<u8> = row.get("data");
+
+        std::fs::write(output_path, data)
+            .map_err(|e| StreamError::internal(format!("Failed to write MP4 segment to file: {}", e)))?;
+
+        Ok(())
     }
 }
 
@@ -4627,6 +4682,57 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>> {
+        let query = format!(
+            r#"
+            SELECT id, start_time, end_time, storage_path
+            FROM {}
+            WHERE camera_id = $1 AND end_time >= $2 AND start_time <= $3
+            ORDER BY start_time ASC
+            "#,
+            TABLE_RECORDING_MP4
+        );
+
+        let rows = sqlx::query(&query)
+            .bind(camera_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut segments = Vec::new();
+        for row in rows {
+            segments.push(crate::export_jobs::Mp4SegmentInfo {
+                id: row.get("id"),
+                start_time: row.get("start_time"),
+                end_time: row.get("end_time"),
+                storage_path: row.get("storage_path"),
+            });
+        }
+
+        Ok(segments)
+    }
+
+    async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()> {
+        let query = format!(
+            "SELECT data FROM {} WHERE id = $1",
+            TABLE_RECORDING_MP4
+        );
+
+        let row = sqlx::query(&query)
+            .bind(segment_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| StreamError::not_found(format!("MP4 segment {} not found", segment_id)))?;
+
+        let data: Vec<u8> = row.get("data");
+
+        std::fs::write(output_path, data)
+            .map_err(|e| StreamError::internal(format!("Failed to write MP4 segment to file: {}", e)))?;
+
+        Ok(())
     }
 }
 

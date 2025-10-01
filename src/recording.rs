@@ -89,9 +89,15 @@ impl RecordingManager {
     }
 
     /// Get the database for a specific camera
-    async fn get_camera_database(&self, camera_id: &str) -> Option<Arc<dyn DatabaseProvider>> {
+    pub async fn get_camera_database(&self, camera_id: &str) -> Option<Arc<dyn DatabaseProvider>> {
         let databases = self.databases.read().await;
         databases.get(camera_id).cloned()
+    }
+
+    /// Get all camera IDs that have databases
+    pub async fn get_all_camera_ids(&self) -> Vec<String> {
+        let databases = self.databases.read().await;
+        databases.keys().cloned().collect()
     }
 
 

@@ -61,7 +61,12 @@ GET /cam1/control/recordings/hls/timerange?t1=2025-08-21T05:00:00Z&t2=2025-08-21
     │   │   ├── GET segments                  # List MP4 segments
     │   │   ├── GET segments/{filename}       # Stream single MP4
     │   │   ├── DELETE segments/{filename}    # Delete single MP4 segment
-    │   │   └── DELETE segments               # Bulk delete MP4 segments
+    │   │   ├── DELETE segments               # Bulk delete MP4 segments
+    │   │   └── export/
+    │   │       ├── POST /                    # Start export job
+    │   │       ├── GET jobs                  # List export jobs
+    │   │       ├── GET jobs/{job_id}         # Get export job status
+    │   │       └── GET download/{job_id}     # Download exported file
     │   └── hls/
     │       ├── GET timerange                 # Generate HLS playlist
     │       ├── GET segments/{playlist_id}/{segment_name} # Serve HLS segments
@@ -650,6 +655,170 @@ GET /cam1/control/recordings/mp4/segments?from=2025-08-21T00:00:00Z&to=2025-08-2
 # Search for alarm segments
 GET /cam1/control/recordings/mp4/segments?reason=%alarm%&sort_order=oldest
 ```
+
+### MP4 Export (Time Range Concatenation)
+
+The export API allows you to combine multiple MP4 segments from a time range into a single downloadable MP4 file. Export jobs are processed asynchronously and can be monitored via status endpoints.
+
+#### Start Export Job
+**Endpoint:** `POST {camera_path}/control/recordings/mp4/export`
+
+Creates a new export job that concatenates all MP4 segments within the specified time range into a single MP4 file.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Query Parameters:**
+- `from` (required): Start time in ISO 8601 format
+- `to` (required): End time in ISO 8601 format
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "Queued",
+    "output_filename": "cam1_2025-08-21T05-00-00Z_2025-08-21T06-00-00Z.mp4",
+    "from_time": "2025-08-21T05:00:00Z",
+    "to_time": "2025-08-21T06:00:00Z"
+  }
+}
+```
+
+**Examples:**
+```bash
+# Start export for 1-hour time range
+POST /cam1/control/recordings/mp4/export?from=2025-08-21T05:00:00Z&to=2025-08-21T06:00:00Z
+Authorization: Bearer your-camera-token
+```
+
+#### List Export Jobs
+**Endpoint:** `GET {camera_path}/control/recordings/mp4/export/jobs`
+
+Lists all export jobs for the camera with optional status filtering.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Query Parameters:**
+- `status` (optional): Filter by job status: `queued`, `running`, `completed`, or `failed`
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "jobs": [
+      {
+        "job_id": "550e8400-e29b-41d4-a716-446655440000",
+        "camera_id": "cam1",
+        "from_time": "2025-08-21T05:00:00Z",
+        "to_time": "2025-08-21T06:00:00Z",
+        "status": "Completed",
+        "created_at": "2025-08-21T07:00:00Z",
+        "started_at": "2025-08-21T07:00:02Z",
+        "completed_at": "2025-08-21T07:02:15Z",
+        "output_filename": "cam1_2025-08-21T05-00-00Z_2025-08-21T06-00-00Z.mp4",
+        "output_path": "exports/cam1_2025-08-21T05-00-00Z_2025-08-21T06-00-00Z.mp4",
+        "file_size_bytes": 52428800,
+        "progress_percent": 100,
+        "error_message": null
+      }
+    ],
+    "total_count": 1,
+    "camera_id": "cam1"
+  }
+}
+```
+
+**Examples:**
+```bash
+# Get all export jobs
+GET /cam1/control/recordings/mp4/export/jobs
+
+# Get only completed jobs
+GET /cam1/control/recordings/mp4/export/jobs?status=completed
+
+# Get failed jobs
+GET /cam1/control/recordings/mp4/export/jobs?status=failed
+```
+
+#### Get Export Job Status
+**Endpoint:** `GET {camera_path}/control/recordings/mp4/export/jobs/{job_id}`
+
+Retrieves detailed status information for a specific export job.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "job_id": "550e8400-e29b-41d4-a716-446655440000",
+    "camera_id": "cam1",
+    "from_time": "2025-08-21T05:00:00Z",
+    "to_time": "2025-08-21T06:00:00Z",
+    "status": "Running",
+    "created_at": "2025-08-21T07:00:00Z",
+    "started_at": "2025-08-21T07:00:02Z",
+    "completed_at": null,
+    "output_filename": "cam1_2025-08-21T05-00-00Z_2025-08-21T06-00-00Z.mp4",
+    "output_path": "exports/cam1_2025-08-21T05-00-00Z_2025-08-21T06-00-00Z.mp4",
+    "file_size_bytes": null,
+    "progress_percent": 45,
+    "error_message": null
+  }
+}
+```
+
+**Examples:**
+```bash
+# Get status of specific job
+GET /cam1/control/recordings/mp4/export/jobs/550e8400-e29b-41d4-a716-446655440000
+Authorization: Bearer your-camera-token
+```
+
+#### Download Exported File
+**Endpoint:** `GET {camera_path}/control/recordings/mp4/export/download/{job_id}`
+
+Downloads the exported MP4 file once the job is completed.
+
+**Headers:**
+- `Authorization: Bearer <camera_token>` (if camera has token configured)
+
+**Response:**
+- **Success (200)**: Binary MP4 file with headers:
+  - `Content-Type: video/mp4`
+  - `Content-Disposition: attachment; filename="<output_filename>"`
+  - `Content-Length: <file_size_bytes>`
+- **Bad Request (400)**: Job not completed yet
+- **Not Found (404)**: Job not found or doesn't belong to this camera
+- **Internal Server Error (500)**: Failed to read export file
+
+**Examples:**
+```bash
+# Download completed export
+GET /cam1/control/recordings/mp4/export/download/550e8400-e29b-41d4-a716-446655440000
+Authorization: Bearer your-camera-token
+```
+
+**Job Status Lifecycle:**
+1. **Queued**: Job created, waiting for processing
+2. **Running**: FFmpeg is actively concatenating segments (progress_percent updates)
+3. **Completed**: Export finished, file ready for download
+4. **Failed**: Export failed (check error_message for details)
+
+**Implementation Notes:**
+- Server maintains last 100 jobs in memory (configurable via `mp4_export_max_jobs`)
+- Only one export job per camera can run at a time
+- Uses FFmpeg concat demuxer with `-c copy` for fast, lossless concatenation
+- Supports both database-stored and filesystem-stored MP4 segments
+- Export files are saved to configurable directory (default: `exports/`)
+- Exported files persist after job cleanup (not automatically deleted)
+- Background worker processes jobs every 2 seconds
 
 ---
 
