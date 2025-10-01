@@ -1596,44 +1596,59 @@ impl DatabaseProvider for SqliteDatabase {
 
         // Cleanup frames with camera-specific or global retention
         if config.frame_storage_enabled {
-            if let Ok(duration) = humantime::parse_duration(&frame_retention) {
-                if duration.as_secs() > 0 {
-                    let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    tracing::info!("Starting frame cleanup (retention: {})", frame_retention);
-                    if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
-                        tracing::error!("Error deleting old frames: {}", e);
+            // Check if retention is explicitly disabled with "0"
+            if frame_retention != "0" {
+                if let Ok(duration) = humantime::parse_duration(&frame_retention) {
+                    if duration.as_secs() > 0 {
+                        let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
+                        tracing::info!("Starting frame cleanup (retention: {})", frame_retention);
+                        if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
+                            tracing::error!("Error deleting old frames: {}", e);
+                        }
                     }
                 }
+            } else {
+                tracing::debug!("Frame retention disabled (0) for camera {:?}", camera_id);
             }
         }
 
         // Cleanup video segments with camera-specific or global retention
         if mp4_storage_type != crate::config::Mp4StorageType::Disabled {
-            if let Ok(duration) = humantime::parse_duration(&video_retention) {
-                if duration.as_secs() > 0 {
-                    let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    tracing::info!("Starting video segment cleanup (retention: {})", video_retention);
-                    if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
-                        tracing::error!("Error deleting old video segments: {}", e);
+            // Check if retention is explicitly disabled with "0"
+            if video_retention != "0" {
+                if let Ok(duration) = humantime::parse_duration(&video_retention) {
+                    if duration.as_secs() > 0 {
+                        let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
+                        tracing::info!("Starting video segment cleanup (retention: {})", video_retention);
+                        if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
+                            tracing::error!("Error deleting old video segments: {}", e);
+                        }
                     }
                 }
+            } else {
+                tracing::debug!("MP4 retention disabled (0) for camera {:?}", camera_id);
             }
         }
 
         // Cleanup HLS segments with camera-specific or global retention
         if hls_enabled {
-            if let Ok(duration) = humantime::parse_duration(&hls_retention) {
-                if duration.as_secs() > 0 {
-                    tracing::info!("Starting HLS segment cleanup (retention: {})", hls_retention);
-                    match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
-                        Ok(deleted_count) => {
-                            tracing::info!("Deleted {} old HLS segments", deleted_count);
-                        }
+            // Check if retention is explicitly disabled with "0"
+            if hls_retention != "0" {
+                if let Ok(duration) = humantime::parse_duration(&hls_retention) {
+                    if duration.as_secs() > 0 {
+                        tracing::info!("Starting HLS segment cleanup (retention: {})", hls_retention);
+                        match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
+                            Ok(deleted_count) => {
+                                tracing::info!("Deleted {} old HLS segments", deleted_count);
+                            }
                         Err(e) => {
                             tracing::error!("Error deleting old HLS segments: {}", e);
                         }
                     }
                 }
+            }
+            } else {
+                tracing::debug!("HLS retention disabled (0) for camera {:?}", camera_id);
             }
         }
 
@@ -3554,44 +3569,59 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
         // Cleanup frames with camera-specific or global retention
         if config.frame_storage_enabled {
-            if let Ok(duration) = humantime::parse_duration(&frame_retention) {
-                if duration.as_secs() > 0 {
-                    let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    info!("Starting frame cleanup for database '{}' (retention: {})", self.database_name, frame_retention);
-                    if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
-                        tracing::error!("Error deleting old frames: {}", e);
+            // Check if retention is explicitly disabled with "0"
+            if frame_retention != "0" {
+                if let Ok(duration) = humantime::parse_duration(&frame_retention) {
+                    if duration.as_secs() > 0 {
+                        let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
+                        info!("Starting frame cleanup for database '{}' (retention: {})", self.database_name, frame_retention);
+                        if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
+                            tracing::error!("Error deleting old frames: {}", e);
+                        }
                     }
                 }
+            } else {
+                tracing::debug!("Frame retention disabled (0) for database '{}', camera {:?}", self.database_name, camera_id);
             }
         }
 
         // Cleanup video segments with camera-specific or global retention
         if mp4_storage_type != crate::config::Mp4StorageType::Disabled {
-            if let Ok(duration) = humantime::parse_duration(&video_retention) {
-                if duration.as_secs() > 0 {
-                    let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
-                    info!("Starting video segment cleanup for database '{}' (retention: {})", self.database_name, video_retention);
-                    if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
-                        tracing::error!("Error deleting old video segments: {}", e);
+            // Check if retention is explicitly disabled with "0"
+            if video_retention != "0" {
+                if let Ok(duration) = humantime::parse_duration(&video_retention) {
+                    if duration.as_secs() > 0 {
+                        let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
+                        info!("Starting video segment cleanup for database '{}' (retention: {})", self.database_name, video_retention);
+                        if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
+                            tracing::error!("Error deleting old video segments: {}", e);
+                        }
                     }
                 }
+            } else {
+                tracing::debug!("MP4 retention disabled (0) for database '{}', camera {:?}", self.database_name, camera_id);
             }
         }
 
         // Cleanup HLS segments with camera-specific or global retention
         if hls_enabled {
-            if let Ok(duration) = humantime::parse_duration(&hls_retention) {
-                if duration.as_secs() > 0 {
-                    info!("Starting HLS segment cleanup (retention: {})", hls_retention);
-                    match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
-                        Ok(deleted_count) => {
-                            info!("Deleted {} old HLS segments", deleted_count);
-                        }
-                        Err(e) => {
-                            tracing::error!("Error deleting old HLS segments: {}", e);
+            // Check if retention is explicitly disabled with "0"
+            if hls_retention != "0" {
+                if let Ok(duration) = humantime::parse_duration(&hls_retention) {
+                    if duration.as_secs() > 0 {
+                        info!("Starting HLS segment cleanup (retention: {})", hls_retention);
+                        match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
+                            Ok(deleted_count) => {
+                                info!("Deleted {} old HLS segments", deleted_count);
+                            }
+                            Err(e) => {
+                                tracing::error!("Error deleting old HLS segments: {}", e);
+                            }
                         }
                     }
                 }
+            } else {
+                tracing::debug!("HLS retention disabled (0) for database '{}', camera {:?}", self.database_name, camera_id);
             }
         }
 

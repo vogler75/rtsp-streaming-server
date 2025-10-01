@@ -702,7 +702,7 @@ document.getElementById('cameraForm').addEventListener('submit', async (e) => {
         if (videoStorageType !== '' && videoStorageType !== null) {
             config.recording.mp4_storage_type = videoStorageType;
         }
-        if (videoStorageRetention) {
+        if (videoStorageRetention !== '' && videoStorageRetention !== null) {
             config.recording.mp4_storage_retention = videoStorageRetention;
         }
         if (videoSegmentMinutes) {
