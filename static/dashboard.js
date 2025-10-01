@@ -362,7 +362,9 @@ function populateServerConfigForm(config) {
     document.getElementById('config_server_cors_allow_origin').value = config.server?.cors_allow_origin || '';
     document.getElementById('config_server_admin_token').value = config.server?.admin_token || '';
     document.getElementById('config_server_cameras_directory').value = config.server?.cameras_directory || '';
-    
+    document.getElementById('config_server_mp4_export_path').value = config.server?.mp4_export_path || '';
+    document.getElementById('config_server_mp4_export_max_jobs').value = config.server?.mp4_export_max_jobs || '';
+
     // TLS settings
     document.getElementById('config_server_tls_enabled').value = (config.server?.tls?.enabled || false).toString();
     document.getElementById('config_server_tls_cert_path').value = config.server?.tls?.cert_path || '';
@@ -422,6 +424,8 @@ function collectServerConfigFromForm() {
             cors_allow_origin: document.getElementById('config_server_cors_allow_origin').value || "*",
             admin_token: document.getElementById('config_server_admin_token').value || "",
             cameras_directory: document.getElementById('config_server_cameras_directory').value || null,
+            mp4_export_path: document.getElementById('config_server_mp4_export_path').value || "exports",
+            mp4_export_max_jobs: parseInt(document.getElementById('config_server_mp4_export_max_jobs').value) || 100,
             tls: {
                 enabled: document.getElementById('config_server_tls_enabled').value === 'true',
                 cert_path: document.getElementById('config_server_tls_cert_path').value || "certs/server.crt",

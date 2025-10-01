@@ -605,6 +605,16 @@
                                 <input type="text" id="config_server_cameras_directory" placeholder="cameras">
                                 <span class="help-text">Directory path for camera configuration files (default: "cameras")</span>
                             </div>
+                            <div class="form-group">
+                                <label>MP4 Export Path</label>
+                                <input type="text" id="config_server_mp4_export_path" placeholder="exports">
+                                <span class="help-text">Directory path for exported MP4 files (default: "exports")</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Export Max Jobs</label>
+                                <input type="number" id="config_server_mp4_export_max_jobs" placeholder="100" min="1" max="1000">
+                                <span class="help-text">Maximum number of export jobs to keep in memory (default: 100)</span>
+                            </div>
                         </div>
                     </div>
                 </div>
