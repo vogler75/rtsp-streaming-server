@@ -1,0 +1,15 @@
+Release v1.0.8
+Built from commit: 97bfab0
+Date: 2025-10-01 15:29:59
+
+Changes since v1.0.7:
+---
+97bfab0 Add MP4 export path and max jobs to server config
+5f4b2c0 Add MP4 export API and job management
+ff8cae4 Add bulk and individual delete actions for recordings and segments
+f065ca9 Add API endpoints for deleting recordings
+fef929e Add explicit '0' retention support for media cleanup
+a516217 Remove configurable MP4 framerate; use actual framerate
+f2cd80e Bump version to 1.0.7
+e455e9a Add dark theme CSS and apply to all HTML pages
+93c8eef Fix capture_framerate default and add config backups at startup
