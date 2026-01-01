@@ -580,7 +580,7 @@ impl RtspClient {
             .spawn()?;
 
         info!("[{}] 📡 FFmpeg process started, reading MJPEG stream from camera", self.camera_id);
-        
+
         // Handle stderr logging if enabled
         let log_mode = ffmpeg.and_then(|c| c.log_stderr.as_ref());
         if let Some(log_mode) = log_mode {
@@ -619,7 +619,7 @@ impl RtspClient {
         let data_timeout_duration = Duration::from_secs(data_timeout_secs);
         
         info!("[{}] FFmpeg data timeout configured for {} seconds", self.camera_id, data_timeout_secs);
-        
+
         // Read MJPEG frames from FFmpeg stdout with process monitoring
         loop {
             // Check for shutdown signal with a short timeout
@@ -637,7 +637,7 @@ impl RtspClient {
                     
                     // Kill the FFmpeg process
                     let _ = ffmpeg_cmd.kill().await;
-                    
+
                     return Err(StreamError::ffmpeg("FFmpeg data timeout - process will be restarted"));
                 }
                 
@@ -989,6 +989,6 @@ async fn log_ffmpeg_stderr(
         file.write_all(footer.as_bytes()).await?;
         file.flush().await?;
     }
-    
+
     Ok(())
 }
