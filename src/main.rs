@@ -1402,31 +1402,19 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
     let mut cert_reader = BufReader::new(cert_file);
     let mut key_reader = BufReader::new(key_file);
 
-    // Parse certificate and key
-    let certs = rustls_pemfile::certs(&mut cert_reader)
-        .map_err(|e| StreamError::server(format!("Failed to parse certificate: {}", e)))?
-        .into_iter()
-        .map(rustls::Certificate)
-        .collect();
-    
-    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
-        .map_err(|e| StreamError::server(format!("Failed to parse private key: {}", e)))?;
-    
-    if keys.is_empty() {
-        // Try RSA private keys if PKCS8 fails
-        let mut key_reader = BufReader::new(File::open(&tls_cfg.key_path)?);
-        keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
-            .map_err(|e| StreamError::server(format!("Failed to parse RSA private key: {}", e)))?;
-    }
-    
-    let private_key = keys.into_iter().next()
+    // Parse certificate and key (rustls 0.23 API)
+    let certs: Vec<_> = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| StreamError::server(format!("Failed to parse certificate: {}", e)))?;
+
+    let private_key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|e| StreamError::server(format!("Failed to parse private key: {}", e)))?
         .ok_or_else(|| StreamError::server("No private key found in key file"))?;
 
     // Create TLS configuration
     let rustls_config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(certs, rustls::PrivateKey(private_key))
+        .with_single_cert(certs, private_key)
         .map_err(|e| StreamError::server(format!("Failed to create TLS config: {}", e)))?;
 
     info!("HTTPS server listening on https://{}", addr);
@@ -1435,7 +1423,9 @@ async fn start_https_server(app: axum::Router, addr: &str, tls_cfg: &config::Tls
 
     // Start HTTPS server
     let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(rustls_config));
-    axum_server::bind_rustls(addr.parse()?, tls_config)
+    let socket_addr: std::net::SocketAddr = addr.parse()
+        .map_err(|e| StreamError::server(format!("Invalid address '{}': {}", addr, e)))?;
+    axum_server::bind_rustls(socket_addr, tls_config)
         .serve(app.into_make_service())
         .await
         .map_err(|e| StreamError::server(format!("HTTPS server error: {}", e)))?;
