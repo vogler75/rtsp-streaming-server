@@ -492,10 +492,27 @@ impl SqliteDatabase {
         if let Some(parent) = std::path::Path::new(database_path).parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
+        // Configure SQLite for better concurrency:
+        // - WAL mode: allows concurrent reads during writes
+        // - busy_timeout: wait up to 60 seconds for locks instead of failing immediately
+        // - synchronous=NORMAL: good balance of safety and performance with WAL
         let database_url = format!("sqlite://{}?mode=rwc", database_path);
         let pool = SqlitePool::connect(&database_url).await?;
-        
+
+        // Set pragmas for better concurrency
+        sqlx::query("PRAGMA journal_mode=WAL")
+            .execute(&pool)
+            .await?;
+        sqlx::query("PRAGMA busy_timeout=60000")
+            .execute(&pool)
+            .await?;
+        sqlx::query("PRAGMA synchronous=NORMAL")
+            .execute(&pool)
+            .await?;
+
+        info!("SQLite database configured with WAL mode and 60s busy timeout: {}", database_path);
+
         Ok(Self { pool })
     }
 }
