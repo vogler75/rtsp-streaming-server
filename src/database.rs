@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, PgPool, Row, FromRow};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous, SqlitePoolOptions};
 use tracing::{error, info, debug};
 use std::sync::Arc;
+use std::str::FromStr;
 use crate::errors::{Result, StreamError};
 
 // Table name constants for easy configuration
@@ -174,15 +176,17 @@ pub trait DatabaseProvider: Send + Sync {
     async fn add_recorded_frame(
         &self,
         session_id: i64,
+        camera_id: &str,
         timestamp: DateTime<Utc>,
         frame_number: i64,
         frame_data: &[u8],
     ) -> Result<i64>;
-    
+
     /// Bulk insert multiple recorded frames for better performance
     async fn add_recorded_frames_bulk(
         &self,
         session_id: i64,
+        camera_id: &str,
         frames: &[(DateTime<Utc>, i64, Vec<u8>)], // (timestamp, frame_number, frame_data)
     ) -> Result<u64>;
     
@@ -343,6 +347,10 @@ pub trait DatabaseProvider: Send + Sync {
 
 pub struct SqliteDatabase {
     pool: SqlitePool,
+    /// RwLock to coordinate between recording (read) and cleanup (write) operations.
+    /// Recording operations acquire read lock (can run concurrently).
+    /// Cleanup operations acquire write lock (exclusive access).
+    cleanup_lock: tokio::sync::RwLock<()>,
 }
 
 // SQLite-specific frame streaming implementation
@@ -493,33 +501,37 @@ impl SqliteDatabase {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Configure SQLite for better concurrency:
+        // Configure SQLite connection options for better concurrency:
         // - WAL mode: allows concurrent reads during writes
         // - busy_timeout: wait up to 60 seconds for locks instead of failing immediately
         // - synchronous=NORMAL: good balance of safety and performance with WAL
+        // These options are applied to EVERY connection in the pool
         let database_url = format!("sqlite://{}?mode=rwc", database_path);
-        let pool = SqlitePool::connect(&database_url).await?;
+        let connect_options = SqliteConnectOptions::from_str(&database_url)?
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(std::time::Duration::from_secs(60));
 
-        // Set pragmas for better concurrency
-        sqlx::query("PRAGMA journal_mode=WAL")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA busy_timeout=60000")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA synchronous=NORMAL")
-            .execute(&pool)
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(connect_options)
             .await?;
 
         info!("SQLite database configured with WAL mode and 60s busy timeout: {}", database_path);
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            cleanup_lock: tokio::sync::RwLock::new(()),
+        })
     }
 }
 
 #[async_trait]
 impl DatabaseProvider for SqliteDatabase {
     async fn initialize(&self) -> Result<()> {
+        let init_start = std::time::Instant::now();
+        info!("Starting SQLite database initialization...");
+
         let create_sessions_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
@@ -534,14 +546,18 @@ impl DatabaseProvider for SqliteDatabase {
             "#,
             TABLE_RECORDING_SESSIONS
         );
+        info!("Executing CREATE TABLE recording_sessions...");
+        let query_start = std::time::Instant::now();
         sqlx::query(&create_sessions_query)
             .execute(&self.pool)
             .await?;
+        info!("CREATE recording_sessions took {:?}", query_start.elapsed());
 
         let create_mjpeg_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
                 session_id INTEGER NOT NULL,
+                camera_id TEXT NOT NULL,
                 timestamp TIMESTAMP NOT NULL,
                 frame_data BLOB NOT NULL,
                 PRIMARY KEY (session_id, timestamp),
@@ -553,14 +569,16 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(&create_mjpeg_query)
             .execute(&self.pool)
             .await?;
+        info!("CREATE recording_mjpeg done, elapsed {:?}", init_start.elapsed());
 
-        let idx_timestamp = format!(
-            "CREATE INDEX IF NOT EXISTS idx_timestamp ON {}(timestamp)",
+        let idx_camera_timestamp = format!(
+            "CREATE INDEX IF NOT EXISTS idx_camera_timestamp ON {}(camera_id, timestamp)",
             TABLE_RECORDING_MJPEG
         );
-        sqlx::query(&idx_timestamp)
+        sqlx::query(&idx_camera_timestamp)
             .execute(&self.pool)
             .await?;
+        info!("CREATE idx_camera_timestamp done, elapsed {:?}", init_start.elapsed());
 
         let create_mp4_query = format!(
             r#"
@@ -588,7 +606,7 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(&idx_segment_time)
             .execute(&self.pool)
             .await?;
-        
+
         // Add index on session_id for the JOIN operation
         let idx_segment_session = format!(
             "CREATE INDEX IF NOT EXISTS idx_segment_session ON {}(session_id)",
@@ -597,6 +615,7 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(&idx_segment_session)
             .execute(&self.pool)
             .await?;
+        info!("MP4 table and indexes done, elapsed {:?}", init_start.elapsed());
 
         // Add indexes on recording_sessions for common query patterns
         let idx_camera_start_time = format!(
@@ -606,6 +625,7 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(&idx_camera_start_time)
             .execute(&self.pool)
             .await?;
+        info!("Sessions index done, elapsed {:?}", init_start.elapsed());
 
         // Create HLS playlists table
         let create_hls_playlists_query = format!(
@@ -668,6 +688,7 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(&create_recording_hls_query)
             .execute(&self.pool)
             .await?;
+        info!("HLS tables done, elapsed {:?}", init_start.elapsed());
 
         // Add indexes for HLS tables
         let idx_hls_playlists_camera = format!(
@@ -738,6 +759,7 @@ impl DatabaseProvider for SqliteDatabase {
             .execute(&self.pool)
             .await?;
 
+        info!("SQLite database initialization completed in {:?}", init_start.elapsed());
         Ok(())
     }
 
@@ -807,19 +829,24 @@ impl DatabaseProvider for SqliteDatabase {
     async fn add_recorded_frame(
         &self,
         session_id: i64,
+        camera_id: &str,
         timestamp: DateTime<Utc>,
         _frame_number: i64,
         frame_data: &[u8],
     ) -> Result<i64> {
+        // Acquire read lock - allows concurrent frame writes but blocks during cleanup
+        let _lock = self.cleanup_lock.read().await;
+
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, timestamp, frame_data)
-            VALUES (?, ?, ?)
+            INSERT INTO {} (session_id, camera_id, timestamp, frame_data)
+            VALUES (?, ?, ?, ?)
             "#,
             TABLE_RECORDING_MJPEG
         );
         let result = sqlx::query(&query)
         .bind(session_id)
+        .bind(camera_id)
         .bind(timestamp)
         .bind(frame_data)
         .execute(&self.pool)
@@ -827,38 +854,43 @@ impl DatabaseProvider for SqliteDatabase {
 
         Ok(result.rows_affected() as i64)
     }
-    
+
     async fn add_recorded_frames_bulk(
         &self,
         session_id: i64,
+        camera_id: &str,
         frames: &[(DateTime<Utc>, i64, Vec<u8>)],
     ) -> Result<u64> {
         if frames.is_empty() {
             return Ok(0);
         }
-        
-        debug!("SQLite bulk insert: inserting {} frames for session {}", frames.len(), session_id);
+
+        // Acquire read lock - allows concurrent frame writes but blocks during cleanup
+        let _lock = self.cleanup_lock.read().await;
+
+        debug!("SQLite bulk insert: inserting {} frames for session {} camera {}", frames.len(), session_id, camera_id);
         let start_time = std::time::Instant::now();
-        
+
         // Build bulk insert query with placeholders
         let placeholders = frames.iter()
-            .map(|_| "(?, ?, ?)")
+            .map(|_| "(?, ?, ?, ?)")
             .collect::<Vec<_>>()
             .join(", ");
-        
+
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, timestamp, frame_data)
+            INSERT INTO {} (session_id, camera_id, timestamp, frame_data)
             VALUES {}
             "#,
             TABLE_RECORDING_MJPEG, placeholders
         );
-        
+
         // Create query builder and bind all parameters
         let mut query_builder = sqlx::query(&query);
         for frame in frames {
             query_builder = query_builder
                 .bind(session_id)
+                .bind(camera_id)
                 .bind(frame.0)
                 .bind(&frame.2);
         }
@@ -1073,64 +1105,134 @@ impl DatabaseProvider for SqliteDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
-        
-        // Delete old frames based on their timestamp, but only for sessions that aren't marked to keep
-        let frames_result = if let Some(cam_id) = camera_id {
-            // Delete frames for a specific camera
+        const BATCH_SIZE: i64 = 10_000;
+
+        let cam_id = camera_id.unwrap_or("unknown");
+
+        tracing::info!(
+            "Counting frames to delete (older than {}) for camera '{}'...",
+            older_than.format("%Y-%m-%d %H:%M:%S UTC"),
+            cam_id
+        );
+
+        // Fetch KEPT session IDs (usually 0 or very few)
+        let kept_session_ids: Vec<i64> = {
             let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE timestamp < ? 
-                AND session_id IN (
-                    SELECT id FROM {} WHERE camera_id = ? AND keep_session = 0
-                )
-                "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+                "SELECT id FROM {} WHERE camera_id = ? AND keep_session = 1",
+                TABLE_RECORDING_SESSIONS
             );
-            sqlx::query(&query)
-            .bind(older_than)
-            .bind(cam_id)
-            .execute(&self.pool).await?
-        } else {
-            // Delete frames for all cameras, but only for sessions not marked to keep
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE timestamp < ? 
-                AND session_id IN (
-                    SELECT id FROM {} WHERE keep_session = 0
-                )
-                "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
-            );
-            sqlx::query(&query)
-                .bind(older_than)
-                .execute(&self.pool).await?
+            sqlx::query_scalar(&query)
+                .bind(cam_id)
+                .fetch_all(&self.pool).await?
         };
-        let deleted_frames = frames_result.rows_affected();
-        
-        let elapsed = start_time.elapsed();
-        
-        if deleted_frames > 0 {
-            tracing::info!(
-                "Deleted {} frames in {:.3}ms{}",
-                deleted_frames,
-                elapsed.as_secs_f64() * 1000.0,
-                if let Some(cam_id) = camera_id {
-                    format!(" for camera '{}'", cam_id)
-                } else {
-                    String::new()
-                }
-            );
+
+        // Build NOT IN clause only if there are kept sessions
+        let kept_clause = if kept_session_ids.is_empty() {
+            String::new()
         } else {
-            tracing::info!(
-                "No frames to delete (query took {:.3}ms)",
-                elapsed.as_secs_f64() * 1000.0
+            let kept_list = kept_session_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("AND session_id NOT IN ({})", kept_list)
+        };
+
+        // Count frames to delete using camera_id index
+        let count_start = std::time::Instant::now();
+        let count_query = {
+            let query = format!(
+                "SELECT COUNT(*) FROM {} WHERE camera_id = ? AND timestamp < ? {}",
+                TABLE_RECORDING_MJPEG, kept_clause
             );
+            sqlx::query_scalar::<_, i64>(&query)
+                .bind(cam_id)
+                .bind(older_than)
+                .fetch_one(&self.pool).await?
+        };
+        let count_elapsed = count_start.elapsed();
+
+        if count_query == 0 {
+            tracing::info!(
+                "No frames to delete for camera '{}' (count query took {:.1}s)",
+                cam_id,
+                count_elapsed.as_secs_f64()
+            );
+            return Ok(0);
         }
-        
-        // Return number of frames deleted
-        Ok(deleted_frames as usize)
+
+        tracing::info!(
+            "Found {} frames to delete for camera '{}' (count took {:.1}s), {} kept sessions excluded, deleting in batches of {}...",
+            count_query,
+            cam_id,
+            count_elapsed.as_secs_f64(),
+            kept_session_ids.len(),
+            BATCH_SIZE
+        );
+
+        // Delete in batches using camera_id + timestamp index
+        let mut total_deleted: u64 = 0;
+        let mut batch_num = 0;
+
+        loop {
+            batch_num += 1;
+            tracing::info!("Starting batch {} delete...", batch_num);
+            let batch_start = std::time::Instant::now();
+
+            // DELETE using camera_id and timestamp - uses idx_camera_timestamp index
+            let query = format!(
+                r#"
+                DELETE FROM {}
+                WHERE rowid IN (
+                    SELECT rowid FROM {}
+                    WHERE camera_id = ? AND timestamp < ?
+                    {}
+                    LIMIT ?
+                )
+                "#,
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_MJPEG, kept_clause
+            );
+            let deleted = sqlx::query(&query)
+                .bind(cam_id)
+                .bind(older_than)
+                .bind(BATCH_SIZE)
+                .execute(&self.pool).await?
+                .rows_affected();
+
+            total_deleted += deleted;
+            let batch_elapsed = batch_start.elapsed();
+
+            tracing::info!(
+                "Batch {}: deleted {} frames in {:.1}s (total: {}/{})",
+                batch_num,
+                deleted,
+                batch_elapsed.as_secs_f64(),
+                total_deleted,
+                count_query
+            );
+
+            if deleted == 0 || deleted < BATCH_SIZE as u64 {
+                break;
+            }
+
+            // Small yield to allow other tasks to run
+            tokio::task::yield_now().await;
+        }
+
+        let elapsed = start_time.elapsed();
+
+        tracing::info!(
+            "Completed frame cleanup: {} frames deleted in {:.1}s{}",
+            total_deleted,
+            elapsed.as_secs_f64(),
+            if let Some(cam_id) = camera_id {
+                format!(" for camera '{}'", cam_id)
+            } else {
+                String::new()
+            }
+        );
+
+        Ok(total_deleted as usize)
     }
     
     async fn delete_unused_sessions(
@@ -1305,6 +1407,9 @@ impl DatabaseProvider for SqliteDatabase {
     }
 
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
+        // Acquire read lock - allows concurrent writes but blocks during cleanup
+        let _lock = self.cleanup_lock.read().await;
+
         let query = format!(
             r#"
             INSERT INTO {} (session_id, start_time, end_time, file_path, size_bytes, mp4_data)
@@ -1591,6 +1696,10 @@ impl DatabaseProvider for SqliteDatabase {
         config: &crate::config::RecordingConfig,
         camera_configs: &std::collections::HashMap<String, crate::config::CameraConfig>,
     ) -> Result<()> {
+        // Acquire write lock - blocks all frame writes during cleanup to prevent "database is locked" errors
+        let _lock = self.cleanup_lock.write().await;
+        tracing::debug!("Acquired cleanup write lock for SQLite database");
+
         // Extract camera_id from the database path if this is a per-camera database
         // The path format is typically "recordings/{camera_id}.db"
         let camera_id = if let Ok(mut connection) = self.pool.acquire().await {
@@ -2760,6 +2869,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             r#"
             CREATE TABLE IF NOT EXISTS {} (
                 session_id BIGINT NOT NULL,
+                camera_id TEXT NOT NULL,
                 timestamp TIMESTAMPTZ NOT NULL,
                 frame_data BYTEA NOT NULL,
                 PRIMARY KEY (session_id, timestamp),
@@ -2772,11 +2882,11 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .execute(&self.pool)
             .await?;
 
-        let idx_timestamp = format!(
-            "CREATE INDEX IF NOT EXISTS idx_timestamp ON {}(timestamp)",
+        let idx_camera_timestamp = format!(
+            "CREATE INDEX IF NOT EXISTS idx_camera_timestamp ON {}(camera_id, timestamp)",
             TABLE_RECORDING_MJPEG
         );
-        sqlx::query(&idx_timestamp)
+        sqlx::query(&idx_camera_timestamp)
             .execute(&self.pool)
             .await?;
 
@@ -3026,19 +3136,21 @@ impl DatabaseProvider for PostgreSqlDatabase {
     async fn add_recorded_frame(
         &self,
         session_id: i64,
+        camera_id: &str,
         timestamp: DateTime<Utc>,
         _frame_number: i64,
         frame_data: &[u8],
     ) -> Result<i64> {
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, timestamp, frame_data)
-            VALUES ($1, $2, $3)
+            INSERT INTO {} (session_id, camera_id, timestamp, frame_data)
+            VALUES ($1, $2, $3, $4)
             "#,
             TABLE_RECORDING_MJPEG
         );
         let result = sqlx::query(&query)
         .bind(session_id)
+        .bind(camera_id)
         .bind(timestamp)
         .bind(frame_data)
         .execute(&self.pool)
@@ -3046,34 +3158,36 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
         Ok(result.rows_affected() as i64)
     }
-    
+
     async fn add_recorded_frames_bulk(
         &self,
         session_id: i64,
+        camera_id: &str,
         frames: &[(DateTime<Utc>, i64, Vec<u8>)],
     ) -> Result<u64> {
         if frames.is_empty() {
             return Ok(0);
         }
-        
-        debug!("PostgreSQL bulk insert: inserting {} frames for session {}", frames.len(), session_id);
+
+        debug!("PostgreSQL bulk insert: inserting {} frames for session {} camera {}", frames.len(), session_id, camera_id);
         let start_time = std::time::Instant::now();
-        
+
         // PostgreSQL supports UNNEST for efficient bulk inserts
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, timestamp, frame_data)
-            SELECT $1, * FROM UNNEST($2::timestamptz[], $3::bytea[])
+            INSERT INTO {} (session_id, camera_id, timestamp, frame_data)
+            SELECT $1, $2, * FROM UNNEST($3::timestamptz[], $4::bytea[])
             "#,
             TABLE_RECORDING_MJPEG
         );
-        
+
         // Collect timestamps and frame data into arrays
         let timestamps: Vec<DateTime<Utc>> = frames.iter().map(|(ts, _, _)| *ts).collect();
         let frame_data: Vec<Vec<u8>> = frames.iter().map(|(_, _, data)| data.clone()).collect();
-        
+
         let result = sqlx::query(&query)
             .bind(session_id)
+            .bind(camera_id)
             .bind(timestamps)
             .bind(frame_data)
             .execute(&self.pool)
@@ -3299,66 +3413,150 @@ impl DatabaseProvider for PostgreSqlDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
-        
-        // Delete old frames based on their timestamp, but only for sessions that aren't marked to keep
-        let frames_result = if let Some(cam_id) = camera_id {
-            // Delete frames for a specific camera
+        const BATCH_SIZE: i64 = 10_000;
+
+        let cam_id = camera_id.unwrap_or("unknown");
+
+        info!(
+            "Counting frames to delete (older than {}) for camera '{}'...",
+            older_than.format("%Y-%m-%d %H:%M:%S UTC"),
+            cam_id
+        );
+
+        // Fetch KEPT session IDs (usually 0 or very few)
+        let kept_session_ids: Vec<i64> = {
             let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE timestamp < $1 
-                AND session_id IN (
-                    SELECT id FROM {} WHERE camera_id = $2 AND keep_session = false
-                )
-                "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+                "SELECT id FROM {} WHERE camera_id = $1 AND keep_session = true",
+                TABLE_RECORDING_SESSIONS
             );
-            sqlx::query(&query)
-            .bind(older_than)
-            .bind(cam_id)
-            .execute(&self.pool).await?
-        } else {
-            // Delete frames for all cameras, but only for sessions not marked to keep
-            let query = format!(
-                r#"
-                DELETE FROM {} 
-                WHERE timestamp < $1 
-                AND session_id IN (
-                    SELECT id FROM {} WHERE keep_session = false
-                )
-                "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
-            );
-            sqlx::query(&query)
-                .bind(older_than)
-                .execute(&self.pool).await?
+            sqlx::query_scalar(&query)
+                .bind(cam_id)
+                .fetch_all(&self.pool).await?
         };
-        let deleted_frames = frames_result.rows_affected();
-        
-        let elapsed = start_time.elapsed();
-        
-        if deleted_frames > 0 {
-            info!(
-                "Deleted {} frames in {:.3}ms{}",
-                deleted_frames,
-                elapsed.as_secs_f64() * 1000.0,
-                if let Some(cam_id) = camera_id {
-                    format!(" for camera '{}'", cam_id)
-                } else {
-                    String::new()
-                }
+
+        // Count frames to delete using camera_id index
+        let count_start = std::time::Instant::now();
+        let count_query = if kept_session_ids.is_empty() {
+            let query = format!(
+                "SELECT COUNT(*) FROM {} WHERE camera_id = $1 AND timestamp < $2",
+                TABLE_RECORDING_MJPEG
             );
+            sqlx::query_scalar::<_, i64>(&query)
+                .bind(cam_id)
+                .bind(older_than)
+                .fetch_one(&self.pool).await?
         } else {
-            info!(
-                "No frames to delete (query took {:.3}ms)",
-                elapsed.as_secs_f64() * 1000.0
+            let query = format!(
+                "SELECT COUNT(*) FROM {} WHERE camera_id = $1 AND timestamp < $2 AND session_id != ALL($3)",
+                TABLE_RECORDING_MJPEG
             );
+            sqlx::query_scalar::<_, i64>(&query)
+                .bind(cam_id)
+                .bind(older_than)
+                .bind(&kept_session_ids)
+                .fetch_one(&self.pool).await?
+        };
+        let count_elapsed = count_start.elapsed();
+
+        if count_query == 0 {
+            info!(
+                "No frames to delete for camera '{}' (count query took {:.1}s)",
+                cam_id,
+                count_elapsed.as_secs_f64()
+            );
+            return Ok(0);
         }
-        
-        // Return number of frames deleted
-        Ok(deleted_frames as usize)
+
+        info!(
+            "Found {} frames to delete for camera '{}' (count took {:.1}s), {} kept sessions excluded, deleting in batches of {}...",
+            count_query,
+            cam_id,
+            count_elapsed.as_secs_f64(),
+            kept_session_ids.len(),
+            BATCH_SIZE
+        );
+
+        // Delete in batches using camera_id + timestamp index
+        let mut total_deleted: u64 = 0;
+        let mut batch_num = 0;
+
+        loop {
+            batch_num += 1;
+            info!("Starting batch {} delete...", batch_num);
+            let batch_start = std::time::Instant::now();
+
+            // DELETE using camera_id and timestamp - uses idx_camera_timestamp index
+            let deleted = if kept_session_ids.is_empty() {
+                let query = format!(
+                    r#"
+                    DELETE FROM {}
+                    WHERE ctid IN (
+                        SELECT ctid FROM {}
+                        WHERE camera_id = $1 AND timestamp < $2
+                        LIMIT $3
+                    )
+                    "#,
+                    TABLE_RECORDING_MJPEG, TABLE_RECORDING_MJPEG
+                );
+                sqlx::query(&query)
+                    .bind(cam_id)
+                    .bind(older_than)
+                    .bind(BATCH_SIZE)
+                    .execute(&self.pool).await?
+                    .rows_affected()
+            } else {
+                let query = format!(
+                    r#"
+                    DELETE FROM {}
+                    WHERE ctid IN (
+                        SELECT ctid FROM {}
+                        WHERE camera_id = $1 AND timestamp < $2 AND session_id != ALL($3)
+                        LIMIT $4
+                    )
+                    "#,
+                    TABLE_RECORDING_MJPEG, TABLE_RECORDING_MJPEG
+                );
+                sqlx::query(&query)
+                    .bind(cam_id)
+                    .bind(older_than)
+                    .bind(&kept_session_ids)
+                    .bind(BATCH_SIZE)
+                    .execute(&self.pool).await?
+                    .rows_affected()
+            };
+
+            total_deleted += deleted;
+            let batch_elapsed = batch_start.elapsed();
+
+            info!(
+                "Batch {}: deleted {} frames in {:.1}s (total: {}/{})",
+                batch_num,
+                deleted,
+                batch_elapsed.as_secs_f64(),
+                total_deleted,
+                count_query
+            );
+
+            if deleted == 0 || deleted < BATCH_SIZE as u64 {
+                break;
+            }
+
+            // Small yield to allow other tasks to run
+            tokio::task::yield_now().await;
+        }
+
+        let elapsed = start_time.elapsed();
+
+        info!(
+            "Completed frame cleanup: {} frames deleted in {:.1}s for camera '{}'",
+            total_deleted,
+            elapsed.as_secs_f64(),
+            cam_id
+        );
+
+        Ok(total_deleted as usize)
     }
-    
+
     async fn delete_unused_sessions(
         &self,
         camera_id: Option<&str>,

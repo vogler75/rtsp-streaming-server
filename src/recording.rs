@@ -153,7 +153,7 @@ impl RecordingManager {
                     .map(|(index, frame)| (frame.timestamp, (index + 1) as i64, frame.data.to_vec()))
                     .collect();
                 
-                match database.add_recorded_frames_bulk(session_id, &bulk_frames).await {
+                match database.add_recorded_frames_bulk(session_id, camera_id, &bulk_frames).await {
                     Ok(inserted_count) => {
                         initial_frame_count = inserted_count;
                         info!("Successfully bulk inserted {} pre-recorded frames for camera '{}'", inserted_count, camera_id);
@@ -165,6 +165,7 @@ impl RecordingManager {
                         for (frame_number, buffered_frame) in buffered_frames.iter().enumerate() {
                             if let Err(e) = database.add_recorded_frame(
                                 session_id,
+                                camera_id,
                                 buffered_frame.timestamp,
                                 (frame_number + 1) as i64,
                                 &buffered_frame.data,
@@ -317,6 +318,7 @@ impl RecordingManager {
                     // Store frame directly in database
                     if let Err(e) = database.add_recorded_frame(
                         session_id,
+                        &camera_id,
                         timestamp,
                         frame_number,
                         &frame_data,

@@ -570,30 +570,42 @@ impl RtspClient {
         // Log the full FFmpeg command
         let full_command = format!("{} {}", ffmpeg_path, ffmpeg_args.join(" "));
         info!("[{}] FFmpeg command: {}", self.camera_id, full_command);
-        
+
+        // Determine stderr handling based on log_stderr config
+        // If log_stderr is not set or invalid, redirect to null to prevent buffer filling
+        let log_mode = ffmpeg.and_then(|c| c.log_stderr.as_ref());
+        let stderr_config = match log_mode {
+            Some(mode) if mode == "file" || mode == "console" || mode == "both" => {
+                std::process::Stdio::piped()
+            }
+            _ => {
+                // Redirect to null device to prevent FFmpeg from blocking on stderr buffer
+                std::process::Stdio::null()
+            }
+        };
+
         let mut ffmpeg_cmd = tokio::process::Command::new(ffmpeg_path)
             .args(&ffmpeg_args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(stderr_config)
             .kill_on_drop(true)
             .spawn()?;
 
         info!("[{}] 📡 FFmpeg process started, reading MJPEG stream from camera", self.camera_id);
 
         // Handle stderr logging if enabled
-        let log_mode = ffmpeg.and_then(|c| c.log_stderr.as_ref());
         if let Some(log_mode) = log_mode {
             if log_mode == "file" || log_mode == "console" || log_mode == "both" {
                 let stderr = ffmpeg_cmd.stderr.take()
                     .ok_or_else(|| StreamError::ffmpeg("Failed to get FFmpeg stderr"))?;
-                
+
                 let log_filename = format!("{}.log", self.camera_id);
                 let camera_id = self.camera_id.clone();
                 let log_mode_clone = log_mode.clone();
-                
+
                 info!("[{}] FFmpeg stderr logging enabled (mode: {})", self.camera_id, log_mode);
-                
+
                 // Spawn a task to handle stderr logging
                 tokio::spawn(async move {
                     if let Err(e) = log_ffmpeg_stderr(stderr, &log_filename, &camera_id, &log_mode_clone).await {
