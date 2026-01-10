@@ -398,18 +398,18 @@ impl SqliteFrameStream {
             }
         };
         
+        // Use camera_id directly from recording_mjpeg table with idx_camera_timestamp index
         let query = format!(
             r#"
-            SELECT rf.timestamp, rf.frame_data
-            FROM {} rf
-            JOIN {} rs ON rf.session_id = rs.id
-            WHERE rs.camera_id = ? 
-              AND rf.timestamp >= ? 
-              AND rf.timestamp <= ?
-            ORDER BY rf.timestamp ASC
+            SELECT timestamp, frame_data
+            FROM {}
+            WHERE camera_id = ?
+              AND timestamp >= ?
+              AND timestamp <= ?
+            ORDER BY timestamp ASC
             LIMIT ?
             "#,
-            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            TABLE_RECORDING_MJPEG
         );
         let rows = sqlx::query(&query)
         .bind(&self.camera_id)
@@ -1243,25 +1243,28 @@ impl DatabaseProvider for SqliteDatabase {
         // 1. No frames in recording_mjpeg table
         // 2. No segments in recording_mp4 table
         // 3. Are not currently active (end_time is not NULL)
-        
+        // Uses EXISTS for efficient index lookups instead of NOT IN with full table scans
+
         let start_time = std::time::Instant::now();
-        
+
         let result = if let Some(cam_id) = camera_id {
             // Delete unused sessions for a specific camera, but don't delete sessions marked to keep
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {sessions}
                 WHERE camera_id = ?
                 AND end_time IS NOT NULL
                 AND keep_session = 0
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
                 )
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
                 )
                 "#,
-                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG, TABLE_RECORDING_MP4
+                sessions = TABLE_RECORDING_SESSIONS,
+                mjpeg = TABLE_RECORDING_MJPEG,
+                mp4 = TABLE_RECORDING_MP4
             );
             sqlx::query(&query)
                 .bind(cam_id)
@@ -1271,17 +1274,19 @@ impl DatabaseProvider for SqliteDatabase {
             // Delete unused sessions for all cameras, but don't delete sessions marked to keep
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {sessions}
                 WHERE end_time IS NOT NULL
                 AND keep_session = 0
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
                 )
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
                 )
                 "#,
-                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG, TABLE_RECORDING_MP4
+                sessions = TABLE_RECORDING_SESSIONS,
+                mjpeg = TABLE_RECORDING_MJPEG,
+                mp4 = TABLE_RECORDING_MP4
             );
             sqlx::query(&query)
                 .execute(&self.pool)
@@ -1321,23 +1326,22 @@ impl DatabaseProvider for SqliteDatabase {
         let tolerance = tolerance_seconds.unwrap_or(0);
         
         if tolerance == 0 {
-            // Exact timestamp match only
+            // Exact timestamp match using idx_camera_timestamp index
             let query = format!(
                 r#"
-                SELECT rf.timestamp, rf.frame_data
-                FROM {} rf
-                JOIN {} rs ON rf.session_id = rs.id
-                WHERE rs.camera_id = ? AND rf.timestamp = ?
+                SELECT timestamp, frame_data
+                FROM {}
+                WHERE camera_id = ? AND timestamp = ?
                 LIMIT 1
                 "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_MJPEG
             );
             let row = sqlx::query(&query)
                 .bind(camera_id)
                 .bind(timestamp)
                 .fetch_optional(&self.pool)
                 .await?;
-                
+
             if let Some(row) = row {
                 return Ok(Some(RecordedFrame {
                     timestamp: row.get("timestamp"),
@@ -1345,25 +1349,24 @@ impl DatabaseProvider for SqliteDatabase {
                 }));
             }
         }
-        
-        // Find the closest frame within tolerance (or closest if tolerance > 0)
+
+        // Find the closest frame within tolerance using idx_camera_timestamp index
         let tolerance_duration = chrono::Duration::seconds(tolerance);
         let time_before = timestamp - tolerance_duration;
         let time_after = timestamp + tolerance_duration;
-        
+
         let query = format!(
             r#"
-            SELECT rf.timestamp, rf.frame_data,
-                   ABS(julianday(rf.timestamp) - julianday(?)) as time_diff
-            FROM {} rf
-            JOIN {} rs ON rf.session_id = rs.id
-            WHERE rs.camera_id = ? 
-              AND rf.timestamp >= ? 
-              AND rf.timestamp <= ?
+            SELECT timestamp, frame_data,
+                   ABS(julianday(timestamp) - julianday(?)) as time_diff
+            FROM {}
+            WHERE camera_id = ?
+              AND timestamp >= ?
+              AND timestamp <= ?
             ORDER BY time_diff ASC
             LIMIT 1
             "#,
-            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            TABLE_RECORDING_MJPEG
         );
         let row = sqlx::query(&query)
             .bind(timestamp)
@@ -2658,18 +2661,18 @@ impl PostgreSqlFrameStream {
             }
         };
         
+        // Use camera_id directly from recording_mjpeg table with idx_camera_timestamp index
         let query = format!(
             r#"
-            SELECT rf.timestamp, rf.frame_data
-            FROM {} rf
-            JOIN {} rs ON rf.session_id = rs.id
-            WHERE rs.camera_id = $1 
-              AND rf.timestamp >= $2 
-              AND rf.timestamp <= $3
-            ORDER BY rf.timestamp ASC
+            SELECT timestamp, frame_data
+            FROM {}
+            WHERE camera_id = $1
+              AND timestamp >= $2
+              AND timestamp <= $3
+            ORDER BY timestamp ASC
             LIMIT $4
             "#,
-            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            TABLE_RECORDING_MJPEG
         );
         let rows = sqlx::query(&query)
         .bind(&self.camera_id)
@@ -2678,28 +2681,28 @@ impl PostgreSqlFrameStream {
         .bind(self.batch_size)
         .fetch_all(self.connection.as_mut())
         .await?;
-        
+
         self.current_batch.clear();
         self.batch_index = 0;
-        
+
         for row in rows {
             let timestamp: DateTime<Utc> = row.get("timestamp");
             let frame_data: Vec<u8> = row.get("frame_data");
-            
+
             self.current_batch.push(RecordedFrame {
                 timestamp,
                 frame_data,
             });
-            
+
             // Update current timestamp for next batch
             self.current_timestamp = Some(timestamp + chrono::Duration::microseconds(1));
         }
-        
+
         // If we got fewer rows than requested, we've reached the end
         if self.current_batch.len() < self.batch_size as usize {
             self.finished = true;
         }
-        
+
         Ok(())
     }
 }
@@ -3565,25 +3568,28 @@ impl DatabaseProvider for PostgreSqlDatabase {
         // 1. No frames in recording_mjpeg table
         // 2. No segments in recording_mp4 table
         // 3. Are not currently active (end_time is not NULL)
-        
+        // Uses EXISTS for efficient index lookups instead of NOT IN with full table scans
+
         let start_time = std::time::Instant::now();
-        
+
         let result = if let Some(cam_id) = camera_id {
             // Delete unused sessions for a specific camera, but don't delete sessions marked to keep
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {sessions}
                 WHERE camera_id = $1
                 AND end_time IS NOT NULL
                 AND keep_session = false
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
                 )
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
                 )
                 "#,
-                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG, TABLE_RECORDING_MP4
+                sessions = TABLE_RECORDING_SESSIONS,
+                mjpeg = TABLE_RECORDING_MJPEG,
+                mp4 = TABLE_RECORDING_MP4
             );
             sqlx::query(&query)
                 .bind(cam_id)
@@ -3593,26 +3599,28 @@ impl DatabaseProvider for PostgreSqlDatabase {
             // Delete unused sessions for all cameras, but don't delete sessions marked to keep
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {sessions}
                 WHERE end_time IS NOT NULL
                 AND keep_session = false
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
                 )
-                AND id NOT IN (
-                    SELECT DISTINCT session_id FROM {}
+                AND NOT EXISTS (
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
                 )
                 "#,
-                TABLE_RECORDING_SESSIONS, TABLE_RECORDING_MJPEG, TABLE_RECORDING_MP4
+                sessions = TABLE_RECORDING_SESSIONS,
+                mjpeg = TABLE_RECORDING_MJPEG,
+                mp4 = TABLE_RECORDING_MP4
             );
             sqlx::query(&query)
                 .execute(&self.pool)
                 .await?
         };
-        
+
         let deleted_sessions = result.rows_affected();
         let elapsed = start_time.elapsed();
-        
+
         if deleted_sessions > 0 {
             info!(
                 "Deleted {} unused sessions in {:.3}ms{}",
@@ -3643,23 +3651,22 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let tolerance = tolerance_seconds.unwrap_or(0);
         
         if tolerance == 0 {
-            // Exact timestamp match only
+            // Exact timestamp match using idx_camera_timestamp index
             let query = format!(
                 r#"
-                SELECT rf.timestamp, rf.frame_data
-                FROM {} rf
-                JOIN {} rs ON rf.session_id = rs.id
-                WHERE rs.camera_id = $1 AND rf.timestamp = $2
+                SELECT timestamp, frame_data
+                FROM {}
+                WHERE camera_id = $1 AND timestamp = $2
                 LIMIT 1
                 "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_MJPEG
             );
             let row = sqlx::query(&query)
                 .bind(camera_id)
                 .bind(timestamp)
                 .fetch_optional(&self.pool)
                 .await?;
-                
+
             if let Some(row) = row {
                 return Ok(Some(RecordedFrame {
                     timestamp: row.get("timestamp"),
@@ -3667,25 +3674,24 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 }));
             }
         }
-        
-        // Find the closest frame within tolerance (or closest if tolerance > 0)
+
+        // Find the closest frame within tolerance using idx_camera_timestamp index
         let tolerance_duration = chrono::Duration::seconds(tolerance);
         let time_before = timestamp - tolerance_duration;
         let time_after = timestamp + tolerance_duration;
-        
+
         let query = format!(
             r#"
-            SELECT rf.timestamp, rf.frame_data,
-                   ABS(EXTRACT(EPOCH FROM (rf.timestamp - $1))) as time_diff
-            FROM {} rf
-            JOIN {} rs ON rf.session_id = rs.id
-            WHERE rs.camera_id = $2 
-              AND rf.timestamp >= $3 
-              AND rf.timestamp <= $4
+            SELECT timestamp, frame_data,
+                   ABS(EXTRACT(EPOCH FROM (timestamp - $1))) as time_diff
+            FROM {}
+            WHERE camera_id = $2
+              AND timestamp >= $3
+              AND timestamp <= $4
             ORDER BY time_diff ASC
             LIMIT 1
             "#,
-            TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
+            TABLE_RECORDING_MJPEG
         );
         let row = sqlx::query(&query)
             .bind(timestamp)
@@ -3694,7 +3700,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .bind(time_after)
             .fetch_optional(&self.pool)
             .await?;
-        
+
         if let Some(row) = row {
             Ok(Some(RecordedFrame {
                 timestamp: row.get("timestamp"),
@@ -3704,7 +3710,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             Ok(None)
         }
     }
-    
+
     async fn create_frame_stream(
         &self,
         camera_id: &str,

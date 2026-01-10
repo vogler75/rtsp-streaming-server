@@ -807,7 +807,7 @@ impl RtspClient {
                             
                             // Measure and log frame processing time if it's slow
                             let processing_duration = frame_start_time.elapsed();
-                            if processing_duration.as_millis() > 10 {
+                            if processing_duration.as_millis() > 50 {
                                 warn!("[{}] Slow frame processing: {}ms", self.camera_id, processing_duration.as_millis());
                             }
                             
