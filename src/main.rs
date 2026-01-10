@@ -224,9 +224,17 @@ async fn main() -> Result<()> {
             cfg
         }
         Err(e) => {
-            warn!("Could not load configuration from {}: {}", args.config, e);
-            info!("Starting with minimal configuration - no cameras configured");
-            
+            // Check if config file exists - if it does, it has errors and we should NOT overwrite it
+            if std::path::Path::new(&args.config).exists() {
+                error!("Configuration file {} exists but has errors: {}", args.config, e);
+                error!("Please fix the configuration file and restart the server.");
+                error!("The server will NOT overwrite your existing configuration.");
+                std::process::exit(1);
+            }
+
+            // Config file doesn't exist - create a new default one
+            info!("No configuration file found at {}, creating default configuration", args.config);
+
             // Determine initial admin password for first-time setup
             let admin_token = if args.random_admin_token {
                 generate_random_token(32)
@@ -242,16 +250,16 @@ async fn main() -> Result<()> {
             info!("Use this password to access /dashboard for admin interface");
             info!("This password has been saved to {}", args.config);
             info!("========================================");
-            
+
             let mut default_config = Config::default();
             default_config.server.admin_token = Some(admin_token);
-            
+
             // Save the generated config to disk
             match save_config_to_file(&default_config, &args.config) {
                 Ok(_) => info!("Saved default configuration to {}", args.config),
                 Err(save_err) => error!("Failed to save configuration to {}: {}", args.config, save_err),
             }
-            
+
             default_config
         }
     };
