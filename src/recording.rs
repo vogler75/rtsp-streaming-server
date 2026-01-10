@@ -218,7 +218,13 @@ impl RecordingManager {
     ) {
         let mut frame_number = 0i64;
         let mut last_session_check = Utc::now(); // Track when we last checked for session segmentation
-        
+
+        // Bulk write buffer: flush when 30 frames accumulated or 1 second passed
+        const BULK_WRITE_MAX_FRAMES: usize = 30;
+        const BULK_WRITE_MAX_INTERVAL_MS: i64 = 1000;
+        let mut frame_buffer: Vec<(DateTime<Utc>, i64, Vec<u8>)> = Vec::with_capacity(BULK_WRITE_MAX_FRAMES);
+        let mut last_flush_time = Utc::now();
+
         // Determine the effective session segment duration
         // Priority: camera-specific setting > global setting
         // 0 = disabled, None/null = use global, n = minutes
@@ -254,7 +260,17 @@ impl RecordingManager {
                     drop(active_recordings_guard);
 
                     if !is_active {
-                        trace!("Recording stopped for camera '{}', ending task", camera_id);
+                        trace!("Recording stopped for camera '{}', flushing buffer and ending task", camera_id);
+                        // Flush remaining frames before exiting
+                        if !frame_buffer.is_empty() {
+                            let count = frame_buffer.len();
+                            if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
+                                error!("Failed to flush {} remaining frames on stop: {}", count, e);
+                            } else {
+                                trace!("Flushed {} remaining frames on recording stop", count);
+                            }
+                            frame_buffer.clear();
+                        }
                         break;
                     }
 
@@ -262,47 +278,57 @@ impl RecordingManager {
                     if let Some(segment_minutes) = effective_session_segment_minutes {
                         let session_segment_duration = chrono::Duration::minutes(segment_minutes as i64);
                         if timestamp.signed_duration_since(last_session_check) >= session_segment_duration {
-                            info!("Session segment interval ({} minutes) reached for camera '{}', splitting recording session {}", 
+                            info!("Session segment interval ({} minutes) reached for camera '{}', splitting recording session {}",
                                   segment_minutes, camera_id, session_id);
-                        
-                        // Get the recording reason from the database to use for the new session
-                        if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
-                            if let Some(current_session) = sessions.first() {
-                                let reason = current_session.reason.clone();
-                                
-                                // Stop the current session
-                                if let Err(e) = database.stop_recording_session(session_id).await {
-                                    error!("Failed to stop recording session for segment split: {}", e);
-                                } else {
-                                    info!("Stopped recording session {} for segment split", session_id);
-                                    
-                                    // Create a new session with the same reason, using current time
-                                    match database.create_recording_session(&camera_id, reason.as_deref(), Utc::now()).await {
-                                        Ok(new_session_id) => {
-                                            info!("Created new recording session {} for segment continuation", new_session_id);
-                                            
-                                            // Update the active recording with new session info
-                                            let mut active_recordings_guard = active_recordings.write().await;
-                                            if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
-                                                recording.session_id = new_session_id;
-                                                recording.start_time = timestamp;
-                                                recording.frame_count = 0;
+
+                            // Flush buffer before session split
+                            if !frame_buffer.is_empty() {
+                                let count = frame_buffer.len();
+                                if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
+                                    error!("Failed to flush {} frames before session split: {}", count, e);
+                                }
+                                frame_buffer.clear();
+                                last_flush_time = timestamp;
+                            }
+
+                            // Get the recording reason from the database to use for the new session
+                            if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
+                                if let Some(current_session) = sessions.first() {
+                                    let reason = current_session.reason.clone();
+
+                                    // Stop the current session
+                                    if let Err(e) = database.stop_recording_session(session_id).await {
+                                        error!("Failed to stop recording session for segment split: {}", e);
+                                    } else {
+                                        info!("Stopped recording session {} for segment split", session_id);
+
+                                        // Create a new session with the same reason, using current time
+                                        match database.create_recording_session(&camera_id, reason.as_deref(), Utc::now()).await {
+                                            Ok(new_session_id) => {
+                                                info!("Created new recording session {} for segment continuation", new_session_id);
+
+                                                // Update the active recording with new session info
+                                                let mut active_recordings_guard = active_recordings.write().await;
+                                                if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
+                                                    recording.session_id = new_session_id;
+                                                    recording.start_time = timestamp;
+                                                    recording.frame_count = 0;
+                                                }
+                                                drop(active_recordings_guard);
+
+                                                // Update the session_id for subsequent frames
+                                                session_id = new_session_id;
+                                                frame_number = 1; // Reset frame number for new session
                                             }
-                                            drop(active_recordings_guard);
-                                            
-                                            // Update the session_id for subsequent frames
-                                            session_id = new_session_id;
-                                            frame_number = 1; // Reset frame number for new session
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to create new recording session for segment split: {}", e);
-                                            // Continue with the old session rather than stopping
+                                            Err(e) => {
+                                                error!("Failed to create new recording session for segment split: {}", e);
+                                                // Continue with the old session rather than stopping
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        
+
                             // Update the last session check timestamp
                             last_session_check = timestamp;
                         }
@@ -310,21 +336,33 @@ impl RecordingManager {
 
                     // Check frame size
                     if frame_data.len() > config.max_frame_size {
-                        error!("Frame size {} exceeds maximum {} for camera '{}'", 
+                        error!("Frame size {} exceeds maximum {} for camera '{}'",
                                 frame_data.len(), config.max_frame_size, camera_id);
                         continue;
                     }
 
-                    // Store frame directly in database
-                    if let Err(e) = database.add_recorded_frame(
-                        session_id,
-                        &camera_id,
-                        timestamp,
-                        frame_number,
-                        &frame_data,
-                    ).await {
-                        error!("Failed to store frame in database: {}", e);
-                        continue;
+                    // Add frame to buffer
+                    frame_buffer.push((timestamp, frame_number, frame_data.to_vec()));
+
+                    // Check if we should flush the buffer (30 frames or 1 second elapsed)
+                    let time_since_flush = timestamp.signed_duration_since(last_flush_time).num_milliseconds();
+                    let should_flush = frame_buffer.len() >= BULK_WRITE_MAX_FRAMES
+                        || time_since_flush >= BULK_WRITE_MAX_INTERVAL_MS;
+
+                    if should_flush {
+                        let frames_to_insert = frame_buffer.len();
+                        match database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
+                            Ok(inserted) => {
+                                trace!("Bulk inserted {} frames for camera '{}' (buffer: {}, interval: {}ms)",
+                                       inserted, camera_id, frames_to_insert, time_since_flush);
+                            }
+                            Err(e) => {
+                                error!("Failed to bulk insert {} frames for camera '{}': {}",
+                                       frames_to_insert, camera_id, e);
+                            }
+                        }
+                        frame_buffer.clear();
+                        last_flush_time = timestamp;
                     }
 
                     // Update frame count
@@ -337,6 +375,15 @@ impl RecordingManager {
                             let elapsed = timestamp.signed_duration_since(recording.start_time);
                             if elapsed.num_seconds() >= duration {
                                 info!("Recording duration reached for camera '{}', stopping", camera_id);
+                                // Flush remaining frames before exiting
+                                drop(active_recordings_guard);
+                                if !frame_buffer.is_empty() {
+                                    let count = frame_buffer.len();
+                                    if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
+                                        error!("Failed to flush {} remaining frames on duration stop: {}", count, e);
+                                    }
+                                    frame_buffer.clear();
+                                }
                                 break;
                             }
                         }
@@ -347,7 +394,16 @@ impl RecordingManager {
                     warn!("Recording lagged for camera '{}', skipped {} frames", camera_id, skipped);
                 }
                 Err(broadcast::error::RecvError::Closed) => {
-                    info!("Frame channel closed for camera '{}', stopping recording", camera_id);
+                    info!("Frame channel closed for camera '{}', flushing buffer and stopping recording", camera_id);
+                    // Flush remaining frames before exiting
+                    if !frame_buffer.is_empty() {
+                        let count = frame_buffer.len();
+                        if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
+                            error!("Failed to flush {} remaining frames on channel close: {}", count, e);
+                        } else {
+                            trace!("Flushed {} remaining frames on channel close", count);
+                        }
+                    }
                     break;
                 }
             }
