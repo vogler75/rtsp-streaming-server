@@ -466,7 +466,7 @@ pub async fn camera_control_handler(
             }
 
             if recording_manager.is_none() {
-                warn!("Recording not enabled, control endpoint unavailable");
+                debug!("Recording not enabled, control endpoint unavailable");
                 return (axum::http::StatusCode::SERVICE_UNAVAILABLE, "Recording system not enabled").into_response();
             }
             
