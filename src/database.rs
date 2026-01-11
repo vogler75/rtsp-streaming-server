@@ -316,6 +316,11 @@ pub trait DatabaseProvider: Send + Sync {
     async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64>;
     async fn delete_hls_segments_by_timerange(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<u64>;
 
+    /// Vacuum/compact tables after cleanup to reclaim disk space
+    /// For PostgreSQL: VACUUM FULL on recording tables
+    /// For SQLite: VACUUM (entire database)
+    async fn vacuum_tables(&self) -> Result<()>;
+
     // Export methods
     async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>>;
     async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()>;
@@ -1803,10 +1808,15 @@ impl DatabaseProvider for SqliteDatabase {
             tracing::error!("Error deleting unused sessions: {}", e);
         }
 
+        // Vacuum database to reclaim disk space after cleanup
+        if let Err(e) = self.vacuum_tables().await {
+            tracing::error!("Error vacuuming database: {}", e);
+        }
+
         Ok(())
     }
-    
-    
+
+
     async fn get_video_segment_by_time(
         &self,
         camera_id: &str,
@@ -2466,6 +2476,22 @@ impl DatabaseProvider for SqliteDatabase {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    async fn vacuum_tables(&self) -> Result<()> {
+        let start_time = std::time::Instant::now();
+        tracing::info!("Starting SQLite VACUUM to reclaim disk space...");
+
+        // SQLite VACUUM rebuilds the entire database file
+        // This reclaims unused space and defragments the database
+        sqlx::query("VACUUM")
+            .execute(&self.pool)
+            .await?;
+
+        let elapsed = start_time.elapsed();
+        tracing::info!("SQLite VACUUM completed in {:.1}s", elapsed.as_secs_f64());
+
+        Ok(())
     }
 
     async fn record_throughput_stats(
@@ -4096,10 +4122,15 @@ impl DatabaseProvider for PostgreSqlDatabase {
             tracing::error!("Error deleting unused sessions: {}", e);
         }
 
+        // Vacuum tables to reclaim disk space after cleanup
+        if let Err(e) = self.vacuum_tables().await {
+            tracing::error!("Error vacuuming database: {}", e);
+        }
+
         Ok(())
     }
-    
-    
+
+
     async fn get_video_segment_by_time(
         &self,
         camera_id: &str,
@@ -4786,6 +4817,47 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    async fn vacuum_tables(&self) -> Result<()> {
+        let start_time = std::time::Instant::now();
+        info!("Starting PostgreSQL VACUUM FULL on recording tables for database '{}'...", self.database_name);
+
+        // VACUUM FULL rewrites tables and reclaims disk space back to the OS
+        // This is more thorough than regular VACUUM but requires exclusive lock
+        // We vacuum each table that can have significant deletions
+
+        let tables = [
+            TABLE_RECORDING_MJPEG,
+            TABLE_RECORDING_HLS,
+            TABLE_RECORDING_MP4,
+            TABLE_RECORDING_SESSIONS,
+        ];
+
+        for table in &tables {
+            let table_start = std::time::Instant::now();
+            let vacuum_query = format!("VACUUM FULL {}", table);
+
+            if let Err(e) = sqlx::query(&vacuum_query)
+                .execute(&self.pool)
+                .await
+            {
+                // Log error but continue with other tables
+                tracing::warn!("VACUUM FULL {} failed: {}", table, e);
+            } else {
+                let table_elapsed = table_start.elapsed();
+                debug!("VACUUM FULL {} completed in {:.1}s", table, table_elapsed.as_secs_f64());
+            }
+        }
+
+        let elapsed = start_time.elapsed();
+        info!(
+            "PostgreSQL VACUUM FULL completed for database '{}' in {:.1}s",
+            self.database_name,
+            elapsed.as_secs_f64()
+        );
+
+        Ok(())
     }
 
     async fn record_throughput_stats(

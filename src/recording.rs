@@ -32,7 +32,7 @@ const WRITER_CHANNEL_BUFFER: usize = 900;
 
 /// Bulk write settings - batch more frames to reduce write frequency
 const BULK_WRITE_MAX_FRAMES: usize = 60;
-const BULK_WRITE_MAX_INTERVAL_MS: u64 = 2000;
+const BULK_WRITE_MAX_INTERVAL_MS: u64 = 1000;
 
 /// Dedicated database writer task - receives frames via mpsc channel and writes in batches
 async fn frame_writer_loop(
