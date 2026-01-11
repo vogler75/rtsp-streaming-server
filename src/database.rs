@@ -18,7 +18,7 @@ const TABLE_THROUGHPUT_STATS: &str = "throughput_stats";
 
 #[derive(Debug, Clone)]
 pub struct RecordingSession {
-    pub id: i64,
+    pub session_id: i64,  // Primary key
     pub camera_id: String,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
@@ -35,17 +35,15 @@ pub struct RecordedFrame {
 
 #[derive(Debug, Clone, FromRow)]
 pub struct VideoSegment {
-    pub session_id: i64,  // Part of composite primary key with start_time
-    pub start_time: DateTime<Utc>,  // Part of composite primary key with session_id
+    pub camera_id: String,    // Part of composite primary key (camera_id, start_time)
+    pub session_id: i64,      // Foreign key to recording_sessions
+    pub start_time: DateTime<Utc>,  // Part of composite primary key
     pub end_time: DateTime<Utc>,
     pub file_path: Option<String>,  // Optional for database storage
     pub size_bytes: i64,
     pub mp4_data: Option<Vec<u8>>,  // Optional blob data for database storage
-    #[sqlx(default)]  // This field might not exist when not joining with recording_sessions
-    pub recording_reason: Option<String>,  // Recording reason from recording_sessions
-    #[sqlx(default)]  // This field comes from the JOIN with recording_sessions
-    #[allow(dead_code)]  // Available from JOIN but not always used
-    pub camera_id: Option<String>,  // Camera ID from recording_sessions when needed
+    #[sqlx(default)]
+    pub recording_reason: Option<String>,  // Recording reason from recording_sessions (JOIN)
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -72,8 +70,9 @@ pub struct HlsSegment {
 
 #[derive(Debug, Clone, FromRow)]
 pub struct RecordingHlsSegment {
-    pub session_id: i64,      // References RecordingSession.id
-    pub segment_index: i32,   // Segment number within the session
+    pub camera_id: String,    // Part of composite primary key (camera_id, segment_index)
+    pub session_id: i64,      // Foreign key to recording_sessions
+    pub segment_index: i32,   // Part of composite primary key
     pub start_time: DateTime<Utc>, // Start timestamp of this segment
     pub end_time: DateTime<Utc>,   // End timestamp of this segment
     pub duration_seconds: f64,     // Actual segment duration in seconds
@@ -535,7 +534,7 @@ impl DatabaseProvider for SqliteDatabase {
         let create_sessions_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 camera_id TEXT NOT NULL,
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP,
@@ -556,12 +555,12 @@ impl DatabaseProvider for SqliteDatabase {
         let create_mjpeg_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
-                session_id INTEGER NOT NULL,
                 camera_id TEXT NOT NULL,
+                session_id INTEGER NOT NULL,
                 timestamp TIMESTAMP NOT NULL,
                 frame_data BLOB NOT NULL,
-                PRIMARY KEY (session_id, timestamp),
-                FOREIGN KEY (session_id) REFERENCES {}(id)
+                PRIMARY KEY (camera_id, timestamp),
+                FOREIGN KEY (session_id) REFERENCES {}(session_id)
             )
             "#,
             TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
@@ -578,19 +577,29 @@ impl DatabaseProvider for SqliteDatabase {
         sqlx::query(&idx_camera_timestamp)
             .execute(&self.pool)
             .await?;
+
+        // Add index on session_id for FK lookups
+        let idx_mjpeg_session = format!(
+            "CREATE INDEX IF NOT EXISTS idx_recording_mjpeg_session ON {}(session_id)",
+            TABLE_RECORDING_MJPEG
+        );
+        sqlx::query(&idx_mjpeg_session)
+            .execute(&self.pool)
+            .await?;
         info!("CREATE idx_camera_timestamp done, elapsed {:?}", init_start.elapsed());
 
         let create_mp4_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
+                camera_id TEXT NOT NULL,
                 session_id INTEGER NOT NULL,
                 start_time TIMESTAMP NOT NULL,
                 end_time TIMESTAMP NOT NULL,
                 file_path TEXT,
                 size_bytes INTEGER NOT NULL,
                 mp4_data BLOB,
-                PRIMARY KEY (session_id, start_time),
-                FOREIGN KEY (session_id) REFERENCES {}(id) ON DELETE CASCADE
+                PRIMARY KEY (camera_id, start_time),
+                FOREIGN KEY (session_id) REFERENCES {}(session_id) ON DELETE CASCADE
             )
             "#,
             TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -671,6 +680,7 @@ impl DatabaseProvider for SqliteDatabase {
         let create_recording_hls_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
+                camera_id TEXT NOT NULL,
                 session_id INTEGER NOT NULL,
                 segment_index INTEGER NOT NULL,
                 start_time TIMESTAMP NOT NULL,
@@ -679,8 +689,8 @@ impl DatabaseProvider for SqliteDatabase {
                 segment_data BLOB NOT NULL,
                 size_bytes INTEGER NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (session_id, segment_index),
-                FOREIGN KEY (session_id) REFERENCES {}(id) ON DELETE CASCADE
+                PRIMARY KEY (camera_id, segment_index),
+                FOREIGN KEY (session_id) REFERENCES {}(session_id) ON DELETE CASCADE
             )
             "#,
             TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -720,6 +730,15 @@ impl DatabaseProvider for SqliteDatabase {
             TABLE_RECORDING_HLS
         );
         sqlx::query(&idx_recording_hls_time)
+            .execute(&self.pool)
+            .await?;
+
+        // Add index on session_id for FK lookups
+        let idx_recording_hls_session = format!(
+            "CREATE INDEX IF NOT EXISTS idx_recording_hls_session ON {}(session_id)",
+            TABLE_RECORDING_HLS
+        );
+        sqlx::query(&idx_recording_hls_session)
             .execute(&self.pool)
             .await?;
 
@@ -788,7 +807,7 @@ impl DatabaseProvider for SqliteDatabase {
 
     async fn stop_recording_session(&self, session_id: i64) -> Result<()> {
         let query = format!(
-            "UPDATE {} SET end_time = ?, status = 'stopped' WHERE id = ?",
+            "UPDATE {} SET end_time = ?, status = 'stopped' WHERE session_id = ?",
             TABLE_RECORDING_SESSIONS
         );
         sqlx::query(&query)
@@ -802,7 +821,7 @@ impl DatabaseProvider for SqliteDatabase {
 
     async fn get_active_recordings(&self, camera_id: &str) -> Result<Vec<RecordingSession>> {
         let query = format!(
-            "SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {} WHERE camera_id = ? AND status = 'active'",
+            "SELECT session_id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {} WHERE camera_id = ? AND status = 'active'",
             TABLE_RECORDING_SESSIONS
         );
         let rows = sqlx::query(&query)
@@ -813,7 +832,7 @@ impl DatabaseProvider for SqliteDatabase {
         let mut sessions = Vec::new();
         for row in rows {
             sessions.push(RecordingSession {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
@@ -934,23 +953,23 @@ impl DatabaseProvider for SqliteDatabase {
             format!(" WHERE {}", conditions.join(" AND "))
         };
         
-        let sql = format!("SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {}{} ORDER BY start_time DESC", TABLE_RECORDING_SESSIONS, where_clause);
-        
+        let sql = format!("SELECT session_id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {}{} ORDER BY start_time DESC", TABLE_RECORDING_SESSIONS, where_clause);
+
         tracing::debug!(
             "Executing SQL query for list_recordings:\n{}\nParameters: {:?}",
             sql, bind_values
         );
-        
+
         let mut query_builder = sqlx::query(&sql);
         for value in &bind_values {
             query_builder = query_builder.bind(value);
         }
-        
+
         let rows = query_builder.fetch_all(&self.pool).await?;
-        
+
         let elapsed = start_time.elapsed();
         let row_count = rows.len();
-        
+
         tracing::debug!(
             "Query completed in {:.3}ms, returned {} rows",
             elapsed.as_secs_f64() * 1000.0,
@@ -960,7 +979,7 @@ impl DatabaseProvider for SqliteDatabase {
         let mut sessions = Vec::new();
         for row in rows {
             sessions.push(RecordingSession {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
@@ -995,10 +1014,10 @@ impl DatabaseProvider for SqliteDatabase {
         let where_clause = format!("WHERE {}", conditions.join(" AND "));
         
         let sql = format!(
-            "SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {} {} ORDER BY start_time DESC",
+            "SELECT session_id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, 0) as keep_session FROM {} {} ORDER BY start_time DESC",
             TABLE_RECORDING_SESSIONS, where_clause
         );
-        
+
         tracing::debug!(
             "Executing SQL query for list_recordings_filtered:\n{}\nParameters: camera_id='{}', from='{:?}', to='{:?}', reason='{:?}'",
             sql, camera_id, from, to, reason
@@ -1006,7 +1025,7 @@ impl DatabaseProvider for SqliteDatabase {
 
         // Build the query with proper parameter binding
         let mut query = sqlx::query(&sql).bind(camera_id);
-        
+
         if let Some(from_time) = from {
             query = query.bind(from_time);
         }
@@ -1016,12 +1035,12 @@ impl DatabaseProvider for SqliteDatabase {
         if let Some(reason_filter) = reason {
             query = query.bind(reason_filter);
         }
-        
+
         let rows = query.fetch_all(&self.pool).await?;
-        
+
         let elapsed = start_time.elapsed();
         let row_count = rows.len();
-        
+
         tracing::debug!(
             "Query completed in {:.3}ms, returned {} rows",
             elapsed.as_secs_f64() * 1000.0,
@@ -1031,7 +1050,7 @@ impl DatabaseProvider for SqliteDatabase {
         let mut sessions = Vec::new();
         for row in rows {
             sessions.push(RecordingSession {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
@@ -1105,131 +1124,100 @@ impl DatabaseProvider for SqliteDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
-        const BATCH_SIZE: i64 = 10_000;
+        let cam_desc = camera_id.unwrap_or("all cameras");
 
-        let cam_id = camera_id.unwrap_or("unknown");
-
-        tracing::info!(
-            "Counting frames to delete (older than {}) for camera '{}'...",
-            older_than.format("%Y-%m-%d %H:%M:%S UTC"),
-            cam_id
-        );
-
-        // Fetch KEPT session IDs (usually 0 or very few)
-        let kept_session_ids: Vec<i64> = {
+        // Find sessions to clean up (oldest first, not marked as keep, ended before retention cutoff)
+        let sessions_to_clean: Vec<(i64, String)> = if let Some(cam_id) = camera_id {
             let query = format!(
-                "SELECT id FROM {} WHERE camera_id = ? AND keep_session = 1",
+                r#"
+                SELECT session_id, camera_id FROM {}
+                WHERE camera_id = ?
+                  AND end_time IS NOT NULL
+                  AND end_time < ?
+                  AND keep_session = 0
+                ORDER BY end_time ASC
+                "#,
                 TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_scalar(&query)
+            sqlx::query_as(&query)
                 .bind(cam_id)
+                .bind(older_than)
+                .fetch_all(&self.pool).await?
+        } else {
+            let query = format!(
+                r#"
+                SELECT session_id, camera_id FROM {}
+                WHERE end_time IS NOT NULL
+                  AND end_time < ?
+                  AND keep_session = 0
+                ORDER BY end_time ASC
+                "#,
+                TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query_as(&query)
+                .bind(older_than)
                 .fetch_all(&self.pool).await?
         };
 
-        // Build NOT IN clause only if there are kept sessions
-        let kept_clause = if kept_session_ids.is_empty() {
-            String::new()
-        } else {
-            let kept_list = kept_session_ids
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("AND session_id NOT IN ({})", kept_list)
-        };
-
-        // Count frames to delete using camera_id index
-        let count_start = std::time::Instant::now();
-        let count_query = {
-            let query = format!(
-                "SELECT COUNT(*) FROM {} WHERE camera_id = ? AND timestamp < ? {}",
-                TABLE_RECORDING_MJPEG, kept_clause
-            );
-            sqlx::query_scalar::<_, i64>(&query)
-                .bind(cam_id)
-                .bind(older_than)
-                .fetch_one(&self.pool).await?
-        };
-        let count_elapsed = count_start.elapsed();
-
-        if count_query == 0 {
-            tracing::info!(
-                "No frames to delete for camera '{}' (count query took {:.1}s)",
-                cam_id,
-                count_elapsed.as_secs_f64()
-            );
+        if sessions_to_clean.is_empty() {
+            tracing::info!("No expired sessions to clean up for {}", cam_desc);
             return Ok(0);
         }
 
         tracing::info!(
-            "Found {} frames to delete for camera '{}' (count took {:.1}s), {} kept sessions excluded, deleting in batches of {}...",
-            count_query,
-            cam_id,
-            count_elapsed.as_secs_f64(),
-            kept_session_ids.len(),
-            BATCH_SIZE
+            "Found {} expired sessions to clean up for {}, processing oldest first...",
+            sessions_to_clean.len(),
+            cam_desc
         );
 
-        // Delete in batches using camera_id + timestamp index
         let mut total_deleted: u64 = 0;
-        let mut batch_num = 0;
+        let mut sessions_processed = 0;
 
-        loop {
-            batch_num += 1;
-            tracing::info!("Starting batch {} delete...", batch_num);
-            let batch_start = std::time::Instant::now();
+        for (session_id, session_camera_id) in &sessions_to_clean {
+            let session_start = std::time::Instant::now();
 
-            // DELETE using camera_id and timestamp - uses idx_camera_timestamp index
-            let query = format!(
-                r#"
-                DELETE FROM {}
-                WHERE rowid IN (
-                    SELECT rowid FROM {}
-                    WHERE camera_id = ? AND timestamp < ?
-                    {}
-                    LIMIT ?
-                )
-                "#,
-                TABLE_RECORDING_MJPEG, TABLE_RECORDING_MJPEG, kept_clause
+            // Delete all frames for this session
+            let delete_query = format!(
+                "DELETE FROM {} WHERE session_id = ?",
+                TABLE_RECORDING_MJPEG
             );
-            let deleted = sqlx::query(&query)
-                .bind(cam_id)
-                .bind(older_than)
-                .bind(BATCH_SIZE)
+            let deleted = sqlx::query(&delete_query)
+                .bind(session_id)
                 .execute(&self.pool).await?
                 .rows_affected();
 
             total_deleted += deleted;
-            let batch_elapsed = batch_start.elapsed();
+            sessions_processed += 1;
 
-            tracing::info!(
-                "Batch {}: deleted {} frames in {:.1}s (total: {}/{})",
-                batch_num,
-                deleted,
-                batch_elapsed.as_secs_f64(),
-                total_deleted,
-                count_query
-            );
+            let session_elapsed = session_start.elapsed();
 
-            if deleted == 0 || deleted < BATCH_SIZE as u64 {
-                break;
+            if deleted > 0 {
+                tracing::debug!(
+                    "Session {}: deleted {} frames for camera '{}' in {:.2}s (total: {} frames, {}/{} sessions)",
+                    session_id,
+                    deleted,
+                    session_camera_id,
+                    session_elapsed.as_secs_f64(),
+                    total_deleted,
+                    sessions_processed,
+                    sessions_to_clean.len()
+                );
             }
 
-            // Small yield to allow other tasks to run
-            tokio::task::yield_now().await;
+            // Yield periodically to allow other tasks to run
+            if sessions_processed % 10 == 0 {
+                tokio::task::yield_now().await;
+            }
         }
 
         let elapsed = start_time.elapsed();
 
         tracing::info!(
-            "Completed frame cleanup: {} frames deleted in {:.1}s{}",
+            "Completed frame cleanup: {} frames deleted from {} sessions in {:.1}s for {}",
             total_deleted,
+            sessions_processed,
             elapsed.as_secs_f64(),
-            if let Some(cam_id) = camera_id {
-                format!(" for camera '{}'", cam_id)
-            } else {
-                String::new()
-            }
+            cam_desc
         );
 
         Ok(total_deleted as usize)
@@ -1256,10 +1244,10 @@ impl DatabaseProvider for SqliteDatabase {
                 AND end_time IS NOT NULL
                 AND keep_session = 0
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.session_id
                 )
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
@@ -1278,10 +1266,10 @@ impl DatabaseProvider for SqliteDatabase {
                 WHERE end_time IS NOT NULL
                 AND keep_session = 0
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.session_id
                 )
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
@@ -1415,12 +1403,13 @@ impl DatabaseProvider for SqliteDatabase {
 
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, start_time, end_time, file_path, size_bytes, mp4_data)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO {} (camera_id, session_id, start_time, end_time, file_path, size_bytes, mp4_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
             TABLE_RECORDING_MP4
         );
         let result = sqlx::query(&query)
+        .bind(&segment.camera_id)
         .bind(segment.session_id)
         .bind(segment.start_time)
         .bind(segment.end_time)
@@ -1445,7 +1434,7 @@ impl DatabaseProvider for SqliteDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.session_id
             WHERE rs.camera_id = ? AND vs.start_time < ? AND vs.end_time > ?
             ORDER BY vs.start_time ASC
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
@@ -1528,7 +1517,7 @@ impl DatabaseProvider for SqliteDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.session_id
             {}
             ORDER BY vs.start_time {}
             LIMIT ?
@@ -1596,7 +1585,7 @@ impl DatabaseProvider for SqliteDatabase {
                 r#"
                 SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
-                JOIN {} rs ON vs.session_id = rs.id
+                JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -1613,7 +1602,7 @@ impl DatabaseProvider for SqliteDatabase {
                 r#"
                 SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
-                JOIN {} rs ON vs.session_id = rs.id
+                JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE vs.end_time < ? AND rs.keep_session = 0
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -1643,7 +1632,7 @@ impl DatabaseProvider for SqliteDatabase {
                 WHERE session_id IN (
                     SELECT vs.session_id 
                     FROM {} vs
-                    JOIN {} rs ON vs.session_id = rs.id
+                    JOIN {} rs ON vs.session_id = rs.session_id
                     WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0
                 )
                 "#,
@@ -1659,7 +1648,7 @@ impl DatabaseProvider for SqliteDatabase {
                 r#"
                 DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT id FROM {} WHERE keep_session = 0
+                    SELECT session_id FROM {} WHERE keep_session = 0
                 ) AND end_time < ?
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -1826,7 +1815,7 @@ impl DatabaseProvider for SqliteDatabase {
         let query = format!(r#"
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.camera_id
             FROM {} vs
-            JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.session_id
             WHERE rs.camera_id = ? AND vs.start_time = ?
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
@@ -2063,13 +2052,14 @@ impl DatabaseProvider for SqliteDatabase {
     async fn add_recording_hls_segment(&self, segment: &RecordingHlsSegment) -> Result<i64> {
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO {} (camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             TABLE_RECORDING_HLS
         );
-        
+
         let result = sqlx::query(&query)
+            .bind(&segment.camera_id)
             .bind(segment.session_id)
             .bind(segment.segment_index)
             .bind(segment.start_time)
@@ -2079,7 +2069,7 @@ impl DatabaseProvider for SqliteDatabase {
             .bind(segment.size_bytes)
             .execute(&self.pool)
             .await?;
-            
+
         Ok(result.last_insert_rowid())
     }
 
@@ -2154,7 +2144,7 @@ impl DatabaseProvider for SqliteDatabase {
             SELECT rh.session_id, rh.segment_index, rh.start_time, rh.end_time, rh.duration_seconds, 
                    rh.segment_data, rh.size_bytes, rh.created_at
             FROM {} rh
-            JOIN {} rs ON rh.session_id = rs.id
+            JOIN {} rs ON rh.session_id = rs.session_id
             WHERE rs.camera_id = ? 
             AND rh.start_time <= ?  -- segment starts before or at range end
             AND rh.end_time >= ?     -- segment ends after or at range start
@@ -2189,7 +2179,7 @@ impl DatabaseProvider for SqliteDatabase {
                 r#"
                 DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT rs.id FROM {} rs 
+                    SELECT rs.session_id FROM {} rs 
                     WHERE rs.camera_id = ? AND rs.start_time < ? AND rs.keep_session = 0
                 )
                 "#,
@@ -2205,7 +2195,7 @@ impl DatabaseProvider for SqliteDatabase {
                 r#"
                 DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT id FROM {} WHERE keep_session = 0
+                    SELECT session_id FROM {} WHERE keep_session = 0
                 ) AND created_at < ?
                 "#,
                 TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -2265,7 +2255,7 @@ impl DatabaseProvider for SqliteDatabase {
         keep_session: bool,
     ) -> Result<()> {
         let query = format!(
-            "UPDATE {} SET keep_session = ? WHERE id = ?",
+            "UPDATE {} SET keep_session = ? WHERE session_id = ?",
             TABLE_RECORDING_SESSIONS
         );
 
@@ -2281,7 +2271,7 @@ impl DatabaseProvider for SqliteDatabase {
     async fn delete_recording_session(&self, session_id: i64) -> Result<DeletedRecordingStats> {
         // First check if session is stopped
         let session_query = format!(
-            "SELECT status FROM {} WHERE id = ?",
+            "SELECT status FROM {} WHERE session_id = ?",
             TABLE_RECORDING_SESSIONS
         );
         let status: String = sqlx::query_scalar(&session_query)
@@ -2334,7 +2324,7 @@ impl DatabaseProvider for SqliteDatabase {
         let delete_hls = format!("DELETE FROM {} WHERE session_id = ?", TABLE_RECORDING_HLS);
         sqlx::query(&delete_hls).bind(session_id).execute(&self.pool).await?;
 
-        let delete_session = format!("DELETE FROM {} WHERE id = ?", TABLE_RECORDING_SESSIONS);
+        let delete_session = format!("DELETE FROM {} WHERE session_id = ?", TABLE_RECORDING_SESSIONS);
         sqlx::query(&delete_session).bind(session_id).execute(&self.pool).await?;
 
         // Delete MP4 files from filesystem
@@ -2360,7 +2350,7 @@ impl DatabaseProvider for SqliteDatabase {
         let query = format!(
             "SELECT s.file_path, s.size_bytes, s.session_id
              FROM {} s
-             JOIN {} r ON s.session_id = r.id
+             JOIN {} r ON s.session_id = r.session_id
              WHERE r.camera_id = ? AND s.file_path LIKE ?",
             TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
         );
@@ -2374,7 +2364,7 @@ impl DatabaseProvider for SqliteDatabase {
 
         if let Some((file_path, size_bytes, session_id)) = row {
             // Check if session is stopped
-            let status_query = format!("SELECT status FROM {} WHERE id = ?", TABLE_RECORDING_SESSIONS);
+            let status_query = format!("SELECT status FROM {} WHERE session_id = ?", TABLE_RECORDING_SESSIONS);
             let status: String = sqlx::query_scalar(&status_query)
                 .bind(session_id)
                 .fetch_one(&self.pool)
@@ -2437,7 +2427,7 @@ impl DatabaseProvider for SqliteDatabase {
 
     async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64> {
         // Check if session is stopped
-        let status_query = format!("SELECT status FROM {} WHERE id = ?", TABLE_RECORDING_SESSIONS);
+        let status_query = format!("SELECT status FROM {} WHERE session_id = ?", TABLE_RECORDING_SESSIONS);
         let status: String = sqlx::query_scalar(&status_query)
             .bind(session_id)
             .fetch_one(&self.pool)
@@ -2462,7 +2452,7 @@ impl DatabaseProvider for SqliteDatabase {
         let delete_query = format!(
             "DELETE FROM {}
              WHERE session_id IN (
-                 SELECT id FROM {} WHERE camera_id = ? AND status != 'active'
+                 SELECT session_id FROM {} WHERE camera_id = ? AND status != 'active'
              )
              AND start_time >= ? AND end_time <= ?",
             TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -2560,7 +2550,7 @@ impl DatabaseProvider for SqliteDatabase {
     async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>> {
         let query = format!(
             r#"
-            SELECT id, start_time, end_time, storage_path
+            SELECT session_id, start_time, end_time, file_path
             FROM {}
             WHERE camera_id = ? AND end_time >= ? AND start_time <= ?
             ORDER BY start_time ASC
@@ -2578,10 +2568,10 @@ impl DatabaseProvider for SqliteDatabase {
         let mut segments = Vec::new();
         for row in rows {
             segments.push(crate::export_jobs::Mp4SegmentInfo {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
-                storage_path: row.get("storage_path"),
+                storage_path: row.get("file_path"),
             });
         }
 
@@ -2590,7 +2580,7 @@ impl DatabaseProvider for SqliteDatabase {
 
     async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()> {
         let query = format!(
-            "SELECT data FROM {} WHERE id = ?",
+            "SELECT mp4_data FROM {} WHERE session_id = ?",
             TABLE_RECORDING_MP4
         );
 
@@ -2600,7 +2590,7 @@ impl DatabaseProvider for SqliteDatabase {
             .await?
             .ok_or_else(|| StreamError::not_found(format!("MP4 segment {} not found", segment_id)))?;
 
-        let data: Vec<u8> = row.get("data");
+        let data: Vec<u8> = row.get("mp4_data");
 
         std::fs::write(output_path, data)
             .map_err(|e| StreamError::internal(format!("Failed to write MP4 segment to file: {}", e)))?;
@@ -2853,7 +2843,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let create_sessions_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
-                id BIGSERIAL PRIMARY KEY,
+                session_id BIGSERIAL PRIMARY KEY,
                 camera_id TEXT NOT NULL,
                 start_time TIMESTAMPTZ NOT NULL,
                 end_time TIMESTAMPTZ,
@@ -2871,12 +2861,12 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let create_mjpeg_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
-                session_id BIGINT NOT NULL,
                 camera_id TEXT NOT NULL,
+                session_id BIGINT NOT NULL,
                 timestamp TIMESTAMPTZ NOT NULL,
                 frame_data BYTEA NOT NULL,
-                PRIMARY KEY (session_id, timestamp),
-                FOREIGN KEY (session_id) REFERENCES {}(id)
+                PRIMARY KEY (camera_id, timestamp),
+                FOREIGN KEY (session_id) REFERENCES {}(session_id)
             )
             "#,
             TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
@@ -2893,17 +2883,27 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .execute(&self.pool)
             .await?;
 
+        // Add index on session_id for FK lookups
+        let idx_mjpeg_session = format!(
+            "CREATE INDEX IF NOT EXISTS idx_recording_mjpeg_session ON {}(session_id)",
+            TABLE_RECORDING_MJPEG
+        );
+        sqlx::query(&idx_mjpeg_session)
+            .execute(&self.pool)
+            .await?;
+
         let create_mp4_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
+                camera_id TEXT NOT NULL,
                 session_id BIGINT NOT NULL,
                 start_time TIMESTAMPTZ NOT NULL,
                 end_time TIMESTAMPTZ NOT NULL,
                 file_path TEXT,
                 size_bytes BIGINT NOT NULL,
                 mp4_data BYTEA,
-                PRIMARY KEY (session_id, start_time),
-                FOREIGN KEY (session_id) REFERENCES {}(id) ON DELETE CASCADE
+                PRIMARY KEY (camera_id, start_time),
+                FOREIGN KEY (session_id) REFERENCES {}(session_id) ON DELETE CASCADE
             )
             "#,
             TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -2982,6 +2982,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let create_recording_hls_query = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
+                camera_id TEXT NOT NULL,
                 session_id BIGINT NOT NULL,
                 segment_index INTEGER NOT NULL,
                 start_time TIMESTAMPTZ NOT NULL,
@@ -2990,8 +2991,8 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 segment_data BYTEA NOT NULL,
                 size_bytes BIGINT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (session_id, segment_index),
-                FOREIGN KEY (session_id) REFERENCES {}(id) ON DELETE CASCADE
+                PRIMARY KEY (camera_id, segment_index),
+                FOREIGN KEY (session_id) REFERENCES {}(session_id) ON DELETE CASCADE
             )
             "#,
             TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -3030,6 +3031,15 @@ impl DatabaseProvider for PostgreSqlDatabase {
             TABLE_RECORDING_HLS
         );
         sqlx::query(&idx_recording_hls_time)
+            .execute(&self.pool)
+            .await?;
+
+        // Add index on session_id for FK lookups
+        let idx_recording_hls_session = format!(
+            "CREATE INDEX IF NOT EXISTS idx_recording_hls_session ON {}(session_id)",
+            TABLE_RECORDING_HLS
+        );
+        sqlx::query(&idx_recording_hls_session)
             .execute(&self.pool)
             .await?;
 
@@ -3082,7 +3092,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             r#"
             INSERT INTO {} (camera_id, start_time, reason)
             VALUES ($1, $2, $3)
-            RETURNING id
+            RETURNING session_id
             "#,
             TABLE_RECORDING_SESSIONS
         );
@@ -3093,12 +3103,12 @@ impl DatabaseProvider for PostgreSqlDatabase {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(row.get("id"))
+        Ok(row.get("session_id"))
     }
 
     async fn stop_recording_session(&self, session_id: i64) -> Result<()> {
         let query = format!(
-            "UPDATE {} SET end_time = $1, status = 'stopped' WHERE id = $2",
+            "UPDATE {} SET end_time = $1, status = 'stopped' WHERE session_id = $2",
             TABLE_RECORDING_SESSIONS
         );
         sqlx::query(&query)
@@ -3112,7 +3122,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
     async fn get_active_recordings(&self, camera_id: &str) -> Result<Vec<RecordingSession>> {
         let query = format!(
-            "SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, false) as keep_session FROM {} WHERE camera_id = $1 AND status = 'active'",
+            "SELECT session_id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, false) as keep_session FROM {} WHERE camera_id = $1 AND status = 'active'",
             TABLE_RECORDING_SESSIONS
         );
         let rows = sqlx::query(&query)
@@ -3123,7 +3133,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let mut sessions = Vec::new();
         for row in rows {
             sessions.push(RecordingSession {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
@@ -3212,7 +3222,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let mut conditions = Vec::new();
         let mut bind_count = 0;
         
-        let mut sql = format!("SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, false) as keep_session FROM {}", TABLE_RECORDING_SESSIONS);
+        let mut sql = format!("SELECT session_id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, false) as keep_session FROM {}", TABLE_RECORDING_SESSIONS);
         
         if query.camera_id.is_some() || query.from.is_some() || query.to.is_some() {
             sql.push_str(" WHERE ");
@@ -3265,7 +3275,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let mut sessions = Vec::new();
         for row in rows {
             sessions.push(RecordingSession {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
@@ -3303,7 +3313,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let where_clause = format!("WHERE {}", conditions.join(" AND "));
         
         let sql = format!(
-            "SELECT id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, false) as keep_session FROM {} {} ORDER BY start_time DESC",
+            "SELECT session_id, camera_id, start_time, end_time, reason, status, COALESCE(keep_session, false) as keep_session FROM {} {} ORDER BY start_time DESC",
             TABLE_RECORDING_SESSIONS, where_clause
         );
         
@@ -3339,7 +3349,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let mut sessions = Vec::new();
         for row in rows {
             sessions.push(RecordingSession {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 camera_id: row.get("camera_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
@@ -3416,145 +3426,100 @@ impl DatabaseProvider for PostgreSqlDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
-        const BATCH_SIZE: i64 = 10_000;
+        let cam_desc = camera_id.unwrap_or("all cameras");
 
-        let cam_id = camera_id.unwrap_or("unknown");
-
-        info!(
-            "Counting frames to delete (older than {}) for camera '{}'...",
-            older_than.format("%Y-%m-%d %H:%M:%S UTC"),
-            cam_id
-        );
-
-        // Fetch KEPT session IDs (usually 0 or very few)
-        let kept_session_ids: Vec<i64> = {
+        // Find sessions to clean up (oldest first, not marked as keep, ended before retention cutoff)
+        let sessions_to_clean: Vec<(i64, String)> = if let Some(cam_id) = camera_id {
             let query = format!(
-                "SELECT id FROM {} WHERE camera_id = $1 AND keep_session = true",
+                r#"
+                SELECT session_id, camera_id FROM {}
+                WHERE camera_id = $1
+                  AND end_time IS NOT NULL
+                  AND end_time < $2
+                  AND keep_session = false
+                ORDER BY end_time ASC
+                "#,
                 TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_scalar(&query)
+            sqlx::query_as(&query)
                 .bind(cam_id)
+                .bind(older_than)
+                .fetch_all(&self.pool).await?
+        } else {
+            let query = format!(
+                r#"
+                SELECT session_id, camera_id FROM {}
+                WHERE end_time IS NOT NULL
+                  AND end_time < $1
+                  AND keep_session = false
+                ORDER BY end_time ASC
+                "#,
+                TABLE_RECORDING_SESSIONS
+            );
+            sqlx::query_as(&query)
+                .bind(older_than)
                 .fetch_all(&self.pool).await?
         };
 
-        // Count frames to delete using camera_id index
-        let count_start = std::time::Instant::now();
-        let count_query = if kept_session_ids.is_empty() {
-            let query = format!(
-                "SELECT COUNT(*) FROM {} WHERE camera_id = $1 AND timestamp < $2",
-                TABLE_RECORDING_MJPEG
-            );
-            sqlx::query_scalar::<_, i64>(&query)
-                .bind(cam_id)
-                .bind(older_than)
-                .fetch_one(&self.pool).await?
-        } else {
-            let query = format!(
-                "SELECT COUNT(*) FROM {} WHERE camera_id = $1 AND timestamp < $2 AND session_id != ALL($3)",
-                TABLE_RECORDING_MJPEG
-            );
-            sqlx::query_scalar::<_, i64>(&query)
-                .bind(cam_id)
-                .bind(older_than)
-                .bind(&kept_session_ids)
-                .fetch_one(&self.pool).await?
-        };
-        let count_elapsed = count_start.elapsed();
-
-        if count_query == 0 {
-            info!(
-                "No frames to delete for camera '{}' (count query took {:.1}s)",
-                cam_id,
-                count_elapsed.as_secs_f64()
-            );
+        if sessions_to_clean.is_empty() {
+            info!("No expired sessions to clean up for {}", cam_desc);
             return Ok(0);
         }
 
         info!(
-            "Found {} frames to delete for camera '{}' (count took {:.1}s), {} kept sessions excluded, deleting in batches of {}...",
-            count_query,
-            cam_id,
-            count_elapsed.as_secs_f64(),
-            kept_session_ids.len(),
-            BATCH_SIZE
+            "Found {} expired sessions to clean up for {}, processing oldest first...",
+            sessions_to_clean.len(),
+            cam_desc
         );
 
-        // Delete in batches using camera_id + timestamp index
         let mut total_deleted: u64 = 0;
-        let mut batch_num = 0;
+        let mut sessions_processed = 0;
 
-        loop {
-            batch_num += 1;
-            info!("Starting batch {} delete...", batch_num);
-            let batch_start = std::time::Instant::now();
+        for (session_id, session_camera_id) in &sessions_to_clean {
+            let session_start = std::time::Instant::now();
 
-            // DELETE using camera_id and timestamp - uses idx_camera_timestamp index
-            let deleted = if kept_session_ids.is_empty() {
-                let query = format!(
-                    r#"
-                    DELETE FROM {}
-                    WHERE ctid IN (
-                        SELECT ctid FROM {}
-                        WHERE camera_id = $1 AND timestamp < $2
-                        LIMIT $3
-                    )
-                    "#,
-                    TABLE_RECORDING_MJPEG, TABLE_RECORDING_MJPEG
-                );
-                sqlx::query(&query)
-                    .bind(cam_id)
-                    .bind(older_than)
-                    .bind(BATCH_SIZE)
-                    .execute(&self.pool).await?
-                    .rows_affected()
-            } else {
-                let query = format!(
-                    r#"
-                    DELETE FROM {}
-                    WHERE ctid IN (
-                        SELECT ctid FROM {}
-                        WHERE camera_id = $1 AND timestamp < $2 AND session_id != ALL($3)
-                        LIMIT $4
-                    )
-                    "#,
-                    TABLE_RECORDING_MJPEG, TABLE_RECORDING_MJPEG
-                );
-                sqlx::query(&query)
-                    .bind(cam_id)
-                    .bind(older_than)
-                    .bind(&kept_session_ids)
-                    .bind(BATCH_SIZE)
-                    .execute(&self.pool).await?
-                    .rows_affected()
-            };
+            // Delete all frames for this session
+            let delete_query = format!(
+                "DELETE FROM {} WHERE session_id = $1",
+                TABLE_RECORDING_MJPEG
+            );
+            let deleted = sqlx::query(&delete_query)
+                .bind(session_id)
+                .execute(&self.pool).await?
+                .rows_affected();
 
             total_deleted += deleted;
-            let batch_elapsed = batch_start.elapsed();
+            sessions_processed += 1;
 
-            info!(
-                "Batch {}: deleted {} frames in {:.1}s (total: {}/{})",
-                batch_num,
-                deleted,
-                batch_elapsed.as_secs_f64(),
-                total_deleted,
-                count_query
-            );
+            let session_elapsed = session_start.elapsed();
 
-            if deleted == 0 || deleted < BATCH_SIZE as u64 {
-                break;
+            if deleted > 0 {
+                debug!(
+                    "Session {}: deleted {} frames for camera '{}' in {:.2}s (total: {} frames, {}/{} sessions)",
+                    session_id,
+                    deleted,
+                    session_camera_id,
+                    session_elapsed.as_secs_f64(),
+                    total_deleted,
+                    sessions_processed,
+                    sessions_to_clean.len()
+                );
             }
 
-            // Small yield to allow other tasks to run
-            tokio::task::yield_now().await;
+            // Yield periodically to allow other tasks to run
+            if sessions_processed % 10 == 0 {
+                tokio::task::yield_now().await;
+            }
         }
 
         let elapsed = start_time.elapsed();
 
         info!(
-            "Completed frame cleanup: {} frames deleted in {:.1}s for camera '{}'",
+            "Completed frame cleanup: {} frames deleted from {} sessions in {:.1}s for {}",
             total_deleted,
+            sessions_processed,
             elapsed.as_secs_f64(),
-            cam_id
+            cam_desc
         );
 
         Ok(total_deleted as usize)
@@ -3581,10 +3546,10 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 AND end_time IS NOT NULL
                 AND keep_session = false
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.session_id
                 )
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
@@ -3603,10 +3568,10 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 WHERE end_time IS NOT NULL
                 AND keep_session = false
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mjpeg} WHERE session_id = {sessions}.session_id
                 )
                 AND NOT EXISTS (
-                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.id
+                    SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
@@ -3734,12 +3699,13 @@ impl DatabaseProvider for PostgreSqlDatabase {
     async fn add_video_segment(&self, segment: &VideoSegment) -> Result<i64> {
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, start_time, end_time, file_path, size_bytes, mp4_data)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO {} (camera_id, session_id, start_time, end_time, file_path, size_bytes, mp4_data)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
             TABLE_RECORDING_MP4
         );
         let result = sqlx::query(&query)
+        .bind(&segment.camera_id)
         .bind(segment.session_id)
         .bind(segment.start_time)
         .bind(segment.end_time)
@@ -3764,7 +3730,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.session_id
             WHERE rs.camera_id = $1 AND vs.start_time < $2 AND vs.end_time > $3
             ORDER BY vs.start_time ASC
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
@@ -3848,7 +3814,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes,
                    rs.reason as recording_reason, rs.camera_id
             FROM {} vs
-            JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.session_id
             {}
             ORDER BY vs.start_time {}
             LIMIT ${}
@@ -3916,7 +3882,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 r#"
                 SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
-                JOIN {} rs ON vs.session_id = rs.id
+                JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE rs.camera_id = $1 AND vs.end_time < $2 AND rs.keep_session = false
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -3932,7 +3898,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 r#"
                 SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
-                JOIN {} rs ON vs.session_id = rs.id
+                JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE vs.end_time < $1 AND rs.keep_session = false
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -3961,7 +3927,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 WHERE session_id IN (
                     SELECT vs.session_id 
                     FROM {} vs
-                    JOIN {} rs ON vs.session_id = rs.id
+                    JOIN {} rs ON vs.session_id = rs.session_id
                     WHERE rs.camera_id = $1 AND vs.end_time < $2 AND rs.keep_session = false
                 )
                 "#,
@@ -3977,7 +3943,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 r#"
                 DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT id FROM {} WHERE keep_session = false
+                    SELECT session_id FROM {} WHERE keep_session = false
                 ) AND end_time < $1
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
@@ -4142,7 +4108,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let query = format!(r#"
             SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data, rs.camera_id
             FROM {} vs
-            JOIN {} rs ON vs.session_id = rs.id
+            JOIN {} rs ON vs.session_id = rs.session_id
             WHERE rs.camera_id = $1 AND vs.start_time = $2
             "#, TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS);
         
@@ -4405,14 +4371,15 @@ impl DatabaseProvider for PostgreSqlDatabase {
     async fn add_recording_hls_segment(&self, segment: &RecordingHlsSegment) -> Result<i64> {
         let query = format!(
             r#"
-            INSERT INTO {} (session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO {} (camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING session_id
             "#,
             TABLE_RECORDING_HLS
         );
-        
+
         let row = sqlx::query(&query)
+            .bind(&segment.camera_id)
             .bind(segment.session_id)
             .bind(segment.segment_index)
             .bind(segment.start_time)
@@ -4422,7 +4389,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .bind(segment.size_bytes)
             .fetch_one(&self.pool)
             .await?;
-            
+
         Ok(row.get("session_id"))
     }
 
@@ -4497,7 +4464,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             SELECT rh.session_id, rh.segment_index, rh.start_time, rh.end_time, rh.duration_seconds, 
                    rh.segment_data, rh.size_bytes, rh.created_at
             FROM {} rh
-            JOIN {} rs ON rh.session_id = rs.id
+            JOIN {} rs ON rh.session_id = rs.session_id
             WHERE rs.camera_id = $1 
             AND rh.start_time <= $2  -- segment starts before or at range end
             AND rh.end_time >= $3     -- segment ends after or at range start
@@ -4532,7 +4499,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 r#"
                 DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT rs.id FROM {} rs 
+                    SELECT rs.session_id FROM {} rs 
                     WHERE rs.camera_id = $1 AND rs.start_time < $2 AND rs.keep_session = false
                 )
                 "#,
@@ -4548,7 +4515,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 r#"
                 DELETE FROM {} 
                 WHERE session_id IN (
-                    SELECT id FROM {} WHERE keep_session = false
+                    SELECT session_id FROM {} WHERE keep_session = false
                 ) AND created_at < $1
                 "#,
                 TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -4608,7 +4575,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         keep_session: bool,
     ) -> Result<()> {
         let query = format!(
-            "UPDATE {} SET keep_session = $1 WHERE id = $2",
+            "UPDATE {} SET keep_session = $1 WHERE session_id = $2",
             TABLE_RECORDING_SESSIONS
         );
 
@@ -4624,7 +4591,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
     async fn delete_recording_session(&self, session_id: i64) -> Result<DeletedRecordingStats> {
         // First check if session is stopped
         let session_query = format!(
-            "SELECT status FROM {} WHERE id = $1",
+            "SELECT status FROM {} WHERE session_id = $1",
             TABLE_RECORDING_SESSIONS
         );
         let status: String = sqlx::query_scalar(&session_query)
@@ -4677,7 +4644,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let delete_hls = format!("DELETE FROM {} WHERE session_id = $1", TABLE_RECORDING_HLS);
         sqlx::query(&delete_hls).bind(session_id).execute(&self.pool).await?;
 
-        let delete_session = format!("DELETE FROM {} WHERE id = $1", TABLE_RECORDING_SESSIONS);
+        let delete_session = format!("DELETE FROM {} WHERE session_id = $1", TABLE_RECORDING_SESSIONS);
         sqlx::query(&delete_session).bind(session_id).execute(&self.pool).await?;
 
         // Delete MP4 files from filesystem
@@ -4703,7 +4670,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let query = format!(
             "SELECT s.file_path, s.size_bytes, s.session_id
              FROM {} s
-             JOIN {} r ON s.session_id = r.id
+             JOIN {} r ON s.session_id = r.session_id
              WHERE r.camera_id = $1 AND s.file_path LIKE $2",
             TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
         );
@@ -4717,7 +4684,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
         if let Some((file_path, size_bytes, session_id)) = row {
             // Check if session is stopped
-            let status_query = format!("SELECT status FROM {} WHERE id = $1", TABLE_RECORDING_SESSIONS);
+            let status_query = format!("SELECT status FROM {} WHERE session_id = $1", TABLE_RECORDING_SESSIONS);
             let status: String = sqlx::query_scalar(&status_query)
                 .bind(session_id)
                 .fetch_one(&self.pool)
@@ -4780,7 +4747,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
     async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64> {
         // Check if session is stopped
-        let status_query = format!("SELECT status FROM {} WHERE id = $1", TABLE_RECORDING_SESSIONS);
+        let status_query = format!("SELECT status FROM {} WHERE session_id = $1", TABLE_RECORDING_SESSIONS);
         let status: String = sqlx::query_scalar(&status_query)
             .bind(session_id)
             .fetch_one(&self.pool)
@@ -4805,7 +4772,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let delete_query = format!(
             "DELETE FROM {}
              WHERE session_id IN (
-                 SELECT id FROM {} WHERE camera_id = $1 AND status != 'active'
+                 SELECT session_id FROM {} WHERE camera_id = $1 AND status != 'active'
              )
              AND start_time >= $2 AND end_time <= $3",
             TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
@@ -4908,7 +4875,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
     async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>> {
         let query = format!(
             r#"
-            SELECT id, start_time, end_time, storage_path
+            SELECT session_id, start_time, end_time, file_path
             FROM {}
             WHERE camera_id = $1 AND end_time >= $2 AND start_time <= $3
             ORDER BY start_time ASC
@@ -4926,10 +4893,10 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let mut segments = Vec::new();
         for row in rows {
             segments.push(crate::export_jobs::Mp4SegmentInfo {
-                id: row.get("id"),
+                session_id: row.get("session_id"),
                 start_time: row.get("start_time"),
                 end_time: row.get("end_time"),
-                storage_path: row.get("storage_path"),
+                storage_path: row.get("file_path"),
             });
         }
 
@@ -4938,7 +4905,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
     async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()> {
         let query = format!(
-            "SELECT data FROM {} WHERE id = $1",
+            "SELECT mp4_data FROM {} WHERE session_id = $1",
             TABLE_RECORDING_MP4
         );
 
@@ -4948,7 +4915,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             .await?
             .ok_or_else(|| StreamError::not_found(format!("MP4 segment {} not found", segment_id)))?;
 
-        let data: Vec<u8> = row.get("data");
+        let data: Vec<u8> = row.get("mp4_data");
 
         std::fs::write(output_path, data)
             .map_err(|e| StreamError::internal(format!("Failed to write MP4 segment to file: {}", e)))?;

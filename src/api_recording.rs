@@ -215,7 +215,7 @@ pub async fn api_list_recordings(
             let recordings_data: Vec<serde_json::Value> = recordings
                 .into_iter()
                 .map(|r| serde_json::json!({
-                    "id": r.id,
+                    "id": r.session_id,
                     "camera_id": r.camera_id,
                     "start_time": r.start_time,
                     "end_time": r.end_time,

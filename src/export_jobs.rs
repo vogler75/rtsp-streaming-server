@@ -278,9 +278,9 @@ impl ExportJobManager {
                     .join(segment.storage_path.as_ref().unwrap())
             } else {
                 // Database storage - extract to temp file
-                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, segment.id));
+                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, segment.session_id));
                 database
-                    .extract_mp4_segment_to_file(segment.id, &temp_file_path.to_string_lossy())
+                    .extract_mp4_segment_to_file(segment.session_id, &temp_file_path.to_string_lossy())
                     .await?;
                 temp_file_path
             };
@@ -342,7 +342,7 @@ impl ExportJobManager {
         // Remove temp segment files (database-stored segments)
         for segment in &segments {
             if segment.storage_path.is_none() {
-                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, segment.id));
+                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, segment.session_id));
                 if let Err(e) = fs::remove_file(&temp_file_path) {
                     warn!("Failed to remove temp segment file: {}", e);
                 }
@@ -361,7 +361,7 @@ impl ExportJobManager {
 // Struct to hold MP4 segment information
 #[derive(Debug, Clone)]
 pub struct Mp4SegmentInfo {
-    pub id: i64,
+    pub session_id: i64,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub storage_path: Option<String>, // None = database storage, Some = filesystem storage

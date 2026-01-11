@@ -215,7 +215,7 @@ impl AppState {
                 ).await {
                     Ok(sessions) => {
                         sessions.into_iter()
-                            .find(|s| s.id == recording.session_id)
+                            .find(|s| s.session_id == recording.session_id)
                             .and_then(|s| s.reason)
                             .unwrap_or_else(|| "Camera restart".to_string())
                     }

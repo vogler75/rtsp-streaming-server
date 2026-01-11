@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::collections::HashMap;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use chrono::{DateTime, Utc, Datelike};
 use tracing::{info, error, warn, trace, debug};
 use bytes::Bytes;
@@ -10,6 +10,173 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery, VideoSegment, RecordingHlsSegment};
 
+/// Message sent from frame receiver to database writer task
+enum FrameWriterMessage {
+    /// A frame to be written to the database
+    Frame {
+        session_id: i64,
+        timestamp: DateTime<Utc>,
+        frame_number: i64,
+        data: Vec<u8>,
+    },
+    /// Session has changed (due to segmentation)
+    SessionChanged {
+        new_session_id: i64,
+    },
+    /// Flush buffer immediately and confirm
+    Flush,
+}
+
+/// Channel buffer size for writer - allows ~60 seconds of frames at 15fps
+const WRITER_CHANNEL_BUFFER: usize = 900;
+
+/// Bulk write settings - batch more frames to reduce write frequency
+const BULK_WRITE_MAX_FRAMES: usize = 60;
+const BULK_WRITE_MAX_INTERVAL_MS: u64 = 2000;
+
+/// Dedicated database writer task - receives frames via mpsc channel and writes in batches
+async fn frame_writer_loop(
+    database: Arc<dyn DatabaseProvider>,
+    camera_id: String,
+    mut receiver: mpsc::Receiver<FrameWriterMessage>,
+) {
+    let mut frame_buffer: Vec<(DateTime<Utc>, i64, Vec<u8>)> = Vec::with_capacity(BULK_WRITE_MAX_FRAMES);
+    let mut current_session_id: Option<i64> = None;
+    let mut last_flush_time = std::time::Instant::now();
+
+    debug!("Frame writer started for camera '{}'", camera_id);
+
+    loop {
+        // Use timeout to ensure we flush periodically even without new frames
+        let timeout = tokio::time::Duration::from_millis(BULK_WRITE_MAX_INTERVAL_MS);
+
+        match tokio::time::timeout(timeout, receiver.recv()).await {
+            Ok(Some(msg)) => {
+                match msg {
+                    FrameWriterMessage::Frame { session_id, timestamp, frame_number, data } => {
+                        // Initialize session_id on first frame
+                        if current_session_id.is_none() {
+                            current_session_id = Some(session_id);
+                        }
+
+                        // If session changed, flush old session's frames first
+                        if current_session_id != Some(session_id) && !frame_buffer.is_empty() {
+                            if let Some(old_session_id) = current_session_id {
+                                let count = frame_buffer.len();
+                                if let Err(e) = database.add_recorded_frames_bulk(old_session_id, &camera_id, &frame_buffer).await {
+                                    error!("Failed to flush {} frames for old session {}: {}", count, old_session_id, e);
+                                } else {
+                                    trace!("Flushed {} frames for old session {} before session change", count, old_session_id);
+                                }
+                                frame_buffer.clear();
+                            }
+                            current_session_id = Some(session_id);
+                        }
+
+                        frame_buffer.push((timestamp, frame_number, data));
+
+                        // Flush if buffer is full
+                        if frame_buffer.len() >= BULK_WRITE_MAX_FRAMES {
+                            if let Some(sid) = current_session_id {
+                                let count = frame_buffer.len();
+                                let total_bytes: usize = frame_buffer.iter().map(|(_, _, d)| d.len()).sum();
+                                let write_start = std::time::Instant::now();
+                                match database.add_recorded_frames_bulk(sid, &camera_id, &frame_buffer).await {
+                                    Ok(inserted) => {
+                                        let write_ms = write_start.elapsed().as_millis();
+                                        if write_ms > 500 {
+                                            warn!("Slow frame write for camera '{}': {} frames ({} KB) in {}ms",
+                                                  camera_id, inserted, total_bytes / 1024, write_ms);
+                                        } else {
+                                            debug!("Bulk inserted {} frames ({} KB) for camera '{}' in {}ms",
+                                                   inserted, total_bytes / 1024, camera_id, write_ms);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to bulk insert {} frames for camera '{}': {}", count, camera_id, e);
+                                    }
+                                }
+                                frame_buffer.clear();
+                                last_flush_time = std::time::Instant::now();
+                            }
+                        }
+                    }
+                    FrameWriterMessage::SessionChanged { new_session_id } => {
+                        // Flush current buffer before session change
+                        if !frame_buffer.is_empty() {
+                            if let Some(old_session_id) = current_session_id {
+                                let count = frame_buffer.len();
+                                if let Err(e) = database.add_recorded_frames_bulk(old_session_id, &camera_id, &frame_buffer).await {
+                                    error!("Failed to flush {} frames before session change: {}", count, e);
+                                }
+                                frame_buffer.clear();
+                            }
+                        }
+                        current_session_id = Some(new_session_id);
+                        last_flush_time = std::time::Instant::now();
+                        debug!("Writer switched to session {} for camera '{}'", new_session_id, camera_id);
+                    }
+                    FrameWriterMessage::Flush => {
+                        if !frame_buffer.is_empty() {
+                            if let Some(sid) = current_session_id {
+                                let count = frame_buffer.len();
+                                if let Err(e) = database.add_recorded_frames_bulk(sid, &camera_id, &frame_buffer).await {
+                                    error!("Failed to flush {} frames on request: {}", count, e);
+                                } else {
+                                    trace!("Flushed {} frames on request for camera '{}'", count, camera_id);
+                                }
+                                frame_buffer.clear();
+                                last_flush_time = std::time::Instant::now();
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                // Channel closed - flush remaining frames and exit
+                if !frame_buffer.is_empty() {
+                    if let Some(sid) = current_session_id {
+                        let count = frame_buffer.len();
+                        if let Err(e) = database.add_recorded_frames_bulk(sid, &camera_id, &frame_buffer).await {
+                            error!("Failed to flush {} remaining frames on shutdown: {}", count, e);
+                        } else {
+                            debug!("Flushed {} remaining frames on writer shutdown for camera '{}'", count, camera_id);
+                        }
+                    }
+                }
+                debug!("Frame writer stopped for camera '{}'", camera_id);
+                break;
+            }
+            Err(_) => {
+                // Timeout - flush buffer if there are frames and enough time has passed
+                if !frame_buffer.is_empty() && last_flush_time.elapsed().as_millis() >= BULK_WRITE_MAX_INTERVAL_MS as u128 {
+                    if let Some(sid) = current_session_id {
+                        let count = frame_buffer.len();
+                        let total_bytes: usize = frame_buffer.iter().map(|(_, _, d)| d.len()).sum();
+                        let write_start = std::time::Instant::now();
+                        match database.add_recorded_frames_bulk(sid, &camera_id, &frame_buffer).await {
+                            Ok(inserted) => {
+                                let write_ms = write_start.elapsed().as_millis();
+                                if write_ms > 500 {
+                                    warn!("Slow periodic flush for camera '{}': {} frames ({} KB) in {}ms",
+                                          camera_id, inserted, total_bytes / 1024, write_ms);
+                                } else {
+                                    debug!("Periodic flush: {} frames ({} KB) for camera '{}' in {}ms",
+                                           inserted, total_bytes / 1024, camera_id, write_ms);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed periodic flush of {} frames for camera '{}': {}", count, camera_id, e);
+                            }
+                        }
+                        frame_buffer.clear();
+                        last_flush_time = std::time::Instant::now();
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ActiveRecording {
@@ -215,15 +382,10 @@ impl RecordingManager {
         mut session_id: i64,
         mut frame_receiver: broadcast::Receiver<Bytes>,
         camera_config: crate::config::CameraConfig,
+        writer_tx: mpsc::Sender<FrameWriterMessage>,
     ) {
         let mut frame_number = 0i64;
-        let mut last_session_check = Utc::now(); // Track when we last checked for session segmentation
-
-        // Bulk write buffer: flush when 30 frames accumulated or 1 second passed
-        const BULK_WRITE_MAX_FRAMES: usize = 30;
-        const BULK_WRITE_MAX_INTERVAL_MS: i64 = 1000;
-        let mut frame_buffer: Vec<(DateTime<Utc>, i64, Vec<u8>)> = Vec::with_capacity(BULK_WRITE_MAX_FRAMES);
-        let mut last_flush_time = Utc::now();
+        let mut last_session_check = Utc::now();
 
         // Determine the effective session segment duration
         // Priority: camera-specific setting > global setting
@@ -231,7 +393,7 @@ impl RecordingManager {
         let effective_session_segment_minutes = match camera_config.get_session_segment_minutes() {
             Some(0) => {
                 info!("Session segmentation disabled for camera '{}' (camera override = 0)", camera_id);
-                None // Disabled
+                None
             }
             Some(minutes) => {
                 info!("Using camera-specific session segmentation for '{}': {} minutes", camera_id, minutes);
@@ -240,7 +402,7 @@ impl RecordingManager {
             None => {
                 if config.session_segment_minutes == 0 {
                     info!("Session segmentation disabled for camera '{}' (global setting = 0)", camera_id);
-                    None // Disabled
+                    None
                 } else {
                     info!("Using global session segmentation for '{}': {} minutes", camera_id, config.session_segment_minutes);
                     Some(config.session_segment_minutes)
@@ -260,17 +422,8 @@ impl RecordingManager {
                     drop(active_recordings_guard);
 
                     if !is_active {
-                        trace!("Recording stopped for camera '{}', flushing buffer and ending task", camera_id);
-                        // Flush remaining frames before exiting
-                        if !frame_buffer.is_empty() {
-                            let count = frame_buffer.len();
-                            if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
-                                error!("Failed to flush {} remaining frames on stop: {}", count, e);
-                            } else {
-                                trace!("Flushed {} remaining frames on recording stop", count);
-                            }
-                            frame_buffer.clear();
-                        }
+                        trace!("Recording stopped for camera '{}', ending receiver task", camera_id);
+                        // Writer will flush when channel is dropped
                         break;
                     }
 
@@ -281,15 +434,8 @@ impl RecordingManager {
                             info!("Session segment interval ({} minutes) reached for camera '{}', splitting recording session {}",
                                   segment_minutes, camera_id, session_id);
 
-                            // Flush buffer before session split
-                            if !frame_buffer.is_empty() {
-                                let count = frame_buffer.len();
-                                if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
-                                    error!("Failed to flush {} frames before session split: {}", count, e);
-                                }
-                                frame_buffer.clear();
-                                last_flush_time = timestamp;
-                            }
+                            // Signal writer to flush before session split
+                            let _ = writer_tx.send(FrameWriterMessage::Flush).await;
 
                             // Get the recording reason from the database to use for the new session
                             if let Ok(sessions) = database.get_active_recordings(&camera_id).await {
@@ -302,10 +448,15 @@ impl RecordingManager {
                                     } else {
                                         info!("Stopped recording session {} for segment split", session_id);
 
-                                        // Create a new session with the same reason, using current time
+                                        // Create a new session with the same reason
                                         match database.create_recording_session(&camera_id, reason.as_deref(), Utc::now()).await {
                                             Ok(new_session_id) => {
                                                 info!("Created new recording session {} for segment continuation", new_session_id);
+
+                                                // Notify writer about session change
+                                                let _ = writer_tx.send(FrameWriterMessage::SessionChanged {
+                                                    new_session_id,
+                                                }).await;
 
                                                 // Update the active recording with new session info
                                                 let mut active_recordings_guard = active_recordings.write().await;
@@ -316,20 +467,17 @@ impl RecordingManager {
                                                 }
                                                 drop(active_recordings_guard);
 
-                                                // Update the session_id for subsequent frames
                                                 session_id = new_session_id;
-                                                frame_number = 1; // Reset frame number for new session
+                                                frame_number = 1;
                                             }
                                             Err(e) => {
                                                 error!("Failed to create new recording session for segment split: {}", e);
-                                                // Continue with the old session rather than stopping
                                             }
                                         }
                                     }
                                 }
                             }
 
-                            // Update the last session check timestamp
                             last_session_check = timestamp;
                         }
                     }
@@ -341,31 +489,25 @@ impl RecordingManager {
                         continue;
                     }
 
-                    // Add frame to buffer
-                    frame_buffer.push((timestamp, frame_number, frame_data.to_vec()));
-
-                    // Check if we should flush the buffer (30 frames or 1 second elapsed)
-                    let time_since_flush = timestamp.signed_duration_since(last_flush_time).num_milliseconds();
-                    let should_flush = frame_buffer.len() >= BULK_WRITE_MAX_FRAMES
-                        || time_since_flush >= BULK_WRITE_MAX_INTERVAL_MS;
-
-                    if should_flush {
-                        let frames_to_insert = frame_buffer.len();
-                        match database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
-                            Ok(inserted) => {
-                                trace!("Bulk inserted {} frames for camera '{}' (buffer: {}, interval: {}ms)",
-                                       inserted, camera_id, frames_to_insert, time_since_flush);
-                            }
-                            Err(e) => {
-                                error!("Failed to bulk insert {} frames for camera '{}': {}",
-                                       frames_to_insert, camera_id, e);
-                            }
+                    // Send frame to writer (non-blocking with try_send for better performance)
+                    match writer_tx.try_send(FrameWriterMessage::Frame {
+                        session_id,
+                        timestamp,
+                        frame_number,
+                        data: frame_data.to_vec(),
+                    }) {
+                        Ok(_) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            // Channel full - writer can't keep up, but we don't block
+                            warn!("Frame writer channel full for camera '{}', dropping frame", camera_id);
                         }
-                        frame_buffer.clear();
-                        last_flush_time = timestamp;
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            error!("Frame writer channel closed for camera '{}'", camera_id);
+                            break;
+                        }
                     }
 
-                    // Update frame count
+                    // Update frame count (quick operation, acceptable to await)
                     let mut active_recordings_guard = active_recordings.write().await;
                     if let Some(recording) = active_recordings_guard.get_mut(&camera_id) {
                         recording.frame_count += 1;
@@ -375,15 +517,7 @@ impl RecordingManager {
                             let elapsed = timestamp.signed_duration_since(recording.start_time);
                             if elapsed.num_seconds() >= duration {
                                 info!("Recording duration reached for camera '{}', stopping", camera_id);
-                                // Flush remaining frames before exiting
                                 drop(active_recordings_guard);
-                                if !frame_buffer.is_empty() {
-                                    let count = frame_buffer.len();
-                                    if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
-                                        error!("Failed to flush {} remaining frames on duration stop: {}", count, e);
-                                    }
-                                    frame_buffer.clear();
-                                }
                                 break;
                             }
                         }
@@ -394,20 +528,12 @@ impl RecordingManager {
                     warn!("Recording lagged for camera '{}', skipped {} frames", camera_id, skipped);
                 }
                 Err(broadcast::error::RecvError::Closed) => {
-                    info!("Frame channel closed for camera '{}', flushing buffer and stopping recording", camera_id);
-                    // Flush remaining frames before exiting
-                    if !frame_buffer.is_empty() {
-                        let count = frame_buffer.len();
-                        if let Err(e) = database.add_recorded_frames_bulk(session_id, &camera_id, &frame_buffer).await {
-                            error!("Failed to flush {} remaining frames on channel close: {}", count, e);
-                        } else {
-                            trace!("Flushed {} remaining frames on channel close", count);
-                        }
-                    }
+                    info!("Frame channel closed for camera '{}', stopping recording", camera_id);
                     break;
                 }
             }
         }
+        // Dropping writer_tx will signal the writer to flush and exit
     }
 
     async fn start_recording_task(
@@ -437,8 +563,20 @@ impl RecordingManager {
             let mut tasks = Vec::new();
 
             if config.frame_storage_enabled {
+                // Create mpsc channel for frame writer
+                let (writer_tx, writer_rx) = mpsc::channel::<FrameWriterMessage>(WRITER_CHANNEL_BUFFER);
+
+                // Spawn the dedicated database writer task
+                let writer_db = database.clone();
+                let writer_camera_id = camera_id.clone();
+                let writer_task = tokio::spawn(async move {
+                    frame_writer_loop(writer_db, writer_camera_id, writer_rx).await;
+                });
+                tasks.push(writer_task);
+
+                // Spawn the frame receiver task (sends to writer via channel)
                 let frame_receiver = frame_sender.subscribe();
-                let task = tokio::spawn(Self::frame_recording_loop(
+                let receiver_task = tokio::spawn(Self::frame_recording_loop(
                     config.clone(),
                     database.clone(),
                     active_recordings.clone(),
@@ -446,8 +584,9 @@ impl RecordingManager {
                     session_id,
                     frame_receiver,
                     camera_config.clone(),
+                    writer_tx,
                 ));
-                tasks.push(task);
+                tasks.push(receiver_task);
             }
 
             if mp4_storage_type != crate::config::Mp4StorageType::Disabled {
@@ -530,7 +669,7 @@ impl RecordingManager {
         let session_count = active_sessions.len();
         
         for session in active_sessions {
-            database.stop_recording_session(session.id).await?;
+            database.stop_recording_session(session.session_id).await?;
         }
 
         // Remove from active recordings map
@@ -733,40 +872,40 @@ impl RecordingManager {
                     for session in active_sessions {
                         info!(
                             "Found active recording session {} for camera '{}', restarting recording...",
-                            session.id, camera_id
+                            session.session_id, camera_id
                         );
-                        
+
                         // Create active recording entry to track this session
                         let active_recording = ActiveRecording {
-                            session_id: session.id,
+                            session_id: session.session_id,
                             start_time: session.start_time,
                             frame_count: 0, // Will be updated as new frames come in
                             requested_duration: None, // Not tracked for restarted sessions
                         };
-                        
+
                         // Store active recording
                         let mut active_recordings = self.active_recordings.write().await;
                         active_recordings.insert(camera_id.clone(), active_recording);
                         drop(active_recordings);
-                        
+
                         // Subscribe to frame stream and start recording task
                         let frame_receiver = frame_sender.subscribe();
                         let mut frame_subscribers = self.frame_subscribers.write().await;
                         frame_subscribers.insert(camera_id.clone(), frame_receiver);
                         drop(frame_subscribers);
-                        
+
                         // Start recording task
                         if let Some(camera_config) = camera_configs.get(camera_id) {
-                            self.start_recording_task(camera_id.clone(), session.id, frame_sender.clone(), camera_config.clone()).await;
+                            self.start_recording_task(camera_id.clone(), session.session_id, frame_sender.clone(), camera_config.clone()).await;
                         } else {
                             error!("Camera config not found for camera '{}', skipping recording restart", camera_id);
                             continue;
                         }
-                        
+
                         restarted_count += 1;
                         info!(
                             "Restarted recording for camera '{}' with session ID {}",
-                            camera_id, session.id
+                            camera_id, session.session_id
                         );
                     }
                 }
@@ -1079,6 +1218,7 @@ impl RecordingManager {
         tokio::fs::write(&file_path, &mp4_data).await?;
         
         let segment = VideoSegment {
+            camera_id: camera_id.clone(),
             session_id,
             start_time,
             end_time,
@@ -1086,7 +1226,6 @@ impl RecordingManager {
             size_bytes: mp4_data.len() as i64,
             mp4_data: None, // No blob data for filesystem storage
             recording_reason: None, // Will be filled by the database query when retrieved
-            camera_id: None, // Not stored in segment, available via session
         };
 
         database.add_video_segment(&segment).await?;
@@ -1118,6 +1257,7 @@ impl RecordingManager {
         let mp4_data = Self::create_mp4_from_frames(frames, actual_framerate).await?;
         
         let segment = VideoSegment {
+            camera_id: camera_id.clone(),
             session_id,
             start_time,
             end_time,
@@ -1125,7 +1265,6 @@ impl RecordingManager {
             size_bytes: mp4_data.len() as i64,
             mp4_data: Some(mp4_data), // Store as BLOB
             recording_reason: None, // Will be filled by the database query when retrieved
-            camera_id: None, // Not stored in segment, available via session
         };
 
         database.add_video_segment(&segment).await?;
@@ -1386,6 +1525,7 @@ impl RecordingManager {
 
         // Create HLS segment struct
         let hls_segment = RecordingHlsSegment {
+            camera_id: camera_id.clone(),
             session_id,
             segment_index,
             start_time,
