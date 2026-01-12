@@ -331,8 +331,12 @@
             opacity: 0;
             transition: opacity 0.3s ease;
         }
-        
-        #videoContainer:hover .video-overlay-controls {
+
+        .video-overlay-controls.hidden {
+            display: none !important;
+        }
+
+        #videoContainer:hover .video-overlay-controls:not(.hidden) {
             opacity: 1;
         }
         
@@ -1550,14 +1554,14 @@
                 const mode = document.getElementById('playbackMode').value;
                 const videoOverlayControls = document.querySelector('.video-overlay-controls');
                 const statusMessage = document.getElementById('statusMessage');
-                
+
                 if (mode === 'segments' || mode === 'hls') {
                     // Hide timeline/playback controls overlay and status message in video/HLS mode
-                    videoOverlayControls.style.display = 'none';
+                    videoOverlayControls.classList.add('hidden');
                     statusMessage.style.display = 'none';
                 } else {
                     // Show timeline/playback controls overlay and status message in frame-by-frame mode
-                    videoOverlayControls.style.display = 'block';
+                    videoOverlayControls.classList.remove('hidden');
                     statusMessage.style.display = 'block';
                 }
             }
@@ -1665,7 +1669,7 @@
                 document.getElementById('hlsPlayer').style.display = 'block';
 
                 // Hide video overlay controls (timeline slider, playback buttons) - HLS player has its own controls
-                document.querySelector('.video-overlay-controls').style.display = 'none';
+                document.querySelector('.video-overlay-controls').classList.add('hidden');
                 document.getElementById('statusMessage').style.display = 'none';
                 
                 // Stop any WebSocket streams
