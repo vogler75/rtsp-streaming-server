@@ -430,8 +430,7 @@
                         <video id="videoPlayer" style="display: none; width: 100%; height: 100%;"></video>
                         <video id="hlsPlayer" style="display: none; width: 100%; height: 100%;" controls></video>
                         <div id="statusMessage">Ready for commands (responses logged to console)</div>
-                        <div id="modeIndicator" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; display: none;">Frame Mode</div>
-                        
+
                         <div class="video-overlay-controls">
                             <div class="timeline-container" style="width: 100%; display: flex; flex-direction: column;">
                                 <!-- Slider -->
@@ -575,7 +574,6 @@
                 // Auto-load recordings on page load
                 setTimeout(() => {
                     this.fetchRecordings();
-                    this.updateModeIndicator();
                 }, 1000);
             }
             
@@ -645,7 +643,6 @@
                         this.logJson({ message: 'HLS Recordings mode selected, refreshing recordings list' });
                     }
                     this.fetchRecordings();
-                    this.updateModeIndicator();
                 });
 
                 // Add sort order change listener
@@ -1181,8 +1178,6 @@
                     console.error('Video URL was:', url);
                     alert(`Failed to play video: ${error.message}\nURL: ${url}`);
                 });
-                
-                this.updateModeIndicator();
             }
 
             startReplay(recording) {
@@ -1578,9 +1573,6 @@
                 if (this.timelineEnd) {
                     document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
                 }
-                
-                // Update mode indicator
-                this.updateModeIndicator();
             }
             
             updateStatus(text, connected) {
@@ -1719,8 +1711,6 @@
                 } else {
                     this.logJson({ error: 'HLS not supported in this browser' });
                 }
-                
-                this.updateModeIndicator();
             }
             
             stopHls() {
@@ -1735,26 +1725,6 @@
                 }
             }
             
-            updateModeIndicator() {
-                const mode = document.getElementById('playbackMode').value;
-                const indicator = document.getElementById('modeIndicator');
-                
-                if (this.streamState === 'live') {
-                    indicator.textContent = 'Live Mode';
-                    indicator.style.display = 'block';
-                } else if (this.streamState === 'replaying') {
-                    indicator.textContent = 'Frame Mode';
-                    indicator.style.display = 'block';
-                } else if (mode === 'segments' && document.getElementById('videoPlayer').style.display !== 'none') {
-                    indicator.textContent = 'MP4 Mode';
-                    indicator.style.display = 'block';
-                } else if (mode === 'hls' && document.getElementById('hlsPlayer').style.display !== 'none') {
-                    indicator.textContent = 'HLS Mode';
-                    indicator.style.display = 'block';
-                } else {
-                    indicator.style.display = 'none';
-                }
-            }
 
             async toggleKeepSession(sessionId, keepSession) {
                 const queryParam = keepSession ? '' : '?keep=false';
