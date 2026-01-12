@@ -1743,6 +1743,9 @@ impl DatabaseProvider for SqliteDatabase {
              config.hls_storage_retention.clone())
         };
 
+        // Track total deleted rows to decide if vacuum is needed
+        let mut total_deleted: usize = 0;
+
         // Cleanup frames with camera-specific or global retention
         if config.frame_storage_enabled {
             // Check if retention is explicitly disabled with "0"
@@ -1751,8 +1754,9 @@ impl DatabaseProvider for SqliteDatabase {
                     if duration.as_secs() > 0 {
                         let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
                         tracing::info!("Starting frame cleanup (retention: {})", frame_retention);
-                        if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
-                            tracing::error!("Error deleting old frames: {}", e);
+                        match self.delete_old_frames(camera_id.as_deref(), older_than).await {
+                            Ok(deleted) => total_deleted += deleted,
+                            Err(e) => tracing::error!("Error deleting old frames: {}", e),
                         }
                     }
                 }
@@ -1769,8 +1773,9 @@ impl DatabaseProvider for SqliteDatabase {
                     if duration.as_secs() > 0 {
                         let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
                         tracing::info!("Starting video segment cleanup (retention: {})", video_retention);
-                        if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
-                            tracing::error!("Error deleting old video segments: {}", e);
+                        match self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
+                            Ok(deleted) => total_deleted += deleted,
+                            Err(e) => tracing::error!("Error deleting old video segments: {}", e),
                         }
                     }
                 }
@@ -1787,15 +1792,14 @@ impl DatabaseProvider for SqliteDatabase {
                     if duration.as_secs() > 0 {
                         tracing::info!("Starting HLS segment cleanup (retention: {})", hls_retention);
                         match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
-                            Ok(deleted_count) => {
-                                tracing::info!("Deleted {} old HLS segments", deleted_count);
+                            Ok(deleted) => {
+                                tracing::info!("Deleted {} old HLS segments", deleted);
+                                total_deleted += deleted;
                             }
-                        Err(e) => {
-                            tracing::error!("Error deleting old HLS segments: {}", e);
+                            Err(e) => tracing::error!("Error deleting old HLS segments: {}", e),
                         }
                     }
                 }
-            }
             } else {
                 tracing::debug!("HLS retention disabled (0) for camera {:?}", camera_id);
             }
@@ -1804,13 +1808,19 @@ impl DatabaseProvider for SqliteDatabase {
         // Finally, cleanup unused sessions (sessions with no frames or videos)
         // This should be done after deleting frames and videos to catch newly orphaned sessions
         tracing::info!("Starting unused session cleanup");
-        if let Err(e) = self.delete_unused_sessions(camera_id.as_deref()).await {
-            tracing::error!("Error deleting unused sessions: {}", e);
+        match self.delete_unused_sessions(camera_id.as_deref()).await {
+            Ok(deleted) => total_deleted += deleted,
+            Err(e) => tracing::error!("Error deleting unused sessions: {}", e),
         }
 
-        // Vacuum database to reclaim disk space after cleanup
-        if let Err(e) = self.vacuum_tables().await {
-            tracing::error!("Error vacuuming database: {}", e);
+        // Vacuum database to reclaim disk space after cleanup (only if rows were deleted)
+        if total_deleted > 0 {
+            tracing::info!("Deleted {} total rows, running VACUUM to reclaim space", total_deleted);
+            if let Err(e) = self.vacuum_tables().await {
+                tracing::error!("Error vacuuming database: {}", e);
+            }
+        } else {
+            tracing::debug!("No rows deleted, skipping VACUUM");
         }
 
         Ok(())
@@ -4057,6 +4067,9 @@ impl DatabaseProvider for PostgreSqlDatabase {
              config.hls_storage_retention.clone())
         };
 
+        // Track total deleted rows to decide if vacuum is needed
+        let mut total_deleted: usize = 0;
+
         // Cleanup frames with camera-specific or global retention
         if config.frame_storage_enabled {
             // Check if retention is explicitly disabled with "0"
@@ -4065,8 +4078,9 @@ impl DatabaseProvider for PostgreSqlDatabase {
                     if duration.as_secs() > 0 {
                         let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
                         info!("Starting frame cleanup for database '{}' (retention: {})", self.database_name, frame_retention);
-                        if let Err(e) = self.delete_old_frames(camera_id.as_deref(), older_than).await {
-                            tracing::error!("Error deleting old frames: {}", e);
+                        match self.delete_old_frames(camera_id.as_deref(), older_than).await {
+                            Ok(deleted) => total_deleted += deleted,
+                            Err(e) => tracing::error!("Error deleting old frames: {}", e),
                         }
                     }
                 }
@@ -4083,8 +4097,9 @@ impl DatabaseProvider for PostgreSqlDatabase {
                     if duration.as_secs() > 0 {
                         let older_than = Utc::now() - chrono::Duration::from_std(duration).unwrap();
                         info!("Starting video segment cleanup for database '{}' (retention: {})", self.database_name, video_retention);
-                        if let Err(e) = self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
-                            tracing::error!("Error deleting old video segments: {}", e);
+                        match self.delete_old_video_segments(camera_id.as_deref(), older_than).await {
+                            Ok(deleted) => total_deleted += deleted,
+                            Err(e) => tracing::error!("Error deleting old video segments: {}", e),
                         }
                     }
                 }
@@ -4101,12 +4116,11 @@ impl DatabaseProvider for PostgreSqlDatabase {
                     if duration.as_secs() > 0 {
                         info!("Starting HLS segment cleanup (retention: {})", hls_retention);
                         match self.delete_old_recording_hls_segments(&hls_retention, camera_id.as_deref()).await {
-                            Ok(deleted_count) => {
-                                info!("Deleted {} old HLS segments", deleted_count);
+                            Ok(deleted) => {
+                                info!("Deleted {} old HLS segments", deleted);
+                                total_deleted += deleted;
                             }
-                            Err(e) => {
-                                tracing::error!("Error deleting old HLS segments: {}", e);
-                            }
+                            Err(e) => tracing::error!("Error deleting old HLS segments: {}", e),
                         }
                     }
                 }
@@ -4118,13 +4132,19 @@ impl DatabaseProvider for PostgreSqlDatabase {
         // Finally, cleanup unused sessions (sessions with no frames or videos)
         // This should be done after deleting frames and videos to catch newly orphaned sessions
         info!("Starting unused session cleanup");
-        if let Err(e) = self.delete_unused_sessions(camera_id.as_deref()).await {
-            tracing::error!("Error deleting unused sessions: {}", e);
+        match self.delete_unused_sessions(camera_id.as_deref()).await {
+            Ok(deleted) => total_deleted += deleted,
+            Err(e) => tracing::error!("Error deleting unused sessions: {}", e),
         }
 
-        // Vacuum tables to reclaim disk space after cleanup
-        if let Err(e) = self.vacuum_tables().await {
-            tracing::error!("Error vacuuming database: {}", e);
+        // Vacuum tables to reclaim disk space after cleanup (only if rows were deleted)
+        if total_deleted > 0 {
+            info!("Deleted {} total rows, running VACUUM FULL to reclaim space", total_deleted);
+            if let Err(e) = self.vacuum_tables().await {
+                tracing::error!("Error vacuuming database: {}", e);
+            }
+        } else {
+            debug!("No rows deleted, skipping VACUUM");
         }
 
         Ok(())
