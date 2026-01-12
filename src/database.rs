@@ -694,7 +694,7 @@ impl DatabaseProvider for SqliteDatabase {
                 segment_data BLOB NOT NULL,
                 size_bytes INTEGER NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (camera_id, segment_index),
+                PRIMARY KEY (camera_id, session_id, segment_index),
                 FOREIGN KEY (session_id) REFERENCES {}(session_id) ON DELETE CASCADE
             )
             "#,
@@ -3026,7 +3026,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 segment_data BYTEA NOT NULL,
                 size_bytes BIGINT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (camera_id, segment_index),
+                PRIMARY KEY (camera_id, session_id, segment_index),
                 FOREIGN KEY (session_id) REFERENCES {}(session_id) ON DELETE CASCADE
             )
             "#,

@@ -999,7 +999,10 @@ impl RecordingManager {
         };
         
         let mut frame_buffer = Vec::new();
-        
+
+        // Track current session_id - may change due to session segmentation
+        let mut current_session_id = session_id;
+
         // Process any pre-recorded frames first if they exist
         if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
             if active_recording.frame_count > 0 {
@@ -1053,18 +1056,19 @@ impl RecordingManager {
                             info!("Flushing {} remaining frames from MP4 buffer on recording stop for camera '{}'", frame_buffer.len(), camera_id);
                             let frames_to_process = std::mem::take(&mut frame_buffer);
                             let end_time = Utc::now();
-                            
+
                             // Update buffer stats to show empty buffer
                             if let Some(ref stats) = mp4_buffer_stats {
                                 let mut stats = stats.write().await;
                                 stats.frame_count = 0;
                                 stats.size_bytes = 0;
                             }
-                            
-                            // Spawn a task to process the final segment
+
+                            // Spawn a task to process the final segment with current session_id
                             let final_config = config.clone();
                             let final_database = database.clone();
                             let final_camera_id = camera_id.clone();
+                            let final_session_id = current_session_id;
                             let final_storage_type = mp4_storage_type.clone();
                             let log_camera_id = camera_id.clone(); // Clone for logging
                             tokio::spawn(async move {
@@ -1072,7 +1076,7 @@ impl RecordingManager {
                                     final_config,
                                     final_database,
                                     final_camera_id,
-                                    session_id,
+                                    final_session_id,
                                     segment_start_time,
                                     end_time,
                                     frames_to_process,
@@ -1099,7 +1103,7 @@ impl RecordingManager {
 
                     if Utc::now().signed_duration_since(segment_start_time) >= segment_duration {
                         let frames_to_process = std::mem::take(&mut frame_buffer);
-                        
+
                         // Update buffer stats after taking frames
                         if let Some(ref stats) = mp4_buffer_stats {
                             let buffer_size = frame_buffer.iter().map(|f| f.len()).sum::<usize>();
@@ -1109,20 +1113,30 @@ impl RecordingManager {
                         }
                         let end_time = Utc::now();
 
-                        // Use the session_id passed to this function
-                        // (no need to look up from active_recordings since we have it directly)
+                        // Check if session has changed (due to session segmentation)
+                        let new_session_id = active_recordings.read().await
+                            .get(&camera_id)
+                            .map(|r| r.session_id)
+                            .unwrap_or(current_session_id);
+
+                        if new_session_id != current_session_id {
+                            info!("MP4 segmenter detected session change {} -> {} for camera '{}'",
+                                  current_session_id, new_session_id, camera_id);
+                            current_session_id = new_session_id;
+                        }
 
                         // Spawn a task to process the segment
                         let task_config = config.clone();
                         let task_database = database.clone();
                         let task_camera_id = camera_id.clone();
+                        let task_session_id = current_session_id;
                         let task_storage_type = mp4_storage_type.clone();
                         tokio::spawn(async move {
                             if let Err(e) = Self::create_video_segment(
                                 task_config,
                                 task_database,
                                 task_camera_id,
-                                session_id,
+                                task_session_id,
                                 segment_start_time,
                                 end_time,
                                 frames_to_process,
@@ -1363,6 +1377,9 @@ impl RecordingManager {
             }
         };
 
+        // Track current session_id - may change due to session segmentation
+        let mut current_session_id = session_id;
+
         // Process any pre-recorded frames first if they exist
         if let Some(active_recording) = active_recordings.read().await.get(&camera_id) {
             if active_recording.frame_count > 0 {
@@ -1410,18 +1427,20 @@ impl RecordingManager {
                             info!("Flushing {} remaining frames from HLS buffer on recording stop", frame_buffer.len());
                             let frames_to_process = std::mem::take(&mut frame_buffer);
                             let end_time = Utc::now();
-                            
-                            // Create final HLS segment
+
+                            // Create final HLS segment with current session_id
                             let final_config = config.clone();
                             let final_database = database.clone();
                             let final_camera_id = camera_id.clone();
+                            let final_session_id = current_session_id;
+                            let final_segment_index = segment_index;
                             tokio::spawn(async move {
                                 if let Err(e) = Self::create_hls_segment(
                                     final_config,
                                     final_database,
                                     final_camera_id,
-                                    session_id,
-                                    segment_index,
+                                    final_session_id,
+                                    final_segment_index,
                                     segment_start_time,
                                     end_time,
                                     frames_to_process,
@@ -1436,25 +1455,39 @@ impl RecordingManager {
                     }
 
                     frame_buffer.push(frame_data);
-                    
+
                     let elapsed = Utc::now().signed_duration_since(segment_start_time);
                     if elapsed >= segment_duration {
                         let frames_to_process = std::mem::take(&mut frame_buffer);
                         let end_time = Utc::now();
 
+                        // Check if session has changed (due to session segmentation)
+                        let new_session_id = active_recordings.read().await
+                            .get(&camera_id)
+                            .map(|r| r.session_id)
+                            .unwrap_or(current_session_id);
+
+                        if new_session_id != current_session_id {
+                            info!("HLS segmenter detected session change {} -> {} for camera '{}'",
+                                  current_session_id, new_session_id, camera_id);
+                            current_session_id = new_session_id;
+                            segment_index = 0;  // Reset segment index for new session
+                        }
+
                         // Spawn a task to process the HLS segment
                         let task_config = config.clone();
                         let task_database = database.clone();
                         let task_camera_id = camera_id.clone();
+                        let task_session_id = current_session_id;
                         let current_segment_index = segment_index;
                         let current_start_time = segment_start_time;
-                        
+
                         tokio::spawn(async move {
                             if let Err(e) = Self::create_hls_segment(
                                 task_config,
                                 task_database,
                                 task_camera_id,
-                                session_id,
+                                task_session_id,
                                 current_segment_index,
                                 current_start_time,
                                 end_time,
