@@ -1131,101 +1131,67 @@ impl DatabaseProvider for SqliteDatabase {
         let start_time = std::time::Instant::now();
         let cam_desc = camera_id.unwrap_or("all cameras");
 
-        // Find sessions to clean up (oldest first, not marked as keep, ended before retention cutoff)
-        let sessions_to_clean: Vec<(i64, String)> = if let Some(cam_id) = camera_id {
+        tracing::info!(
+            "Starting frame cleanup for {} (timestamp cutoff: {})",
+            cam_desc,
+            older_than
+        );
+
+        // Delete frames by their individual timestamp, respecting keep_session flag
+        let deleted = if let Some(cam_id) = camera_id {
             let query = format!(
                 r#"
-                SELECT session_id, camera_id FROM {}
+                DELETE FROM {}
                 WHERE camera_id = ?
-                  AND end_time IS NOT NULL
-                  AND end_time < ?
-                  AND keep_session = 0
-                ORDER BY end_time ASC
+                  AND timestamp < ?
+                  AND session_id NOT IN (
+                    SELECT session_id FROM {} WHERE keep_session = 1
+                  )
                 "#,
-                TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_as(&query)
+            sqlx::query(&query)
                 .bind(cam_id)
                 .bind(older_than)
-                .fetch_all(&self.pool).await?
+                .execute(&self.pool)
+                .await?
+                .rows_affected()
         } else {
             let query = format!(
                 r#"
-                SELECT session_id, camera_id FROM {}
-                WHERE end_time IS NOT NULL
-                  AND end_time < ?
-                  AND keep_session = 0
-                ORDER BY end_time ASC
+                DELETE FROM {}
+                WHERE timestamp < ?
+                  AND session_id NOT IN (
+                    SELECT session_id FROM {} WHERE keep_session = 1
+                  )
                 "#,
-                TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_as(&query)
+            sqlx::query(&query)
                 .bind(older_than)
-                .fetch_all(&self.pool).await?
+                .execute(&self.pool)
+                .await?
+                .rows_affected()
         };
-
-        if sessions_to_clean.is_empty() {
-            tracing::info!("No expired sessions to clean up for {}", cam_desc);
-            return Ok(0);
-        }
-
-        tracing::info!(
-            "Found {} expired sessions to clean up for {}, processing oldest first...",
-            sessions_to_clean.len(),
-            cam_desc
-        );
-
-        let mut total_deleted: u64 = 0;
-        let mut sessions_processed = 0;
-
-        for (session_id, session_camera_id) in &sessions_to_clean {
-            let session_start = std::time::Instant::now();
-
-            // Delete all frames for this session
-            let delete_query = format!(
-                "DELETE FROM {} WHERE session_id = ?",
-                TABLE_RECORDING_MJPEG
-            );
-            let deleted = sqlx::query(&delete_query)
-                .bind(session_id)
-                .execute(&self.pool).await?
-                .rows_affected();
-
-            total_deleted += deleted;
-            sessions_processed += 1;
-
-            let session_elapsed = session_start.elapsed();
-
-            if deleted > 0 {
-                tracing::debug!(
-                    "Session {}: deleted {} frames for camera '{}' in {:.2}s (total: {} frames, {}/{} sessions)",
-                    session_id,
-                    deleted,
-                    session_camera_id,
-                    session_elapsed.as_secs_f64(),
-                    total_deleted,
-                    sessions_processed,
-                    sessions_to_clean.len()
-                );
-            }
-
-            // Yield periodically to allow other tasks to run
-            if sessions_processed % 10 == 0 {
-                tokio::task::yield_now().await;
-            }
-        }
 
         let elapsed = start_time.elapsed();
 
-        tracing::info!(
-            "Completed frame cleanup: {} frames deleted from {} sessions in {:.1}s for {}",
-            total_deleted,
-            sessions_processed,
-            elapsed.as_secs_f64(),
-            cam_desc
-        );
+        if deleted > 0 {
+            tracing::info!(
+                "Completed frame cleanup: {} frames deleted in {:.1}s for {}",
+                deleted,
+                elapsed.as_secs_f64(),
+                cam_desc
+            );
+        } else {
+            tracing::info!(
+                "No frames to delete (timestamp cutoff: {}, query took {:.3}ms)",
+                older_than,
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
 
-        Ok(total_deleted as usize)
+        Ok(deleted as usize)
     }
     
     async fn delete_unused_sessions(
@@ -1235,7 +1201,8 @@ impl DatabaseProvider for SqliteDatabase {
         // Delete sessions that have:
         // 1. No frames in recording_mjpeg table
         // 2. No segments in recording_mp4 table
-        // 3. Are not currently active (end_time is not NULL)
+        // 3. No segments in recording_hls table
+        // 4. Are not currently active (end_time is not NULL)
         // Uses EXISTS for efficient index lookups instead of NOT IN with full table scans
 
         let start_time = std::time::Instant::now();
@@ -1254,10 +1221,14 @@ impl DatabaseProvider for SqliteDatabase {
                 AND NOT EXISTS (
                     SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
+                AND NOT EXISTS (
+                    SELECT 1 FROM {hls} WHERE session_id = {sessions}.session_id
+                )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
                 mjpeg = TABLE_RECORDING_MJPEG,
-                mp4 = TABLE_RECORDING_MP4
+                mp4 = TABLE_RECORDING_MP4,
+                hls = TABLE_RECORDING_HLS
             );
             sqlx::query(&query)
                 .bind(cam_id)
@@ -1276,10 +1247,14 @@ impl DatabaseProvider for SqliteDatabase {
                 AND NOT EXISTS (
                     SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
+                AND NOT EXISTS (
+                    SELECT 1 FROM {hls} WHERE session_id = {sessions}.session_id
+                )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
                 mjpeg = TABLE_RECORDING_MJPEG,
-                mp4 = TABLE_RECORDING_MP4
+                mp4 = TABLE_RECORDING_MP4,
+                hls = TABLE_RECORDING_HLS
             );
             sqlx::query(&query)
                 .execute(&self.pool)
@@ -2189,20 +2164,22 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<usize> {
         let duration = humantime::parse_duration(retention_duration)
             .map_err(|e| crate::errors::StreamError::config(&format!("Invalid retention duration '{}': {}", retention_duration, e)))?;
-        
+
         let cutoff_time = Utc::now() - chrono::Duration::from_std(duration)
             .map_err(|e| crate::errors::StreamError::config(&format!("Invalid duration: {}", e)))?;
-        
+
         let result = if let Some(cam_id) = camera_id {
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {}
                 WHERE session_id IN (
-                    SELECT rs.session_id FROM {} rs 
-                    WHERE rs.camera_id = ? AND rs.start_time < ? AND rs.keep_session = 0
+                    SELECT h.session_id
+                    FROM {} h
+                    JOIN {} rs ON h.session_id = rs.session_id
+                    WHERE rs.camera_id = ? AND h.end_time < ? AND rs.keep_session = 0
                 )
                 "#,
-                TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_HLS, TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
             );
             sqlx::query(&query)
                 .bind(cam_id)
@@ -2212,10 +2189,10 @@ impl DatabaseProvider for SqliteDatabase {
         } else {
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {}
                 WHERE session_id IN (
                     SELECT session_id FROM {} WHERE keep_session = 0
-                ) AND created_at < ?
+                ) AND end_time < ?
                 "#,
                 TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
             );
@@ -2224,7 +2201,7 @@ impl DatabaseProvider for SqliteDatabase {
                 .execute(&self.pool)
                 .await?
         };
-        
+
         Ok(result.rows_affected() as usize)
     }
 
@@ -3463,101 +3440,67 @@ impl DatabaseProvider for PostgreSqlDatabase {
         let start_time = std::time::Instant::now();
         let cam_desc = camera_id.unwrap_or("all cameras");
 
-        // Find sessions to clean up (oldest first, not marked as keep, ended before retention cutoff)
-        let sessions_to_clean: Vec<(i64, String)> = if let Some(cam_id) = camera_id {
+        info!(
+            "Starting frame cleanup for {} (timestamp cutoff: {})",
+            cam_desc,
+            older_than
+        );
+
+        // Delete frames by their individual timestamp, respecting keep_session flag
+        let deleted = if let Some(cam_id) = camera_id {
             let query = format!(
                 r#"
-                SELECT session_id, camera_id FROM {}
+                DELETE FROM {}
                 WHERE camera_id = $1
-                  AND end_time IS NOT NULL
-                  AND end_time < $2
-                  AND keep_session = false
-                ORDER BY end_time ASC
+                  AND timestamp < $2
+                  AND session_id NOT IN (
+                    SELECT session_id FROM {} WHERE keep_session = true
+                  )
                 "#,
-                TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_as(&query)
+            sqlx::query(&query)
                 .bind(cam_id)
                 .bind(older_than)
-                .fetch_all(&self.pool).await?
+                .execute(&self.pool)
+                .await?
+                .rows_affected()
         } else {
             let query = format!(
                 r#"
-                SELECT session_id, camera_id FROM {}
-                WHERE end_time IS NOT NULL
-                  AND end_time < $1
-                  AND keep_session = false
-                ORDER BY end_time ASC
+                DELETE FROM {}
+                WHERE timestamp < $1
+                  AND session_id NOT IN (
+                    SELECT session_id FROM {} WHERE keep_session = true
+                  )
                 "#,
-                TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_MJPEG, TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_as(&query)
+            sqlx::query(&query)
                 .bind(older_than)
-                .fetch_all(&self.pool).await?
+                .execute(&self.pool)
+                .await?
+                .rows_affected()
         };
-
-        if sessions_to_clean.is_empty() {
-            info!("No expired sessions to clean up for {}", cam_desc);
-            return Ok(0);
-        }
-
-        info!(
-            "Found {} expired sessions to clean up for {}, processing oldest first...",
-            sessions_to_clean.len(),
-            cam_desc
-        );
-
-        let mut total_deleted: u64 = 0;
-        let mut sessions_processed = 0;
-
-        for (session_id, session_camera_id) in &sessions_to_clean {
-            let session_start = std::time::Instant::now();
-
-            // Delete all frames for this session
-            let delete_query = format!(
-                "DELETE FROM {} WHERE session_id = $1",
-                TABLE_RECORDING_MJPEG
-            );
-            let deleted = sqlx::query(&delete_query)
-                .bind(session_id)
-                .execute(&self.pool).await?
-                .rows_affected();
-
-            total_deleted += deleted;
-            sessions_processed += 1;
-
-            let session_elapsed = session_start.elapsed();
-
-            if deleted > 0 {
-                debug!(
-                    "Session {}: deleted {} frames for camera '{}' in {:.2}s (total: {} frames, {}/{} sessions)",
-                    session_id,
-                    deleted,
-                    session_camera_id,
-                    session_elapsed.as_secs_f64(),
-                    total_deleted,
-                    sessions_processed,
-                    sessions_to_clean.len()
-                );
-            }
-
-            // Yield periodically to allow other tasks to run
-            if sessions_processed % 10 == 0 {
-                tokio::task::yield_now().await;
-            }
-        }
 
         let elapsed = start_time.elapsed();
 
-        info!(
-            "Completed frame cleanup: {} frames deleted from {} sessions in {:.1}s for {}",
-            total_deleted,
-            sessions_processed,
-            elapsed.as_secs_f64(),
-            cam_desc
-        );
+        if deleted > 0 {
+            info!(
+                "Completed frame cleanup: {} frames deleted in {:.1}s for {}",
+                deleted,
+                elapsed.as_secs_f64(),
+                cam_desc
+            );
+        } else {
+            info!(
+                "No frames to delete (timestamp cutoff: {}, query took {:.3}ms)",
+                older_than,
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
 
-        Ok(total_deleted as usize)
+        Ok(deleted as usize)
     }
 
     async fn delete_unused_sessions(
@@ -3567,7 +3510,8 @@ impl DatabaseProvider for PostgreSqlDatabase {
         // Delete sessions that have:
         // 1. No frames in recording_mjpeg table
         // 2. No segments in recording_mp4 table
-        // 3. Are not currently active (end_time is not NULL)
+        // 3. No segments in recording_hls table
+        // 4. Are not currently active (end_time is not NULL)
         // Uses EXISTS for efficient index lookups instead of NOT IN with full table scans
 
         let start_time = std::time::Instant::now();
@@ -3586,10 +3530,14 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 AND NOT EXISTS (
                     SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
+                AND NOT EXISTS (
+                    SELECT 1 FROM {hls} WHERE session_id = {sessions}.session_id
+                )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
                 mjpeg = TABLE_RECORDING_MJPEG,
-                mp4 = TABLE_RECORDING_MP4
+                mp4 = TABLE_RECORDING_MP4,
+                hls = TABLE_RECORDING_HLS
             );
             sqlx::query(&query)
                 .bind(cam_id)
@@ -3608,10 +3556,14 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 AND NOT EXISTS (
                     SELECT 1 FROM {mp4} WHERE session_id = {sessions}.session_id
                 )
+                AND NOT EXISTS (
+                    SELECT 1 FROM {hls} WHERE session_id = {sessions}.session_id
+                )
                 "#,
                 sessions = TABLE_RECORDING_SESSIONS,
                 mjpeg = TABLE_RECORDING_MJPEG,
-                mp4 = TABLE_RECORDING_MP4
+                mp4 = TABLE_RECORDING_MP4,
+                hls = TABLE_RECORDING_HLS
             );
             sqlx::query(&query)
                 .execute(&self.pool)
@@ -4539,20 +4491,22 @@ impl DatabaseProvider for PostgreSqlDatabase {
     ) -> Result<usize> {
         let duration = humantime::parse_duration(retention_duration)
             .map_err(|e| crate::errors::StreamError::config(&format!("Invalid retention duration '{}': {}", retention_duration, e)))?;
-        
+
         let cutoff_time = Utc::now() - chrono::Duration::from_std(duration)
             .map_err(|e| crate::errors::StreamError::config(&format!("Invalid duration: {}", e)))?;
-        
+
         let result = if let Some(cam_id) = camera_id {
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {}
                 WHERE session_id IN (
-                    SELECT rs.session_id FROM {} rs 
-                    WHERE rs.camera_id = $1 AND rs.start_time < $2 AND rs.keep_session = false
+                    SELECT h.session_id
+                    FROM {} h
+                    JOIN {} rs ON h.session_id = rs.session_id
+                    WHERE rs.camera_id = $1 AND h.end_time < $2 AND rs.keep_session = false
                 )
                 "#,
-                TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+                TABLE_RECORDING_HLS, TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
             );
             sqlx::query(&query)
                 .bind(cam_id)
@@ -4562,10 +4516,10 @@ impl DatabaseProvider for PostgreSqlDatabase {
         } else {
             let query = format!(
                 r#"
-                DELETE FROM {} 
+                DELETE FROM {}
                 WHERE session_id IN (
                     SELECT session_id FROM {} WHERE keep_session = false
-                ) AND created_at < $1
+                ) AND end_time < $1
                 "#,
                 TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
             );
@@ -4574,7 +4528,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
                 .execute(&self.pool)
                 .await?
         };
-        
+
         Ok(result.rows_affected() as usize)
     }
 
