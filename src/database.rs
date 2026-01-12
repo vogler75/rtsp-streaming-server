@@ -2102,7 +2102,7 @@ impl DatabaseProvider for SqliteDatabase {
         match (from_time, to_time) {
             (None, None) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -2113,7 +2113,7 @@ impl DatabaseProvider for SqliteDatabase {
             }
             (Some(from), None) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND start_time >= ? ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND start_time >= ? ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -2125,7 +2125,7 @@ impl DatabaseProvider for SqliteDatabase {
             }
             (None, Some(to)) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND end_time <= ? ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND end_time <= ? ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -2137,7 +2137,7 @@ impl DatabaseProvider for SqliteDatabase {
             }
             (Some(from), Some(to)) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND start_time >= ? AND end_time <= ? ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = ? AND start_time >= ? AND end_time <= ? ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -2161,25 +2161,24 @@ impl DatabaseProvider for SqliteDatabase {
         // A segment overlaps if its start is before the range end AND its end is after the range start
         let query = format!(
             r#"
-            SELECT rh.session_id, rh.segment_index, rh.start_time, rh.end_time, rh.duration_seconds, 
-                   rh.segment_data, rh.size_bytes, rh.created_at
-            FROM {} rh
-            JOIN {} rs ON rh.session_id = rs.session_id
-            WHERE rs.camera_id = ? 
-            AND rh.start_time <= ?  -- segment starts before or at range end
-            AND rh.end_time >= ?     -- segment ends after or at range start
-            ORDER BY rh.start_time ASC, rh.segment_index ASC
+            SELECT camera_id, session_id, segment_index, start_time, end_time,
+                   duration_seconds, segment_data, size_bytes, created_at
+            FROM {}
+            WHERE camera_id = ?
+            AND start_time <= ?  -- segment starts before or at range end
+            AND end_time >= ?     -- segment ends after or at range start
+            ORDER BY start_time ASC, segment_index ASC
             "#,
-            TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+            TABLE_RECORDING_HLS
         );
-        
+
         let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
             .bind(camera_id)
             .bind(to_time)
             .bind(from_time)
             .fetch_all(&self.pool)
             .await?;
-            
+
         Ok(segments)
     }
 
@@ -2236,19 +2235,19 @@ impl DatabaseProvider for SqliteDatabase {
     ) -> Result<Option<RecordingHlsSegment>> {
         let query = format!(
             r#"
-            SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at
-            FROM {} 
+            SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at
+            FROM {}
             WHERE session_id = ? AND segment_index = ?
             "#,
             TABLE_RECORDING_HLS
         );
-        
+
         let segment = sqlx::query_as::<_, RecordingHlsSegment>(&query)
             .bind(session_id)
             .bind(segment_index)
             .fetch_optional(&self.pool)
             .await?;
-        
+
         Ok(segment)
     }
 
@@ -4453,7 +4452,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
         match (from_time, to_time) {
             (None, None) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -4464,7 +4463,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             }
             (Some(from), None) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 AND start_time >= $2 ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 AND start_time >= $2 ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -4476,7 +4475,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             }
             (None, Some(to)) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 AND end_time <= $2 ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 AND end_time <= $2 ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -4488,7 +4487,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             }
             (Some(from), Some(to)) => {
                 let query = format!(
-                    "SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 AND start_time >= $2 AND end_time <= $3 ORDER BY segment_index ASC",
+                    "SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at FROM {} WHERE session_id = $1 AND start_time >= $2 AND end_time <= $3 ORDER BY segment_index ASC",
                     TABLE_RECORDING_HLS
                 );
                 let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
@@ -4512,25 +4511,24 @@ impl DatabaseProvider for PostgreSqlDatabase {
         // A segment overlaps if its start is before the range end AND its end is after the range start
         let query = format!(
             r#"
-            SELECT rh.session_id, rh.segment_index, rh.start_time, rh.end_time, rh.duration_seconds, 
-                   rh.segment_data, rh.size_bytes, rh.created_at
-            FROM {} rh
-            JOIN {} rs ON rh.session_id = rs.session_id
-            WHERE rs.camera_id = $1 
-            AND rh.start_time <= $2  -- segment starts before or at range end
-            AND rh.end_time >= $3     -- segment ends after or at range start
-            ORDER BY rh.start_time ASC, rh.segment_index ASC
+            SELECT camera_id, session_id, segment_index, start_time, end_time,
+                   duration_seconds, segment_data, size_bytes, created_at
+            FROM {}
+            WHERE camera_id = $1
+            AND start_time <= $2  -- segment starts before or at range end
+            AND end_time >= $3     -- segment ends after or at range start
+            ORDER BY start_time ASC, segment_index ASC
             "#,
-            TABLE_RECORDING_HLS, TABLE_RECORDING_SESSIONS
+            TABLE_RECORDING_HLS
         );
-        
+
         let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
             .bind(camera_id)
             .bind(to_time)
             .bind(from_time)
             .fetch_all(&self.pool)
             .await?;
-            
+
         Ok(segments)
     }
 
@@ -4587,19 +4585,19 @@ impl DatabaseProvider for PostgreSqlDatabase {
     ) -> Result<Option<RecordingHlsSegment>> {
         let query = format!(
             r#"
-            SELECT session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at
-            FROM {} 
+            SELECT camera_id, session_id, segment_index, start_time, end_time, duration_seconds, segment_data, size_bytes, created_at
+            FROM {}
             WHERE session_id = $1 AND segment_index = $2
             "#,
             TABLE_RECORDING_HLS
         );
-        
+
         let segment = sqlx::query_as::<_, RecordingHlsSegment>(&query)
             .bind(session_id)
             .bind(segment_index)
             .fetch_optional(&self.pool)
             .await?;
-        
+
         Ok(segment)
     }
 
