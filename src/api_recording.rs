@@ -289,20 +289,40 @@ pub async fn api_get_active_recording(
         return response;
     }
 
+    // Get recording config to check HLS/MP4 status
+    let recording_config = recording_manager.get_recording_config();
+    let hls_enabled = camera_config.get_hls_storage_enabled()
+        .unwrap_or(recording_config.hls_storage_enabled);
+    let mp4_storage_type = camera_config.get_mp4_storage_type()
+        .unwrap_or(&recording_config.mp4_storage_type);
+    let mp4_enabled = mp4_storage_type != &config::Mp4StorageType::Disabled;
+    let frame_storage_enabled = camera_config.get_frame_storage_enabled()
+        .unwrap_or(recording_config.frame_storage_enabled);
+
     if let Some(active_recording) = recording_manager.get_active_recording(&camera_id).await {
         let data = serde_json::json!({
             "active": true,
             "session_id": active_recording.session_id,
             "start_time": active_recording.start_time,
             "frame_count": active_recording.frame_count,
-            "camera_id": camera_id
+            "camera_id": camera_id,
+            "storage": {
+                "hls_enabled": hls_enabled,
+                "mp4_enabled": mp4_enabled,
+                "frame_storage_enabled": frame_storage_enabled
+            }
         });
         Json(ApiResponse::success(data)).into_response()
     } else {
         let data = serde_json::json!({
             "message": "No active recording found",
             "camera_id": camera_id,
-            "active": false
+            "active": false,
+            "storage": {
+                "hls_enabled": hls_enabled,
+                "mp4_enabled": mp4_enabled,
+                "frame_storage_enabled": frame_storage_enabled
+            }
         });
         Json(ApiResponse::success(data)).into_response()
     }

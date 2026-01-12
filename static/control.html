@@ -1472,15 +1472,72 @@
                     const headers = {};
                     const token = document.getElementById('bearerToken').value.trim();
                     if (token) headers['Authorization'] = `Bearer ${token}`;
-                    
+
                     const response = await fetch(url, { headers });
                     if (response.ok) {
                         const result = await response.json();
                         this.isRecording = result.data && result.data.active === true;
                         this.updateRecordingUI();
+
+                        // Update playback mode options based on storage config
+                        if (result.data && result.data.storage) {
+                            this.updatePlaybackModeOptions(result.data.storage);
+                        }
                     }
                 } catch (error) {
                     // Ignore, likely 404 if not active
+                }
+            }
+
+            updatePlaybackModeOptions(storage) {
+                const playbackMode = document.getElementById('playbackMode');
+                const hlsOption = playbackMode.querySelector('option[value="hls"]');
+                const segmentsOption = playbackMode.querySelector('option[value="segments"]');
+                const framesOption = playbackMode.querySelector('option[value="frames"]');
+
+                // Hide/show HLS option based on hls_enabled
+                if (hlsOption) {
+                    if (storage.hls_enabled) {
+                        hlsOption.style.display = '';
+                        hlsOption.disabled = false;
+                    } else {
+                        hlsOption.style.display = 'none';
+                        hlsOption.disabled = true;
+                        // If HLS was selected, switch to another mode
+                        if (playbackMode.value === 'hls') {
+                            playbackMode.value = storage.mp4_enabled ? 'segments' : 'frames';
+                        }
+                    }
+                }
+
+                // Hide/show MP4 segments option based on mp4_enabled
+                if (segmentsOption) {
+                    if (storage.mp4_enabled) {
+                        segmentsOption.style.display = '';
+                        segmentsOption.disabled = false;
+                    } else {
+                        segmentsOption.style.display = 'none';
+                        segmentsOption.disabled = true;
+                        // If segments was selected, switch to another mode
+                        if (playbackMode.value === 'segments') {
+                            playbackMode.value = 'frames';
+                        }
+                    }
+                }
+
+                // Hide/show frames option based on frame_storage_enabled
+                if (framesOption) {
+                    if (storage.frame_storage_enabled) {
+                        framesOption.style.display = '';
+                        framesOption.disabled = false;
+                    } else {
+                        framesOption.style.display = 'none';
+                        framesOption.disabled = true;
+                        // If frames was selected, switch to another mode
+                        if (playbackMode.value === 'frames') {
+                            playbackMode.value = storage.mp4_enabled ? 'segments' : (storage.hls_enabled ? 'hls' : 'frames');
+                        }
+                    }
                 }
             }
 
