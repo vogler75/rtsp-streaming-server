@@ -404,10 +404,10 @@ async fn main() -> Result<()> {
                     // Start cleanup task if frame_storage_retention is configured
                     if !recording_config.frame_storage_retention.is_empty() && recording_config.frame_storage_retention != "0" {
                         let manager_clone = manager.clone();
-                        let cleanup_interval = recording_config.cleanup_interval_hours;
+                        let cleanup_interval = recording_config.cleanup_interval_minutes;
                         tokio::spawn(async move {
                             let mut interval = tokio::time::interval(
-                                tokio::time::Duration::from_secs(cleanup_interval * 3600)
+                                tokio::time::Duration::from_secs(cleanup_interval * 60)
                             );
                             
                             loop {

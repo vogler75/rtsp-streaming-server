@@ -184,7 +184,7 @@ Here's a complete `config.json` file with all sections:
     "database_path": "recordings",
     "max_frame_size": 10485760,
     "max_recording_age": "7d",
-    "cleanup_interval_hours": 1
+    "cleanup_interval_minutes": 60
   },
   "transcoding": {
     "output_format": "mjpeg",
@@ -784,7 +784,7 @@ The recording system supports three storage formats with independent configurati
     "mp4_segment_minutes": 5,
     "hls_storage_retention": "30d",
     "hls_segment_seconds": 6,
-    "cleanup_interval_hours": 1
+    "cleanup_interval_minutes": 60
   }
 }
 ```
@@ -937,7 +937,7 @@ Central WinCC System: Access all recordings from PostgreSQL database
 ##### Segment Configuration  
 - **mp4_segment_minutes**: Duration of each MP4 segment (default: 5 minutes)
 - **hls_segment_seconds**: Duration of each HLS segment (default: 6 seconds)
-- **cleanup_interval_hours**: How often to run automatic cleanup (default: 1 hour)
+- **cleanup_interval_minutes**: How often to run automatic cleanup (default: 60 minutes)
 
 ##### Performance Recommendations
 For optimal performance and storage efficiency:
@@ -972,7 +972,7 @@ The server runs independent cleanup processes for both storage formats:
 
 #### Frame Storage Cleanup
 When `frame_storage_retention` is configured:
-1. Background cleanup task runs every `cleanup_interval_hours`
+1. Background cleanup task runs every `cleanup_interval_minutes`
 2. Deletes frames older than the retention period based on timestamp
 3. Deletes completed recording sessions that ended before the cutoff time
 4. Preserves active/ongoing recordings (sessions without end_time)

@@ -333,8 +333,8 @@ pub struct RecordingConfig {
     pub hls_segment_seconds: u64, // Duration of each HLS segment in seconds
     
     // Cleanup settings
-    #[serde(default = "default_cleanup_interval_hours")]
-    pub cleanup_interval_hours: u64, // How often to run cleanup (default: 1 hour)
+    #[serde(default = "default_cleanup_interval_minutes")]
+    pub cleanup_interval_minutes: u64, // How often to run cleanup (default: 60 minutes)
 }
 
 fn default_max_frame_size() -> usize { 10 * 1024 * 1024 } // 10MB
@@ -345,7 +345,7 @@ fn default_mp4_storage_retention() -> String { "30d".to_string() }
 fn default_mp4_segment_minutes() -> u64 { 5 }
 fn default_hls_storage_retention() -> String { "30d".to_string() }
 fn default_hls_segment_seconds() -> u64 { 6 }
-fn default_cleanup_interval_hours() -> u64 { 1 }
+fn default_cleanup_interval_minutes() -> u64 { 60 }
 
 impl MqttConfig {
     pub fn substitute_variables(&mut self) {
@@ -418,7 +418,7 @@ impl Default for Config {
                 mp4_storage_type: Mp4StorageType::Disabled,
                 mp4_storage_retention: default_mp4_storage_retention(),
                 mp4_segment_minutes: default_mp4_segment_minutes(),
-                cleanup_interval_hours: default_cleanup_interval_hours(),
+                cleanup_interval_minutes: default_cleanup_interval_minutes(),
                 hls_storage_enabled: false,
                 hls_storage_retention: default_hls_storage_retention(),
                 hls_segment_seconds: default_hls_segment_seconds(),

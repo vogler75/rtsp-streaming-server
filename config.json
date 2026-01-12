@@ -14,7 +14,7 @@
     "username": null
   },
   "recording": {
-    "cleanup_interval_hours": 1,
+    "cleanup_interval_minutes": 60,
     "database_path": "recordings",
     "database_type": "postgresql",
     "database_url": "postgres://system:manager@linux5/streamvault",

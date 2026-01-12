@@ -99,7 +99,7 @@ How the MP4 Recording System Works:
   - Deletes MP4 files older than the configured retention period based on filename timestamp
   - Removes empty directories after file deletion
   - Each camera's files are processed independently
-  - Cleanup runs every `cleanup_interval_hours` (default: 1 hour)
+  - Cleanup runs every `cleanup_interval_minutes` (default: 60 minutes)
   
   Example cleanup process:
   1. Check mp4_storage_retention (e.g., "30d")
