@@ -316,9 +316,9 @@ pub trait DatabaseProvider: Send + Sync {
     async fn delete_hls_segments_by_session(&self, session_id: i64) -> Result<u64>;
     async fn delete_hls_segments_by_timerange(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<u64>;
 
-    /// Vacuum/compact tables after cleanup to reclaim disk space
-    /// For PostgreSQL: VACUUM FULL on recording tables
-    /// For SQLite: VACUUM (entire database)
+    /// Vacuum/compact tables after cleanup to mark space as reusable
+    /// For PostgreSQL: VACUUM ANALYZE on recording tables (fast, no exclusive lock)
+    /// For SQLite: VACUUM (rebuilds entire database)
     async fn vacuum_tables(&self) -> Result<()>;
 
     // Export methods
@@ -4137,9 +4137,9 @@ impl DatabaseProvider for PostgreSqlDatabase {
             Err(e) => tracing::error!("Error deleting unused sessions: {}", e),
         }
 
-        // Vacuum tables to reclaim disk space after cleanup (only if rows were deleted)
+        // Vacuum tables to mark space as reusable after cleanup (only if rows were deleted)
         if total_deleted > 0 {
-            info!("Deleted {} total rows, running VACUUM FULL to reclaim space", total_deleted);
+            info!("Deleted {} total rows, running VACUUM ANALYZE to mark space reusable", total_deleted);
             if let Err(e) = self.vacuum_tables().await {
                 tracing::error!("Error vacuuming database: {}", e);
             }
@@ -4841,11 +4841,11 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
     async fn vacuum_tables(&self) -> Result<()> {
         let start_time = std::time::Instant::now();
-        info!("Starting PostgreSQL VACUUM FULL on recording tables for database '{}'...", self.database_name);
+        info!("Starting PostgreSQL VACUUM ANALYZE on recording tables for database '{}'...", self.database_name);
 
-        // VACUUM FULL rewrites tables and reclaims disk space back to the OS
-        // This is more thorough than regular VACUUM but requires exclusive lock
-        // We vacuum each table that can have significant deletions
+        // Regular VACUUM marks dead tuples as reusable (doesn't return space to OS but fast)
+        // ANALYZE updates statistics for the query planner
+        // This is much faster than VACUUM FULL and doesn't require exclusive lock
 
         let tables = [
             TABLE_RECORDING_MJPEG,
@@ -4856,23 +4856,23 @@ impl DatabaseProvider for PostgreSqlDatabase {
 
         for table in &tables {
             let table_start = std::time::Instant::now();
-            let vacuum_query = format!("VACUUM FULL {}", table);
+            let vacuum_query = format!("VACUUM ANALYZE {}", table);
 
             if let Err(e) = sqlx::query(&vacuum_query)
                 .execute(&self.pool)
                 .await
             {
                 // Log error but continue with other tables
-                tracing::warn!("VACUUM FULL {} failed: {}", table, e);
+                tracing::warn!("VACUUM ANALYZE {} failed: {}", table, e);
             } else {
                 let table_elapsed = table_start.elapsed();
-                debug!("VACUUM FULL {} completed in {:.1}s", table, table_elapsed.as_secs_f64());
+                debug!("VACUUM ANALYZE {} completed in {:.1}s", table, table_elapsed.as_secs_f64());
             }
         }
 
         let elapsed = start_time.elapsed();
         info!(
-            "PostgreSQL VACUUM FULL completed for database '{}' in {:.1}s",
+            "PostgreSQL VACUUM ANALYZE completed for database '{}' in {:.1}s",
             self.database_name,
             elapsed.as_secs_f64()
         );
