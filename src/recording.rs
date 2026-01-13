@@ -839,27 +839,35 @@ impl RecordingManager {
         // Update camera configs for cleanup
         self.update_camera_configs(camera_configs.clone()).await;
 
-        // Run startup cleanup in background to avoid blocking server startup
-        info!("Scheduling background cleanup for all camera databases at startup...");
-        let databases_clone = self.databases.clone();
-        let config_clone = self.config.clone();
-        let camera_configs_clone = self.camera_configs.clone();
+        // Run startup cleanup in background ONLY for PostgreSQL (concurrent-safe)
+        // SQLite requires exclusive access for VACUUM, so skip startup cleanup and rely on periodic cleanup
+        match self.config.database_type {
+            crate::config::DatabaseType::PostgreSQL => {
+                info!("Scheduling background cleanup for PostgreSQL databases at startup...");
+                let databases_clone = self.databases.clone();
+                let config_clone = self.config.clone();
+                let camera_configs_clone = self.camera_configs.clone();
 
-        tokio::spawn(async move {
-            // Small delay to let server finish starting up first
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                tokio::spawn(async move {
+                    // Small delay to let server finish starting up first
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-            info!("Starting background cleanup for all camera databases...");
-            let databases = databases_clone.read().await;
-            for (camera_id, database) in databases.iter() {
-                info!("Performing background startup cleanup for camera '{}'", camera_id);
-                let configs = camera_configs_clone.read().await;
-                if let Err(e) = database.cleanup_database(&config_clone, &configs).await {
-                    error!("Failed to perform startup cleanup for camera '{}': {}", camera_id, e);
-                }
+                    info!("Starting background cleanup for all PostgreSQL camera databases...");
+                    let databases = databases_clone.read().await;
+                    for (camera_id, database) in databases.iter() {
+                        info!("Performing background startup cleanup for camera '{}'", camera_id);
+                        let configs = camera_configs_clone.read().await;
+                        if let Err(e) = database.cleanup_database(&config_clone, &configs).await {
+                            error!("Failed to perform startup cleanup for camera '{}': {}", camera_id, e);
+                        }
+                    }
+                    info!("Background startup cleanup completed for all PostgreSQL camera databases");
+                });
             }
-            info!("Background startup cleanup completed for all camera databases");
-        });
+            crate::config::DatabaseType::SQLite => {
+                info!("Skipping startup cleanup for SQLite databases (will run on periodic schedule to avoid locking issues)");
+            }
+        }
 
         info!("Checking for active recordings to restart at startup...");
         
