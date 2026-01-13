@@ -483,6 +483,41 @@
                                 <button id="stopRecording" class="danger" disabled style="padding: 6px 10px; font-size: 11px; white-space: nowrap;">⏹ Stop</button>
                             </div>
                         </div>
+
+                        <!-- MP4 Export Section -->
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                            <h3 style="margin-bottom: 8px; font-size: 0.95rem;">Export to MP4</h3>
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <div>
+                                    <label style="font-size: 11px; color: var(--text-secondary);">From:</label>
+                                    <div style="display: flex; gap: 4px;">
+                                        <input type="date" id="exportFromDate" style="flex: 1; padding: 4px; font-size: 11px;">
+                                        <input type="time" id="exportFromTime" style="width: 90px; padding: 4px; font-size: 11px;">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; color: var(--text-secondary);">To:</label>
+                                    <div style="display: flex; gap: 4px;">
+                                        <input type="date" id="exportToDate" style="flex: 1; padding: 4px; font-size: 11px;">
+                                        <input type="time" id="exportToTime" style="width: 90px; padding: 4px; font-size: 11px;">
+                                    </div>
+                                </div>
+                                <button id="exportMp4Btn" class="success" style="margin-top: 4px; padding: 6px 10px; font-size: 11px;">
+                                    📽️ Export MP4
+                                </button>
+                            </div>
+
+                            <!-- Export Jobs Table -->
+                            <div style="margin-top: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <h4 style="font-size: 0.85rem; margin: 0;">Export Jobs</h4>
+                                    <button id="refreshExportJobs" style="padding: 2px 6px; font-size: 10px;">🔄</button>
+                                </div>
+                                <div id="exportJobsList" style="max-height: 150px; overflow-y: auto; font-size: 11px;">
+                                    <div style="color: var(--text-secondary);">No export jobs</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -570,7 +605,14 @@
                 this.updateRecordingControlsVisibility();
                 this.connectWebSocket();
                 this.checkActiveRecording();
-                
+
+                // Initialize export functionality
+                this.setDefaultExportTimes();
+                this.refreshExportJobs();
+
+                // Auto-refresh export jobs every 5 seconds
+                setInterval(() => this.refreshExportJobs(), 5000);
+
                 // Auto-load recordings on page load
                 setTimeout(() => {
                     this.fetchRecordings();
@@ -586,6 +628,8 @@
                 document.getElementById('refreshRecordings').addEventListener('click', () => this.fetchRecordings());
                 document.getElementById('startRecording').addEventListener('click', () => this.startRecording());
                 document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
+                document.getElementById('exportMp4Btn').addEventListener('click', () => this.startMp4Export());
+                document.getElementById('refreshExportJobs').addEventListener('click', () => this.refreshExportJobs());
                 document.getElementById('startLiveStream').addEventListener('click', () => this.startLiveStream());
                 
                 document.getElementById('increaseSpeed').addEventListener('click', () => this.changeSpeed(0.5));
@@ -1463,6 +1507,121 @@
                 } catch (error) {
                     this.logJson({ error: 'Network error stopping recording', details: error.message });
                 }
+            }
+
+            // MP4 Export Functions
+            async startMp4Export() {
+                const fromDate = document.getElementById('exportFromDate').value;
+                const fromTime = document.getElementById('exportFromTime').value;
+                const toDate = document.getElementById('exportToDate').value;
+                const toTime = document.getElementById('exportToTime').value;
+
+                if (!fromDate || !fromTime || !toDate || !toTime) {
+                    alert('Please select both date and time for start and end');
+                    return;
+                }
+
+                const fromISO = new Date(`${fromDate}T${fromTime}`).toISOString();
+                const toISO = new Date(`${toDate}T${toTime}`).toISOString();
+
+                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '').replace(/\/$/, '')}`;
+                const url = `${baseUrl}/control/recordings/mp4/export?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`;
+
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                    const response = await fetch(url, { method: 'POST', headers });
+                    const result = await response.json();
+
+                    if (result.status === 'success') {
+                        this.logJson({ message: 'Export job created', job_id: result.data.job_id });
+                        this.refreshExportJobs();
+                    } else {
+                        alert('Failed to start export: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    this.logJson({ error: 'Network error starting export', details: error.message });
+                    alert('Failed to start export: ' + error.message);
+                }
+            }
+
+            async refreshExportJobs() {
+                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '').replace(/\/$/, '')}`;
+                const url = `${baseUrl}/control/recordings/mp4/export/jobs`;
+
+                try {
+                    const headers = {};
+                    const token = document.getElementById('bearerToken').value.trim();
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                    const response = await fetch(url, { headers });
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            this.renderExportJobs(result.data.jobs);
+                        }
+                    }
+                } catch (error) {
+                    // Silent fail for refresh
+                }
+            }
+
+            renderExportJobs(jobs) {
+                const container = document.getElementById('exportJobsList');
+                if (!jobs || jobs.length === 0) {
+                    container.innerHTML = '<div style="color: var(--text-secondary);">No export jobs</div>';
+                    return;
+                }
+
+                // Sort by created_at descending (newest first)
+                jobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '').replace(/\/$/, '')}`;
+
+                let html = '<table style="width: 100%; border-collapse: collapse;">';
+                html += '<tr style="border-bottom: 1px solid var(--border-color); text-align: left;"><th style="padding: 2px;">Time</th><th style="padding: 2px;">Status</th><th style="padding: 2px;">Action</th></tr>';
+
+                for (const job of jobs) {
+                    const fromTime = new Date(job.from_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                    const toTime = new Date(job.to_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                    const fromDate = new Date(job.from_time).toLocaleDateString([], {month: 'short', day: 'numeric'});
+
+                    const statusColor = job.status === 'Completed' ? '#4caf50' :
+                                       job.status === 'Failed' ? '#f44336' :
+                                       job.status === 'Running' ? '#ff9800' : 'inherit';
+
+                    let actionHtml = '';
+                    if (job.status === 'Completed') {
+                        const downloadUrl = `${baseUrl}/control/recordings/mp4/export/download/${job.job_id}`;
+                        actionHtml = `<a href="${downloadUrl}" style="color: #4a90e2; text-decoration: none;">⬇️</a>`;
+                    } else if (job.status === 'Running') {
+                        actionHtml = `<span style="color: #ff9800;">${job.progress_percent || 0}%</span>`;
+                    } else if (job.status === 'Failed') {
+                        actionHtml = `<span title="${job.error_message || 'Unknown error'}" style="cursor: help;">❌</span>`;
+                    } else {
+                        actionHtml = '<span style="color: var(--text-secondary);">⏳</span>';
+                    }
+
+                    html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <td style="padding: 3px 2px;" title="${fromDate}">${fromTime}-${toTime}</td>
+                        <td style="padding: 3px 2px; color: ${statusColor};">${job.status}</td>
+                        <td style="padding: 3px 2px;">${actionHtml}</td>
+                    </tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            }
+
+            setDefaultExportTimes() {
+                const now = new Date();
+                const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+                document.getElementById('exportFromDate').value = oneHourAgo.toISOString().split('T')[0];
+                document.getElementById('exportFromTime').value = oneHourAgo.toTimeString().slice(0, 5);
+                document.getElementById('exportToDate').value = now.toISOString().split('T')[0];
+                document.getElementById('exportToTime').value = now.toTimeString().slice(0, 5);
             }
 
             async checkActiveRecording() {
