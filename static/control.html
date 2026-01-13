@@ -1898,14 +1898,17 @@
                 if (Hls.isSupported()) {
                     this.hls = new Hls({
                         debug: false,
-                        enableWorker: true
+                        enableWorker: true,
+                        startPosition: 0  // Always start from the beginning of VOD content
                     });
-                    
+
                     this.hls.loadSource(hlsUrl);
                     this.hls.attachMedia(this.hlsPlayer);
-                    
+
                     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
                         this.logJson({ message: 'HLS manifest parsed successfully' });
+                        // Ensure we start from the beginning
+                        this.hlsPlayer.currentTime = 0;
                         this.hlsPlayer.play().catch(error => {
                             this.logJson({ error: 'Failed to play HLS', details: error.message });
                         });
@@ -1920,6 +1923,7 @@
                 } else if (this.hlsPlayer.canPlayType('application/vnd.apple.mpegurl')) {
                     // Native HLS support (Safari)
                     this.hlsPlayer.src = hlsUrl;
+                    this.hlsPlayer.currentTime = 0;  // Start from beginning
                     this.hlsPlayer.play().catch(error => {
                         this.logJson({ error: 'Failed to play HLS natively', details: error.message });
                     });

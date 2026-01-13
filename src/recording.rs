@@ -1624,7 +1624,6 @@ impl RecordingManager {
             "-i", "-", // Input from stdin
             "-c:v", "libx264", // H.264 codec
             "-preset", "ultrafast", // Fast encoding
-            // No output framerate - use same as input
             "-f", "mpegts", // MPEG-TS format for HLS
             "-", // Output to stdout
         ]);
