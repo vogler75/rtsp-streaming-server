@@ -1,0 +1,36 @@
+Release v1.0.9
+Built from commit: e02432b
+Date: 2026-01-13 12:18:37
+
+Changes since v1.0.8:
+---
+e02432b Mark HLS settings as experimental in server and camera config UI
+fe912d4 Add test files to .gitignore
+1eb1d6a Remove accidentally committed test files
+64f7b69 Mark HLS playback mode as experimental in UI
+cbe7fe9 Fix HLS playback to start from beginning, revert timestamp offset
+4179d9c Fix HLS playback ordering and improve MP4 export
+2292669 Add MP4 export UI to control page Recording Controls section
+52fc350 Increase timeline slider granularity from 1% to 0.1% steps
+23f0478 Only run background cleanup for PostgreSQL, skip for SQLite
+5875624 Run database cleanup in background at startup to avoid blocking
+1d0c60c Fix dashboard to skip recording status checks for disabled cameras
+f747182 Make database cleanup consistent - delete by timestamp, not full sessions
+617fb72 Change cleanup interval from hours to minutes for more frequent cleanup
+1464afe Remove mode indicator overlay that was covering fullscreen button
+d79574b Fix overlay controls showing in HLS playback mode
+aaf00ac Fix recording_hls primary key to include session_id to prevent duplicates
+554c28b Fix HLS segment queries to include camera_id and hide overlay controls
+fe021a8 Hide unavailable playback modes in control GUI based on storage config
+c452037 Use VACUUM ANALYZE instead of VACUUM FULL for PostgreSQL
+dd12c70 Only run VACUUM after cleanup if rows were actually deleted
+b98f58b Add VACUUM after database cleanup to reclaim disk space
+f67a12e Rework database schema and improve recording performance
+5421bc1 Implement bulk frame writing for recording (30 frames or 1 second)
+0685100 Change 'recording not enabled' log to debug level
+f366dd0 Never overwrite config.json when it has parse errors
+d9b2eec Optimize database queries for playback and cleanup
+91cad21 Add camera_id to recording_mjpeg table and improve cleanup
+e9a817e Configure SQLite for better concurrency with WAL mode
+55e84fc Enable FFmpeg stderr logging for cam2
+77bcafa Upgrade rustls to 0.23 and update TLS configuration API
