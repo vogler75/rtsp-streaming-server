@@ -287,6 +287,7 @@ pub trait DatabaseProvider: Send + Sync {
         camera_id: &str,
         from_time: DateTime<Utc>,
         to_time: DateTime<Utc>,
+        session_id: Option<i64>,
     ) -> Result<Vec<RecordingHlsSegment>>;
     async fn delete_old_recording_hls_segments(
         &self,
@@ -323,7 +324,7 @@ pub trait DatabaseProvider: Send + Sync {
 
     // Export methods
     async fn get_mp4_segments_in_range(&self, camera_id: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<crate::export_jobs::Mp4SegmentInfo>>;
-    async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()>;
+    async fn extract_mp4_segment_to_file(&self, camera_id: &str, start_time: DateTime<Utc>, output_path: &str) -> Result<()>;
 
     // Throughput tracking methods
     async fn record_throughput_stats(
@@ -2131,9 +2132,17 @@ impl DatabaseProvider for SqliteDatabase {
         camera_id: &str,
         from_time: DateTime<Utc>,
         to_time: DateTime<Utc>,
+        session_id: Option<i64>,
     ) -> Result<Vec<RecordingHlsSegment>> {
         // Query for segments that overlap with the requested time range
         // A segment overlaps if its start is before the range end AND its end is after the range start
+        // If session_id is provided, filter to only that session's segments
+        let session_filter = if session_id.is_some() {
+            "AND session_id = ?"
+        } else {
+            ""
+        };
+
         let query = format!(
             r#"
             SELECT camera_id, session_id, segment_index, start_time, end_time,
@@ -2142,17 +2151,22 @@ impl DatabaseProvider for SqliteDatabase {
             WHERE camera_id = ?
             AND start_time <= ?  -- segment starts before or at range end
             AND end_time >= ?     -- segment ends after or at range start
-            ORDER BY start_time ASC, segment_index ASC
+            {}
+            ORDER BY start_time ASC
             "#,
-            TABLE_RECORDING_HLS
+            TABLE_RECORDING_HLS, session_filter
         );
 
-        let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+        let mut query_builder = sqlx::query_as::<_, RecordingHlsSegment>(&query)
             .bind(camera_id)
             .bind(to_time)
-            .bind(from_time)
-            .fetch_all(&self.pool)
-            .await?;
+            .bind(from_time);
+
+        if let Some(sid) = session_id {
+            query_builder = query_builder.bind(sid);
+        }
+
+        let segments = query_builder.fetch_all(&self.pool).await?;
 
         Ok(segments)
     }
@@ -2590,17 +2604,18 @@ impl DatabaseProvider for SqliteDatabase {
         Ok(segments)
     }
 
-    async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()> {
+    async fn extract_mp4_segment_to_file(&self, camera_id: &str, start_time: DateTime<Utc>, output_path: &str) -> Result<()> {
         let query = format!(
-            "SELECT mp4_data FROM {} WHERE session_id = ?",
+            "SELECT mp4_data FROM {} WHERE camera_id = ? AND start_time = ?",
             TABLE_RECORDING_MP4
         );
 
         let row = sqlx::query(&query)
-            .bind(segment_id)
+            .bind(camera_id)
+            .bind(start_time)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or_else(|| StreamError::not_found(format!("MP4 segment {} not found", segment_id)))?;
+            .ok_or_else(|| StreamError::not_found(format!("MP4 segment not found for camera {} at {}", camera_id, start_time)))?;
 
         let data: Vec<u8> = row.get("mp4_data");
 
@@ -4458,9 +4473,18 @@ impl DatabaseProvider for PostgreSqlDatabase {
         camera_id: &str,
         from_time: DateTime<Utc>,
         to_time: DateTime<Utc>,
+        session_id: Option<i64>,
     ) -> Result<Vec<RecordingHlsSegment>> {
         // Query for segments that overlap with the requested time range
         // A segment overlaps if its start is before the range end AND its end is after the range start
+        // If session_id is provided, filter to only that session's segments
+        let (session_filter, param_offset) = if session_id.is_some() {
+            ("AND session_id = $4", 4)
+        } else {
+            ("", 3)
+        };
+        let _ = param_offset; // suppress unused warning
+
         let query = format!(
             r#"
             SELECT camera_id, session_id, segment_index, start_time, end_time,
@@ -4469,17 +4493,22 @@ impl DatabaseProvider for PostgreSqlDatabase {
             WHERE camera_id = $1
             AND start_time <= $2  -- segment starts before or at range end
             AND end_time >= $3     -- segment ends after or at range start
-            ORDER BY start_time ASC, segment_index ASC
+            {}
+            ORDER BY start_time ASC
             "#,
-            TABLE_RECORDING_HLS
+            TABLE_RECORDING_HLS, session_filter
         );
 
-        let segments = sqlx::query_as::<_, RecordingHlsSegment>(&query)
+        let mut query_builder = sqlx::query_as::<_, RecordingHlsSegment>(&query)
             .bind(camera_id)
             .bind(to_time)
-            .bind(from_time)
-            .fetch_all(&self.pool)
-            .await?;
+            .bind(from_time);
+
+        if let Some(sid) = session_id {
+            query_builder = query_builder.bind(sid);
+        }
+
+        let segments = query_builder.fetch_all(&self.pool).await?;
 
         Ok(segments)
     }
@@ -4947,17 +4976,18 @@ impl DatabaseProvider for PostgreSqlDatabase {
         Ok(segments)
     }
 
-    async fn extract_mp4_segment_to_file(&self, segment_id: i64, output_path: &str) -> Result<()> {
+    async fn extract_mp4_segment_to_file(&self, camera_id: &str, start_time: DateTime<Utc>, output_path: &str) -> Result<()> {
         let query = format!(
-            "SELECT mp4_data FROM {} WHERE session_id = $1",
+            "SELECT mp4_data FROM {} WHERE camera_id = $1 AND start_time = $2",
             TABLE_RECORDING_MP4
         );
 
         let row = sqlx::query(&query)
-            .bind(segment_id)
+            .bind(camera_id)
+            .bind(start_time)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or_else(|| StreamError::not_found(format!("MP4 segment {} not found", segment_id)))?;
+            .ok_or_else(|| StreamError::not_found(format!("MP4 segment not found for camera {} at {}", camera_id, start_time)))?;
 
         let data: Vec<u8> = row.get("mp4_data");
 

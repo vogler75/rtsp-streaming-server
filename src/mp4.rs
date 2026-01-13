@@ -154,6 +154,7 @@ pub struct HlsTimeRangeQuery {
     t2: DateTime<Utc>,
     #[serde(default = "default_hls_segment_duration")]
     segment_duration: u32, // seconds per HLS segment
+    session_id: Option<i64>, // optional: filter to specific recording session
 }
 
 fn default_hls_segment_duration() -> u32 {
@@ -166,7 +167,7 @@ pub async fn serve_hls_playlist(
     axum::extract::State(app_state): axum::extract::State<AppState>,
 ) -> axum::response::Response {
     let camera_id = path.0;
-    debug!("Serving HLS playlist: camera_id={}, from={}, to={}", camera_id, query.t1, query.t2);
+    debug!("Serving HLS playlist: camera_id={}, from={}, to={}, session_id={:?}", camera_id, query.t1, query.t2, query.session_id);
     
     
     let recording_manager = match app_state.recording_manager {
@@ -227,34 +228,56 @@ pub async fn serve_hls_playlist(
     // When both HLS and MP4 are enabled, ALWAYS prefer HLS
     if hls_enabled {
         debug!("HLS storage enabled for camera '{}', checking for pre-generated segments", camera_id);
-        
+
+        // Add a small buffer to the end time to catch segments that might be written
+        // slightly after the session end_time due to async processing
+        let query_end_time = query.t2 + chrono::Duration::seconds(5);
+
         // Try to find pre-generated HLS segments in database
-        match database.get_recording_hls_segments_for_timerange(&camera_id, query.t1, query.t2).await {
+        // If session_id is provided, filter to only that session's segments to avoid mixing
+        match database.get_recording_hls_segments_for_timerange(&camera_id, query.t1, query_end_time, query.session_id).await {
             Ok(hls_segments) if !hls_segments.is_empty() => {
-                debug!("Found {} pre-generated HLS segments for camera '{}' in time range", hls_segments.len(), camera_id);
-                
+                // Calculate total duration and max segment duration for proper HLS headers
+                let total_duration: f64 = hls_segments.iter().map(|s| s.duration_seconds).sum();
+                let max_duration = hls_segments.iter()
+                    .map(|s| s.duration_seconds)
+                    .fold(0.0f64, f64::max)
+                    .ceil() as u32;
+                let target_duration = max_duration.max(query.segment_duration);
+
+                // Log first and last segment for debugging order issues
+                if let (Some(first), Some(last)) = (hls_segments.first(), hls_segments.last()) {
+                    info!("Found {} HLS segments for camera '{}': total duration {:.1}s, session_id={:?}, first_idx={} ({}), last_idx={} ({})",
+                          hls_segments.len(), camera_id, total_duration, query.session_id,
+                          first.segment_index, first.start_time,
+                          last.segment_index, last.start_time);
+                } else {
+                    info!("Found {} HLS segments for camera '{}': total duration {:.1}s",
+                          hls_segments.len(), camera_id, total_duration);
+                }
+
                 // Create HLS playlist from database-stored segments
                 let mut playlist_content = String::new();
                 playlist_content.push_str("#EXTM3U\n");
                 playlist_content.push_str("#EXT-X-VERSION:3\n");
-                playlist_content.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", query.segment_duration));
+                playlist_content.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", target_duration));
                 playlist_content.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
-                
+
                 for segment in &hls_segments {
-                    debug!("HLS segment {}: duration_seconds={:.3}, start_time={}, end_time={}", 
+                    debug!("HLS segment {}: duration_seconds={:.3}, start_time={}, end_time={}",
                            segment.segment_index, segment.duration_seconds, segment.start_time, segment.end_time);
                     playlist_content.push_str(&format!("#EXTINF:{:.3},\n", segment.duration_seconds));
                     // Create segment URL that will be handled by serve_hls_segment_from_database
                     // Use "db" as a placeholder playlist_id for database-stored segments
-                    let segment_url = format!("segments/db/recording_{}_{}_{}.ts", 
-                                            segment.session_id, 
+                    let segment_url = format!("segments/db/recording_{}_{}_{}.ts",
+                                            segment.session_id,
                                             segment.segment_index,
                                             segment.start_time.timestamp());
                     playlist_content.push_str(&format!("{}\n", segment_url));
                 }
-                
+
                 playlist_content.push_str("#EXT-X-ENDLIST\n");
-                
+
                 debug!("Generated HLS playlist from {} database segments for camera '{}'", hls_segments.len(), camera_id);
                 
                 return axum::response::Response::builder()

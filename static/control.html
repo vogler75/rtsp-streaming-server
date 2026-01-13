@@ -429,6 +429,7 @@
                         <canvas id="videoCanvas"></canvas>
                         <video id="videoPlayer" style="display: none; width: 100%; height: 100%;"></video>
                         <video id="hlsPlayer" style="display: none; width: 100%; height: 100%;" controls></video>
+                        <div id="hlsIndicator" style="display: none; position: absolute; top: 10px; right: 10px; background: rgba(255, 100, 0, 0.9); color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; z-index: 100;">HLS Player</div>
                         <div id="statusMessage">Ready for commands (responses logged to console)</div>
 
                         <div class="video-overlay-controls">
@@ -1052,7 +1053,7 @@
                     tableHTML += `
                         <tr data-session-id="${rec.id}" class="recording-row ${isActive ? 'active-recording' : ''}">
                             <td>
-                                ${canDelete ? `<input type="checkbox" class="recording-checkbox" data-session-id="${rec.id}" data-status="${rec.status}" style="width: 18px; height: 18px; cursor: pointer;">` : ''}
+                                ${canDelete ? `<input type="checkbox" class="recording-checkbox" data-session-id="${rec.id}" data-status="${rec.status}" data-start-time="${rec.start_time}" data-end-time="${rec.end_time || ''}" style="width: 18px; height: 18px; cursor: pointer;">` : ''}
                             </td>
                             <td>${rec.id}</td>
                             <td>${startTime}</td>
@@ -1074,11 +1075,15 @@
                     const rec = recordings[index];
                     
                     row.addEventListener('click', (event) => {
-                        // Don't select recording if clicking on the keep toggle button
-                        if (event.target.classList.contains('keep-toggle-btn')) {
+                        // Don't trigger playback if clicking on interactive elements
+                        if (event.target.classList.contains('keep-toggle-btn') ||
+                            event.target.classList.contains('recording-checkbox') ||
+                            event.target.classList.contains('delete-recording-btn') ||
+                            event.target.tagName === 'INPUT' ||
+                            event.target.tagName === 'BUTTON') {
                             return;
                         }
-                        
+
                         this.selectedRecording = rec;
                         rows.forEach(r => r.classList.remove('selected'));
                         row.classList.add('selected');
@@ -1183,12 +1188,20 @@
                 const rows = container.querySelectorAll('tbody tr');
                 rows.forEach((row, index) => {
                     const seg = segments[index];
-                    
-                    row.addEventListener('click', () => {
+
+                    row.addEventListener('click', (event) => {
+                        // Don't trigger playback if clicking on interactive elements
+                        if (event.target.classList.contains('segment-checkbox') ||
+                            event.target.classList.contains('delete-mp4-btn') ||
+                            event.target.tagName === 'INPUT' ||
+                            event.target.tagName === 'BUTTON') {
+                            return;
+                        }
+
                         this.playVideoSegment(seg.url);
                         rows.forEach(r => r.classList.remove('selected'));
                         row.classList.add('selected');
-                        
+
                         // Scroll to top to show the video player
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                     });
@@ -1225,9 +1238,10 @@
             }
 
             startReplay(recording) {
-                // Show canvas, hide video players
+                // Show canvas, hide video players and HLS indicator
                 document.getElementById('videoPlayer').style.display = 'none';
                 document.getElementById('hlsPlayer').style.display = 'none';
+                document.getElementById('hlsIndicator').style.display = 'none';
                 document.getElementById('videoCanvas').style.display = 'block';
 
                 // Always stop any current stream first to ensure clean state
@@ -1524,8 +1538,8 @@
                 const fromISO = new Date(`${fromDate}T${fromTime}`).toISOString();
                 const toISO = new Date(`${toDate}T${toTime}`).toISOString();
 
-                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '').replace(/\/$/, '')}`;
-                const url = `${baseUrl}/control/recordings/mp4/export?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`;
+                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '')}`;
+                const url = `${baseUrl}/recordings/mp4/export?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`;
 
                 try {
                     const headers = { 'Content-Type': 'application/json' };
@@ -1548,8 +1562,8 @@
             }
 
             async refreshExportJobs() {
-                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '').replace(/\/$/, '')}`;
-                const url = `${baseUrl}/control/recordings/mp4/export/jobs`;
+                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '')}`;
+                const url = `${baseUrl}/recordings/mp4/export/jobs`;
 
                 try {
                     const headers = {};
@@ -1578,36 +1592,31 @@
                 // Sort by created_at descending (newest first)
                 jobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '').replace(/\/$/, '')}`;
+                const baseUrl = `${window.location.origin}${window.location.pathname.replace('control.html', '')}`;
 
                 let html = '<table style="width: 100%; border-collapse: collapse;">';
-                html += '<tr style="border-bottom: 1px solid var(--border-color); text-align: left;"><th style="padding: 2px;">Time</th><th style="padding: 2px;">Status</th><th style="padding: 2px;">Action</th></tr>';
+                html += '<tr style="border-bottom: 1px solid var(--border-color); text-align: left;"><th style="padding: 2px;">Time</th><th style="padding: 2px;">Status</th></tr>';
 
                 for (const job of jobs) {
                     const fromTime = new Date(job.from_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
                     const toTime = new Date(job.to_time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
                     const fromDate = new Date(job.from_time).toLocaleDateString([], {month: 'short', day: 'numeric'});
 
-                    const statusColor = job.status === 'Completed' ? '#4caf50' :
-                                       job.status === 'Failed' ? '#f44336' :
-                                       job.status === 'Running' ? '#ff9800' : 'inherit';
-
-                    let actionHtml = '';
+                    let statusHtml = '';
                     if (job.status === 'Completed') {
-                        const downloadUrl = `${baseUrl}/control/recordings/mp4/export/download/${job.job_id}`;
-                        actionHtml = `<a href="${downloadUrl}" style="color: #4a90e2; text-decoration: none;">⬇️</a>`;
+                        const downloadUrl = `${baseUrl}/recordings/mp4/export/download/${job.job_id}`;
+                        statusHtml = `<a href="${downloadUrl}" style="color: #4caf50; text-decoration: none;">✅ Download</a>`;
                     } else if (job.status === 'Running') {
-                        actionHtml = `<span style="color: #ff9800;">${job.progress_percent || 0}%</span>`;
+                        statusHtml = `<span style="color: #ff9800;">⏳ ${job.progress_percent || 0}%</span>`;
                     } else if (job.status === 'Failed') {
-                        actionHtml = `<span title="${job.error_message || 'Unknown error'}" style="cursor: help;">❌</span>`;
+                        statusHtml = `<span title="${job.error_message || 'Unknown error'}" style="color: #f44336; cursor: help;">❌ Failed</span>`;
                     } else {
-                        actionHtml = '<span style="color: var(--text-secondary);">⏳</span>';
+                        statusHtml = '<span style="color: var(--text-secondary);">⏳ Queued</span>';
                     }
 
                     html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
                         <td style="padding: 3px 2px;" title="${fromDate}">${fromTime}-${toTime}</td>
-                        <td style="padding: 3px 2px; color: ${statusColor};">${job.status}</td>
-                        <td style="padding: 3px 2px;">${actionHtml}</td>
+                        <td style="padding: 3px 2px;">${statusHtml}</td>
                     </tr>`;
                 }
                 html += '</table>';
@@ -1622,6 +1631,51 @@
                 document.getElementById('exportFromTime').value = oneHourAgo.toTimeString().slice(0, 5);
                 document.getElementById('exportToDate').value = now.toISOString().split('T')[0];
                 document.getElementById('exportToTime').value = now.toTimeString().slice(0, 5);
+            }
+
+            updateExportTimeRangeFromSelection() {
+                const checkboxes = document.querySelectorAll('.recording-checkbox:checked');
+                if (checkboxes.length === 0) {
+                    return; // Don't change if nothing selected
+                }
+
+                let minStart = null;
+                let maxEnd = null;
+
+                checkboxes.forEach(cb => {
+                    const startTime = cb.dataset.startTime;
+                    const endTime = cb.dataset.endTime;
+
+                    if (startTime) {
+                        const startDate = new Date(startTime);
+                        if (!minStart || startDate < minStart) {
+                            minStart = startDate;
+                        }
+                    }
+
+                    if (endTime) {
+                        const endDate = new Date(endTime);
+                        if (!maxEnd || endDate > maxEnd) {
+                            maxEnd = endDate;
+                        }
+                    }
+                });
+
+                // Update export form if we have valid times
+                if (minStart) {
+                    document.getElementById('exportFromDate').value = minStart.toISOString().split('T')[0];
+                    document.getElementById('exportFromTime').value = minStart.toTimeString().slice(0, 5);
+                }
+
+                if (maxEnd) {
+                    document.getElementById('exportToDate').value = maxEnd.toISOString().split('T')[0];
+                    document.getElementById('exportToTime').value = maxEnd.toTimeString().slice(0, 5);
+                } else if (minStart) {
+                    // If no end time (active recording), use current time
+                    const now = new Date();
+                    document.getElementById('exportToDate').value = now.toISOString().split('T')[0];
+                    document.getElementById('exportToTime').value = now.toTimeString().slice(0, 5);
+                }
             }
 
             async checkActiveRecording() {
@@ -1818,6 +1872,7 @@
                 document.getElementById('videoCanvas').style.display = 'none';
                 document.getElementById('videoPlayer').style.display = 'none';
                 document.getElementById('hlsPlayer').style.display = 'block';
+                document.getElementById('hlsIndicator').style.display = 'block';
 
                 // Hide video overlay controls (timeline slider, playback buttons) - HLS player has its own controls
                 document.querySelector('.video-overlay-controls').classList.add('hidden');
@@ -1827,11 +1882,12 @@
                 this.sendCommand({ cmd: 'stop' });
                 this.streamState = 'stopped';
                 
-                // Build HLS URL using the recording's time range
+                // Build HLS URL using the recording's time range and session_id
                 const fromTime = new Date(recording.start_time).toISOString();
                 const toTime = recording.end_time ? new Date(recording.end_time).toISOString() : new Date().toISOString();
                 const cameraPath = window.location.pathname.replace('/control.html', '').replace('/control', '');
-                const hlsUrl = `${cameraPath}/control/recordings/hls/timerange?t1=${encodeURIComponent(fromTime)}&t2=${encodeURIComponent(toTime)}`;
+                // Include session_id to ensure we only get segments from this specific recording session
+                const hlsUrl = `${cameraPath}/control/recordings/hls/timerange?t1=${encodeURIComponent(fromTime)}&t2=${encodeURIComponent(toTime)}&session_id=${recording.id}`;
                 
                 this.logJson({ message: 'Playing HLS recording', url: hlsUrl, recording: recording });
                 
@@ -1877,11 +1933,14 @@
                     this.hls.destroy();
                     this.hls = null;
                 }
-                
+
                 if (this.hlsPlayer) {
                     this.hlsPlayer.pause();
                     this.hlsPlayer.src = '';
                 }
+
+                // Hide HLS indicator
+                document.getElementById('hlsIndicator').style.display = 'none';
             }
             
 
@@ -2092,11 +2151,15 @@
                         const checkboxes = document.querySelectorAll('.recording-checkbox');
                         checkboxes.forEach(cb => cb.checked = e.target.checked);
                         this.updateBulkActionUI();
+                        this.updateExportTimeRangeFromSelection();
                     } else if (e.target.classList.contains('select-all-segments')) {
                         const checkboxes = document.querySelectorAll('.segment-checkbox');
                         checkboxes.forEach(cb => cb.checked = e.target.checked);
                         this.updateBulkActionUI();
-                    } else if (e.target.classList.contains('recording-checkbox') || e.target.classList.contains('segment-checkbox')) {
+                    } else if (e.target.classList.contains('recording-checkbox')) {
+                        this.updateBulkActionUI();
+                        this.updateExportTimeRangeFromSelection();
+                    } else if (e.target.classList.contains('segment-checkbox')) {
                         this.updateBulkActionUI();
                     }
                 });
@@ -2112,6 +2175,7 @@
                         const checkboxes = document.querySelectorAll('.recording-checkbox');
                         checkboxes.forEach(cb => cb.checked = e.target.checked);
                         document.querySelectorAll('.select-all-recordings').forEach(cb => cb.checked = e.target.checked);
+                        this.updateExportTimeRangeFromSelection();
                     }
                     this.updateBulkActionUI();
                 });

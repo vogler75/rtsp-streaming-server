@@ -269,7 +269,7 @@ impl ExportJobManager {
         let concat_file_path = temp_dir.join(format!("concat_{}.txt", job.job_id));
         let mut concat_content = String::new();
 
-        for segment in &segments {
+        for (idx, segment) in segments.iter().enumerate() {
             // Resolve actual file path
             let file_path = if segment.storage_path.is_some() {
                 // Filesystem storage
@@ -278,9 +278,10 @@ impl ExportJobManager {
                     .join(segment.storage_path.as_ref().unwrap())
             } else {
                 // Database storage - extract to temp file
-                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, segment.session_id));
+                // Use index for unique filename since start_time is the unique key with camera_id
+                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, idx));
                 database
-                    .extract_mp4_segment_to_file(segment.session_id, &temp_file_path.to_string_lossy())
+                    .extract_mp4_segment_to_file(&job.camera_id, segment.start_time, &temp_file_path.to_string_lossy())
                     .await?;
                 temp_file_path
             };
@@ -340,9 +341,9 @@ impl ExportJobManager {
         }
 
         // Remove temp segment files (database-stored segments)
-        for segment in &segments {
+        for (idx, segment) in segments.iter().enumerate() {
             if segment.storage_path.is_none() {
-                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, segment.session_id));
+                let temp_file_path = temp_dir.join(format!("segment_{}_{}.mp4", job.job_id, idx));
                 if let Err(e) = fs::remove_file(&temp_file_path) {
                     warn!("Failed to remove temp segment file: {}", e);
                 }
