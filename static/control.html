@@ -434,7 +434,7 @@
                         <div class="video-overlay-controls">
                             <div class="timeline-container" style="width: 100%; display: flex; flex-direction: column;">
                                 <!-- Slider -->
-                                <input type="range" id="timelineSlider" min="0" max="100" value="0" disabled style="width: 100%; margin-bottom: 8px;">
+                                <input type="range" id="timelineSlider" min="0" max="1000" value="0" disabled style="width: 100%; margin-bottom: 8px;">
                                 
                                 <!-- From/Current/To times row -->
                                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
@@ -807,8 +807,8 @@
                     const startMs = this.timelineStart.getTime();
                     const endMs = this.timelineEnd.getTime();
                     const currentMs = this.currentTimestamp.getTime();
-                    const position = ((currentMs - startMs) / (endMs - startMs)) * 100;
-                    
+                    const position = ((currentMs - startMs) / (endMs - startMs)) * 1000;
+
                     // In live mode, continuously update the timeline end to "now"
                     if (this.streamState === 'live') {
                         const now = new Date();
@@ -817,14 +817,14 @@
                             document.getElementById('timelineEnd').textContent = this.timelineEnd.toLocaleTimeString();
                             // Recalculate position with new end time
                             const newEndMs = this.timelineEnd.getTime();
-                            const newPosition = ((currentMs - startMs) / (newEndMs - startMs)) * 100;
-                            document.getElementById('timelineSlider').value = Math.max(0, Math.min(100, newPosition));
+                            const newPosition = ((currentMs - startMs) / (newEndMs - startMs)) * 1000;
+                            document.getElementById('timelineSlider').value = Math.max(0, Math.min(1000, newPosition));
                         } else {
-                            document.getElementById('timelineSlider').value = Math.max(0, Math.min(100, position));
+                            document.getElementById('timelineSlider').value = Math.max(0, Math.min(1000, position));
                         }
                     } else {
                         // Replay mode
-                        document.getElementById('timelineSlider').value = Math.max(0, Math.min(100, position));
+                        document.getElementById('timelineSlider').value = Math.max(0, Math.min(1000, position));
                     }
                 }
             }
@@ -1383,10 +1383,10 @@
 
             onSliderChange(value) {
                 if (!this.timelineStart || !this.timelineEnd) return;
-                
+
                 const startMs = this.timelineStart.getTime();
                 const endMs = this.timelineEnd.getTime();
-                const targetMs = startMs + ((endMs - startMs) * (value / 100));
+                const targetMs = startMs + ((endMs - startMs) * (value / 1000));
                 const targetTimestamp = new Date(targetMs);
 
                 // Track the seek position and previous state
