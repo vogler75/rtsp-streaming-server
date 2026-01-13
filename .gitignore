@@ -33,3 +33,7 @@ ffmpeg.exe
 recordings/
 cameras.bak
 *.log
+
+# Test/debug files
+wget-log
+timerange*
