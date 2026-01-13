@@ -922,43 +922,44 @@ async function updateExistingCameras(cameras) {
 async function updateCameraTile(camera) {
     const requiresToken = camera.token_required === true;
     const isOnline = camera.connected || camera.ffmpeg_running;
-    
+    const isEnabled = camera.enabled !== false; // Default to true if not specified
+
     // Use specific IDs to update elements
     const statusElement = document.getElementById(`status-${camera.id}`);
     if (statusElement) {
         statusElement.textContent = isOnline ? 'Online' : 'Offline';
     }
-    
+
     const indicatorElement = document.getElementById(`indicator-${camera.id}`);
     if (indicatorElement) {
         indicatorElement.className = `status-indicator ${isOnline ? '' : 'offline'}`;
     }
-    
+
     const fpsElement = document.getElementById(`fps-${camera.id}`);
     if (fpsElement) {
         fpsElement.textContent = camera.capture_fps.toFixed(1);
     }
-    
+
     const clientsElement = document.getElementById(`clients-${camera.id}`);
     if (clientsElement) {
         clientsElement.textContent = camera.clients_connected;
     }
-    
+
     const frameElement = document.getElementById(`frame-${camera.id}`);
     if (frameElement) {
         frameElement.textContent = camera.last_frame_time ? new Date(camera.last_frame_time).toLocaleTimeString() : 'Never';
     }
-    
+
     const preBufferElement = document.getElementById(`pre-buffer-${camera.id}`);
     if (preBufferElement) {
         preBufferElement.textContent = `${camera.pre_recording_buffer_frames} frames (${camera.pre_recording_buffer_size_kb} KB)`;
     }
-    
+
     const mp4BufferElement = document.getElementById(`mp4-buffer-${camera.id}`);
     if (mp4BufferElement) {
         mp4BufferElement.textContent = `${camera.mp4_buffered_frames} frames (${camera.mp4_buffered_size_kb} KB)`;
     }
-    
+
     // Check if embedded stream needs to be stopped due to camera going offline
     const checkbox = document.getElementById(`stream-checkbox-${camera.id}`);
     if (checkbox && checkbox.checked && !isOnline) {
@@ -966,19 +967,21 @@ async function updateCameraTile(camera) {
         checkbox.checked = false;
         toggleEmbeddedStream(camera.id, camera.path, requiresToken);
     }
-    
+
     // Update admin buttons visibility based on admin mode
     const cameraActionsDiv = document.getElementById(`actions-${camera.id}`);
     if (cameraActionsDiv) {
         const editBtn = cameraActionsDiv.querySelector('button[onclick*="showEditCamera"]');
         const deleteBtn = cameraActionsDiv.querySelector('.delete-btn');
-        
+
         if (editBtn) editBtn.style.display = isAdminMode ? 'inline-block' : 'none';
         if (deleteBtn) deleteBtn.style.display = isAdminMode ? 'inline-block' : 'none';
     }
-    
-    // Update recording status (keep existing function)
-    updateRecordingStatus(camera.id, camera.path, requiresToken);
+
+    // Update recording status only for enabled cameras
+    if (isEnabled) {
+        updateRecordingStatus(camera.id, camera.path, requiresToken);
+    }
 }
 
 async function updateCameraGrid(cameras) {
@@ -1008,7 +1011,8 @@ async function updateCameraGrid(cameras) {
 
 async function createCameraTileWithRecording(camera) {
     const requiresToken = camera.token_required === true;
-    
+    const isEnabled = camera.enabled !== false; // Default to true if not specified
+
     // Fetch recording data in parallel
     let recordingStatus = 'Unknown';
     let recordingActive = false;
@@ -1016,47 +1020,50 @@ async function createCameraTileWithRecording(camera) {
     let recordingBtnText = '🔴 Start Recording';
     let recordingBtnColor = '#27ae60';
     let recordingAvailable = false;
-    
-    try {
-        const headers = { 'Content-Type': 'application/json' };
-        
-        if (requiresToken) {
-            // Check if we have a saved token for this camera
-            const savedToken = cameraTokens[camera.id];
-            if (savedToken) {
-                headers['Authorization'] = `Bearer ${savedToken}`;
+
+    // Skip recording status checks for disabled cameras
+    if (isEnabled) {
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+
+            if (requiresToken) {
+                // Check if we have a saved token for this camera
+                const savedToken = cameraTokens[camera.id];
+                if (savedToken) {
+                    headers['Authorization'] = `Bearer ${savedToken}`;
+                }
             }
-        }
-        
-        if (adminToken) {
-            headers['Authorization'] = `Bearer ${adminToken}`;
-        }
-        
-        const [statusResponse, sizeResponse] = await Promise.all([
-            fetch(`${basePath}${camera.path}/control/recording/active`, { headers }),
-            fetch(`${basePath}${camera.path}/control/recording/size`, { headers })
-        ]);
-        
-        if (statusResponse.ok) {
-            recordingAvailable = true;
-            const statusData = await statusResponse.json();
-            recordingActive = statusData.status === 'success' && statusData.data && statusData.data.active;
-            recordingStatus = recordingActive ? 'Active' : 'Stopped';
-            recordingBtnText = recordingActive ? '⏹️ Stop Recording' : '🔴 Start Recording';
-            recordingBtnColor = recordingActive ? '#e74c3c' : '#27ae60';
-        }
-        
-        if (sizeResponse.ok) {
-            recordingAvailable = true;
-            const sizeData = await sizeResponse.json();
-            if (sizeData.status === 'success' && sizeData.data) {
-                dbSize = formatFileSize(sizeData.data.size_bytes);
+
+            if (adminToken) {
+                headers['Authorization'] = `Bearer ${adminToken}`;
             }
+
+            const [statusResponse, sizeResponse] = await Promise.all([
+                fetch(`${basePath}${camera.path}/control/recording/active`, { headers }),
+                fetch(`${basePath}${camera.path}/control/recording/size`, { headers })
+            ]);
+
+            if (statusResponse.ok) {
+                recordingAvailable = true;
+                const statusData = await statusResponse.json();
+                recordingActive = statusData.status === 'success' && statusData.data && statusData.data.active;
+                recordingStatus = recordingActive ? 'Active' : 'Stopped';
+                recordingBtnText = recordingActive ? '⏹️ Stop Recording' : '🔴 Start Recording';
+                recordingBtnColor = recordingActive ? '#e74c3c' : '#27ae60';
+            }
+
+            if (sizeResponse.ok) {
+                recordingAvailable = true;
+                const sizeData = await sizeResponse.json();
+                if (sizeData.status === 'success' && sizeData.data) {
+                    dbSize = formatFileSize(sizeData.data.size_bytes);
+                }
+            }
+        } catch (error) {
+            // Use default values for errors
         }
-    } catch (error) {
-        // Use default values for errors
     }
-    
+
     return createCameraTile(camera, recordingStatus, recordingActive, dbSize, recordingBtnText, recordingBtnColor, recordingAvailable);
 }
 
