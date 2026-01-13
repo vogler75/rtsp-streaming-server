@@ -1,6 +1,0 @@
---2026-01-13 11:24:34--  http://scada:8081/cam2/control/recordings/hls/timerange?t1=2026-01-13T10%3A08%3A54.389Z
-Resolving scada (scada)... 127.0.1.1
-Connecting to scada (scada)|127.0.1.1|:8081... connected.
-HTTP request sent, awaiting response... 400 Bad Request
-2026-01-13 11:24:34 ERROR 400: Bad Request.
-
