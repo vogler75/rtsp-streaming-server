@@ -836,22 +836,31 @@ impl RecordingManager {
         camera_frame_senders: &HashMap<String, Arc<broadcast::Sender<Bytes>>>,
         camera_configs: &HashMap<String, crate::config::CameraConfig>,
     ) -> crate::errors::Result<()> {
-        info!("Performing startup cleanup for all camera databases...");
-        
         // Update camera configs for cleanup
         self.update_camera_configs(camera_configs.clone()).await;
-        
-        // Perform cleanup for all existing databases at startup
-        let databases = self.databases.read().await;
-        for (camera_id, database) in databases.iter() {
-            info!("Performing startup cleanup for camera '{}'", camera_id);
-            let configs = self.camera_configs.read().await;
-            if let Err(e) = database.cleanup_database(&self.config, &configs).await {
-                error!("Failed to perform startup cleanup for camera '{}': {}", camera_id, e);
+
+        // Run startup cleanup in background to avoid blocking server startup
+        info!("Scheduling background cleanup for all camera databases at startup...");
+        let databases_clone = self.databases.clone();
+        let config_clone = self.config.clone();
+        let camera_configs_clone = self.camera_configs.clone();
+
+        tokio::spawn(async move {
+            // Small delay to let server finish starting up first
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            info!("Starting background cleanup for all camera databases...");
+            let databases = databases_clone.read().await;
+            for (camera_id, database) in databases.iter() {
+                info!("Performing background startup cleanup for camera '{}'", camera_id);
+                let configs = camera_configs_clone.read().await;
+                if let Err(e) = database.cleanup_database(&config_clone, &configs).await {
+                    error!("Failed to perform startup cleanup for camera '{}': {}", camera_id, e);
+                }
             }
-        }
-        drop(databases);
-        
+            info!("Background startup cleanup completed for all camera databases");
+        });
+
         info!("Checking for active recordings to restart at startup...");
         
         let mut restarted_count = 0;
