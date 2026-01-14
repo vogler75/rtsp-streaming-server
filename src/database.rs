@@ -1564,7 +1564,7 @@ impl DatabaseProvider for SqliteDatabase {
             // Delete segments for a specific camera, but not for sessions marked to keep
             let query = format!(
                 r#"
-                SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
+                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0
@@ -1581,7 +1581,7 @@ impl DatabaseProvider for SqliteDatabase {
             // Delete segments for all cameras, but not for sessions marked to keep
             let query = format!(
                 r#"
-                SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
+                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE vs.end_time < ? AND rs.keep_session = 0
@@ -3882,7 +3882,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             // Delete segments for a specific camera, but not for sessions marked to keep
             let query = format!(
                 r#"
-                SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
+                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE rs.camera_id = $1 AND vs.end_time < $2 AND rs.keep_session = false
@@ -3898,7 +3898,7 @@ impl DatabaseProvider for PostgreSqlDatabase {
             // Delete segments for all cameras, but not for sessions marked to keep
             let query = format!(
                 r#"
-                SELECT vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
+                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, vs.mp4_data
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
                 WHERE vs.end_time < $1 AND rs.keep_session = false
