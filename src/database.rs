@@ -1558,51 +1558,44 @@ impl DatabaseProvider for SqliteDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
-        
-        // First, select the file paths of the segments to be deleted, excluding sessions marked to keep
-        let (_query, segments_to_delete) = if let Some(cam_id) = camera_id {
-            // Delete segments for a specific camera, but not for sessions marked to keep
+
+        // First, select only file_path for segments that have files on disk (not stored in database)
+        let file_paths: Vec<String> = if let Some(cam_id) = camera_id {
             let query = format!(
                 r#"
-                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, NULL as mp4_data
+                SELECT vs.file_path
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
-                WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0
+                WHERE rs.camera_id = ? AND vs.end_time < ? AND rs.keep_session = 0 AND vs.file_path IS NOT NULL
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
             );
-            let segments = sqlx::query_as::<_, VideoSegment>(&query)
+            sqlx::query_scalar(&query)
                 .bind(cam_id)
                 .bind(older_than)
                 .fetch_all(&self.pool)
-                .await?;
-            (query, segments)
+                .await?
         } else {
-            // Delete segments for all cameras, but not for sessions marked to keep
             let query = format!(
                 r#"
-                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, NULL as mp4_data
+                SELECT vs.file_path
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
-                WHERE vs.end_time < ? AND rs.keep_session = 0
+                WHERE vs.end_time < ? AND rs.keep_session = 0 AND vs.file_path IS NOT NULL
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
             );
-            let segments = sqlx::query_as::<_, VideoSegment>(&query)
+            sqlx::query_scalar(&query)
                 .bind(older_than)
                 .fetch_all(&self.pool)
-                .await?;
-            (query, segments)
+                .await?
         };
 
-        // Delete the files from the filesystem (only if they have file_path set)
-        for segment in &segments_to_delete {
-            if let Some(file_path) = &segment.file_path {
-                if let Err(e) = tokio::fs::remove_file(file_path).await {
-                    tracing::error!("Failed to delete video segment file {}: {}", file_path, e);
-                }
+        // Delete the files from the filesystem
+        for file_path in &file_paths {
+            if let Err(e) = tokio::fs::remove_file(file_path).await {
+                tracing::error!("Failed to delete video segment file {}: {}", file_path, e);
             }
-            // No action needed for database-stored segments - they'll be deleted with the record
         }
 
         // Then, delete the records from the database, but only for sessions not marked to keep
@@ -3876,49 +3869,44 @@ impl DatabaseProvider for PostgreSqlDatabase {
         older_than: DateTime<Utc>,
     ) -> Result<usize> {
         let start_time = std::time::Instant::now();
-        
-        // First, select the file paths of the segments to be deleted, excluding sessions marked to keep
-        let segments_to_delete = if let Some(cam_id) = camera_id {
-            // Delete segments for a specific camera, but not for sessions marked to keep
+
+        // First, select only file_path for segments that have files on disk (not stored in database)
+        let file_paths: Vec<String> = if let Some(cam_id) = camera_id {
             let query = format!(
                 r#"
-                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, NULL as mp4_data
+                SELECT vs.file_path
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
-                WHERE rs.camera_id = $1 AND vs.end_time < $2 AND rs.keep_session = false
+                WHERE rs.camera_id = $1 AND vs.end_time < $2 AND rs.keep_session = false AND vs.file_path IS NOT NULL
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_as::<_, VideoSegment>(&query)
+            sqlx::query_scalar(&query)
                 .bind(cam_id)
                 .bind(older_than)
                 .fetch_all(&self.pool)
                 .await?
         } else {
-            // Delete segments for all cameras, but not for sessions marked to keep
             let query = format!(
                 r#"
-                SELECT vs.camera_id, vs.session_id, vs.start_time, vs.end_time, vs.file_path, vs.size_bytes, NULL as mp4_data
+                SELECT vs.file_path
                 FROM {} vs
                 JOIN {} rs ON vs.session_id = rs.session_id
-                WHERE vs.end_time < $1 AND rs.keep_session = false
+                WHERE vs.end_time < $1 AND rs.keep_session = false AND vs.file_path IS NOT NULL
                 "#,
                 TABLE_RECORDING_MP4, TABLE_RECORDING_SESSIONS
             );
-            sqlx::query_as::<_, VideoSegment>(&query)
+            sqlx::query_scalar(&query)
                 .bind(older_than)
                 .fetch_all(&self.pool)
                 .await?
         };
 
-        // Delete the files from the filesystem (only if they have file_path set)
-        for segment in &segments_to_delete {
-            if let Some(file_path) = &segment.file_path {
-                if let Err(e) = tokio::fs::remove_file(file_path).await {
-                    tracing::error!("Failed to delete video segment file {}: {}", file_path, e);
-                }
+        // Delete the files from the filesystem
+        for file_path in &file_paths {
+            if let Err(e) = tokio::fs::remove_file(file_path).await {
+                tracing::error!("Failed to delete video segment file {}: {}", file_path, e);
             }
-            // No action needed for database-stored segments - they'll be deleted with the record
         }
 
         // Then, delete the records from the database, but only for sessions not marked to keep
