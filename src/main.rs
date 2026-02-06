@@ -1298,7 +1298,7 @@ async fn main() -> Result<()> {
         info!("Starting export job processor background worker");
         let export_mgr_clone = export_mgr.clone();
         let rec_mgr_clone = rec_mgr.clone();
-        let recording_base_path = rec_config.database_path.clone();
+        let recording_base_path = rec_config.get_mp4_storage_path().to_string();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));

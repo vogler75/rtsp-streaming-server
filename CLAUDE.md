@@ -177,6 +177,24 @@ The server supports both SQLite and PostgreSQL databases for recording storage:
 - Use `timeout` commands for quick testing without long-running processes
 
 ### Adding New Features
+
+**IMPORTANT: Full-stack checklist.** Every feature that touches backend code likely also needs UI changes. Always work through this checklist before considering a feature complete:
+
+#### When adding or changing a config field (`src/config.rs`):
+1. **Rust struct**: Add field to the relevant struct (`RecordingConfig`, `CameraConfig`, `ServerConfig`, etc.) with `#[serde(default)]` for backward compatibility
+2. **Default value**: Update `Config::default()` to include the new field
+3. **Dashboard HTML** (`static/dashboard.html`): Add a form input/select in the matching section of the Server Configuration modal (Recording Settings, Server Settings, MQTT, etc.)
+4. **Dashboard JS — populate** (`static/dashboard.js` → `populateServerConfigForm()`): Read the field from the config response and set it on the new form element
+5. **Dashboard JS — collect** (`static/dashboard.js` → `collectServerConfigFromForm()`): Include the field in the object sent back to the API on save
+6. **Per-camera override** (if applicable): Also add to `CameraRecordingConfig` struct, the camera edit form in `dashboard.html` (`populateForm()` in JS), and camera save logic
+
+#### When adding a new API endpoint:
+1. **Rust handler**: Implement in the appropriate `api_*.rs` or `handlers.rs` file
+2. **Router**: Register the route in `main.rs`
+3. **Dashboard UI**: Add buttons/links/forms in `static/dashboard.html` + JS calls in `static/dashboard.js`
+4. **Camera pages** (if per-camera): Update `static/control.html` or `static/stream.html` as needed
+
+#### General feature areas:
 - **Camera features**: Modify camera JSON schema and `config.rs` parsing
 - **Streaming features**: Extend `video_stream.rs` and `websocket.rs`
 - **Recording features**: Modify `recording.rs` and database schema

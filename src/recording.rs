@@ -1210,7 +1210,7 @@ impl RecordingManager {
         end_time: DateTime<Utc>,
         frames: Vec<Bytes>,
     ) -> crate::errors::Result<()> {
-        let recordings_dir = &config.database_path;
+        let recordings_dir = config.get_mp4_storage_path();
 
         // Create hierarchical directory structure: recordings/cam1/2025/08/19/
         let year = start_time.year();

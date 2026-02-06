@@ -316,6 +316,10 @@ pub struct RecordingConfig {
     #[serde(default = "default_pre_recording_cleanup_interval_seconds")]
     pub pre_recording_cleanup_interval_seconds: u64, // How often to cleanup buffer frames
     
+    // Separate path for MP4 file storage (defaults to database_path when not set)
+    #[serde(default)]
+    pub mp4_storage_path: Option<String>,
+
     // NEW: MP4 video storage settings
     #[serde(default)]
     pub mp4_storage_type: Mp4StorageType,
@@ -359,6 +363,14 @@ impl MqttConfig {
         
         // Substitute ${hostname} in client_id
         self.client_id = self.client_id.replace("${hostname}", &hostname);
+    }
+}
+
+impl RecordingConfig {
+    /// Returns the path to use for MP4 file storage.
+    /// Falls back to `database_path` if `mp4_storage_path` is not set.
+    pub fn get_mp4_storage_path(&self) -> &str {
+        self.mp4_storage_path.as_deref().unwrap_or(&self.database_path)
     }
 }
 
@@ -415,6 +427,7 @@ impl Default for Config {
                 pre_recording_enabled: false,
                 pre_recording_buffer_minutes: default_pre_recording_buffer_minutes(),
                 pre_recording_cleanup_interval_seconds: default_pre_recording_cleanup_interval_seconds(),
+                mp4_storage_path: None,
                 mp4_storage_type: Mp4StorageType::Disabled,
                 mp4_storage_retention: default_mp4_storage_retention(),
                 mp4_segment_minutes: default_mp4_segment_minutes(),
