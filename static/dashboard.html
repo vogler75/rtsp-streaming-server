@@ -822,8 +822,16 @@
                                 <input type="number" id="config_recording_mp4_segment_minutes" placeholder="5" min="1" max="60">
                                 <span class="help-text">Duration of each MP4 video segment (1-60 minutes)</span>
                             </div>
+                            <div class="form-group">
+                                <label>Include Reason in MP4 Filename</label>
+                                <select id="config_recording_mp4_filename_include_reason">
+                                    <option value="false">Disabled - Timestamp only (2025-08-19T10-54-00Z.mp4)</option>
+                                    <option value="true">Enabled - Append reason (2025-08-19T10-54-00Z_Motion-detected.mp4)</option>
+                                </select>
+                                <span class="help-text">When enabled, the recording reason is appended to the MP4 filename</span>
+                            </div>
                         </div>
-                        
+
                         <!-- HLS Section -->
                         <h4 style="margin: 20px 0 10px 0; color: #fff; border-bottom: 1px solid #4a90e2; padding-bottom: 5px;">📺 HLS (Experimental)</h4>
                         <div class="form-grid">

@@ -10,6 +10,49 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use crate::database::{DatabaseProvider, RecordingSession, RecordedFrame, RecordingQuery, VideoSegment, RecordingHlsSegment};
 
+/// Sanitize a recording reason string for safe use in filenames.
+/// Returns None if the sanitized result is empty.
+fn sanitize_reason_for_filename(reason: &str) -> Option<String> {
+    let sanitized: String = reason
+        .chars()
+        .map(|c| {
+            if c == ' ' || "\\/:*?\"<>|".contains(c) || c.is_control() {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+
+    // Collapse consecutive hyphens
+    let mut collapsed = String::with_capacity(sanitized.len());
+    let mut prev_hyphen = false;
+    for c in sanitized.chars() {
+        if c == '-' {
+            if !prev_hyphen {
+                collapsed.push('-');
+            }
+            prev_hyphen = true;
+        } else {
+            collapsed.push(c);
+            prev_hyphen = false;
+        }
+    }
+
+    // Trim leading/trailing dots, spaces, and hyphens
+    let trimmed = collapsed.trim_matches(|c: char| c == '.' || c == ' ' || c == '-');
+
+    // Truncate to 80 characters
+    let truncated: String = trimmed.chars().take(80).collect();
+    let truncated = truncated.trim_end_matches(|c: char| c == '.' || c == ' ' || c == '-');
+
+    if truncated.is_empty() {
+        None
+    } else {
+        Some(truncated.to_string())
+    }
+}
+
 /// Message sent from frame receiver to database writer task
 enum FrameWriterMessage {
     /// A frame to be written to the database
@@ -1228,7 +1271,20 @@ impl RecordingManager {
 
         // Use ISO 8601 format for filename (filesystem-safe): 2025-08-19T10-54-00Z.mp4
         let iso_timestamp = start_time.format("%Y-%m-%dT%H-%M-%SZ");
-        let file_path = format!("{}/{}.mp4", camera_dir, iso_timestamp);
+
+        let filename_stem = if config.mp4_filename_include_reason {
+            match database.get_session_reason(session_id).await {
+                Ok(Some(r)) => match sanitize_reason_for_filename(&r) {
+                    Some(sanitized) => format!("{}_{}", iso_timestamp, sanitized),
+                    None => iso_timestamp.to_string(),
+                },
+                _ => iso_timestamp.to_string(),
+            }
+        } else {
+            iso_timestamp.to_string()
+        };
+
+        let file_path = format!("{}/{}.mp4", camera_dir, filename_stem);
 
         // Calculate actual framerate from frame count and duration
         let duration_secs = (end_time - start_time).num_milliseconds() as f32 / 1000.0;

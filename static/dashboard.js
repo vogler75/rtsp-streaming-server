@@ -393,6 +393,7 @@ function populateServerConfigForm(config) {
     document.getElementById('config_recording_mp4_storage_path').value = config.recording?.mp4_storage_path || '';
     document.getElementById('config_recording_mp4_storage_retention').value = config.recording?.mp4_storage_retention || '';
     document.getElementById('config_recording_mp4_segment_minutes').value = config.recording?.mp4_segment_minutes || '';
+    document.getElementById('config_recording_mp4_filename_include_reason').value = (config.recording?.mp4_filename_include_reason || false).toString();
     document.getElementById('config_recording_cleanup_interval_minutes').value = config.recording?.cleanup_interval_minutes || '';
     // HLS settings
     document.getElementById('config_recording_hls_storage_enabled').value = (config.recording?.hls_storage_enabled || false).toString();
@@ -453,6 +454,7 @@ function collectServerConfigFromForm() {
             frame_storage_retention: document.getElementById('config_recording_frame_storage_retention').value || "7d",
             mp4_storage_retention: document.getElementById('config_recording_mp4_storage_retention').value || "30d",
             mp4_segment_minutes: parseInt(document.getElementById('config_recording_mp4_segment_minutes').value) || 5,
+            mp4_filename_include_reason: document.getElementById('config_recording_mp4_filename_include_reason').value === 'true',
             cleanup_interval_minutes: parseInt(document.getElementById('config_recording_cleanup_interval_minutes').value) || 60,
             hls_storage_enabled: document.getElementById('config_recording_hls_storage_enabled').value === 'true',
             hls_storage_retention: document.getElementById('config_recording_hls_storage_retention').value || "30d",

@@ -327,6 +327,8 @@ pub struct RecordingConfig {
     pub mp4_storage_retention: String, // Max age for video recordings (e.g., "30d")
     #[serde(default = "default_mp4_segment_minutes")]
     pub mp4_segment_minutes: u64, // Duration of each video segment in minutes
+    #[serde(default)]
+    pub mp4_filename_include_reason: bool, // Append sanitized recording reason to MP4 filename
 
     // HLS storage settings
     #[serde(default)]
@@ -431,6 +433,7 @@ impl Default for Config {
                 mp4_storage_type: Mp4StorageType::Disabled,
                 mp4_storage_retention: default_mp4_storage_retention(),
                 mp4_segment_minutes: default_mp4_segment_minutes(),
+                mp4_filename_include_reason: false,
                 cleanup_interval_minutes: default_cleanup_interval_minutes(),
                 hls_storage_enabled: false,
                 hls_storage_retention: default_hls_storage_retention(),

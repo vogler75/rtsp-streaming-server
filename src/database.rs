@@ -171,7 +171,9 @@ pub trait DatabaseProvider: Send + Sync {
     async fn stop_recording_session(&self, session_id: i64) -> Result<()>;
     
     async fn get_active_recordings(&self, camera_id: &str) -> Result<Vec<RecordingSession>>;
-    
+
+    async fn get_session_reason(&self, session_id: i64) -> Result<Option<String>>;
+
     async fn add_recorded_frame(
         &self,
         session_id: i64,
@@ -849,6 +851,16 @@ impl DatabaseProvider for SqliteDatabase {
         }
 
         Ok(sessions)
+    }
+
+    async fn get_session_reason(&self, session_id: i64) -> Result<Option<String>> {
+        let query = format!("SELECT reason FROM {} WHERE session_id = ?", TABLE_RECORDING_SESSIONS);
+        let reason: Option<String> = sqlx::query_scalar(&query)
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten();
+        Ok(reason)
     }
 
     async fn add_recorded_frame(
@@ -3164,6 +3176,16 @@ impl DatabaseProvider for PostgreSqlDatabase {
         }
 
         Ok(sessions)
+    }
+
+    async fn get_session_reason(&self, session_id: i64) -> Result<Option<String>> {
+        let query = format!("SELECT reason FROM {} WHERE session_id = $1", TABLE_RECORDING_SESSIONS);
+        let reason: Option<String> = sqlx::query_scalar(&query)
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten();
+        Ok(reason)
     }
 
     async fn add_recorded_frame(

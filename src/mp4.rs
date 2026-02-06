@@ -106,12 +106,19 @@ fn parse_timestamp_from_filename(filename: &str) -> Option<DateTime<Utc>> {
     }
     
     // Try removing .mp4 extension for backward compatibility
-    let timestamp_str = if let Some(stripped) = filename.strip_suffix(".mp4") {
+    let base = if let Some(stripped) = filename.strip_suffix(".mp4") {
         stripped
     } else {
         filename
     };
-    
+
+    // Strip reason suffix: everything after 'Z' in "2025-08-19T10-54-00Z_Motion-detected"
+    let timestamp_str = if let Some(z_pos) = base.find('Z') {
+        &base[..=z_pos]
+    } else {
+        base
+    };
+
     // Try parsing the exact timestamp format: 2025-08-23T17:53:25.522501Z
     match DateTime::parse_from_rfc3339(timestamp_str) {
         Ok(dt) => {
