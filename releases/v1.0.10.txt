@@ -1,0 +1,14 @@
+Release v1.0.10
+Built from commit: 0cfbe49
+Date: 2026-02-06 11:14:56
+
+Changes since v1.0.9:
+---
+0cfbe49 Add optional recording reason suffix to MP4 filenames
+66571d8 Add separate mp4_storage_path config to decouple MP4 file storage from SQLite database path
+e8d55bb Update .gitignore
+95c9ac1 Delete config.json
+9190ca4 Inform user about restart requirements after config changes
+fb35880 Optimize delete_old_video_segments to only select file_path
+e3f053b Fix memory leak in delete_old_video_segments by not loading mp4_data blobs
+9e4917b Fix missing camera_id column in delete_old_video_segments queries
