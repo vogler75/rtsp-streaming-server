@@ -201,6 +201,22 @@ pub async fn api_get_config(
     }
 }
 
+/// Compare old and new config JSON values and return which top-level sections changed.
+fn detect_changed_sections(old_config: &serde_json::Value, new_config: &serde_json::Value) -> Vec<String> {
+    let sections = ["server", "transcoding", "mqtt", "recording"];
+    let mut changed = Vec::new();
+
+    for section in &sections {
+        let old_section = old_config.get(*section);
+        let new_section = new_config.get(*section);
+        if old_section != new_section {
+            changed.push(section.to_string());
+        }
+    }
+
+    changed
+}
+
 /// Recursively merge JSON values, updating target with values from source
 fn merge_json_values(target: &mut serde_json::Value, source: &serde_json::Value) {
     match (target.as_object_mut(), source.as_object()) {
@@ -265,6 +281,9 @@ pub async fn api_update_config(
         obj.remove("cameras");
     }
 
+    // Save a copy of the old config before merging for change detection
+    let old_config_value = current_config_value.clone();
+
     merge_json_values(&mut current_config_value, &body.0);
 
     match serde_json::from_value::<config::Config>(current_config_value.clone()) {
@@ -280,11 +299,43 @@ pub async fn api_update_config(
 
             match std::fs::write(config_path, content) {
                 Ok(_) => {
-                    info!("Server configuration updated successfully");
-                    Json(ApiResponse::success(serde_json::json!({
-                        "message": "Configuration updated successfully",
-                        "note": "Server restart may be required for some changes to take effect"
-                    }))).into_response()
+                    let changed_sections = detect_changed_sections(&old_config_value, &current_config_value);
+
+                    if changed_sections.is_empty() {
+                        info!("Server configuration saved (no changes detected)");
+                        Json(ApiResponse::success(serde_json::json!({
+                            "message": "Configuration saved (no changes detected)",
+                            "restart_required": false,
+                            "camera_restart_recommended": false
+                        }))).into_response()
+                    } else {
+                        let camera_affecting: Vec<&String> = changed_sections.iter()
+                            .filter(|s| matches!(s.as_str(), "transcoding" | "recording" | "mqtt"))
+                            .collect();
+                        let camera_restart_recommended = !camera_affecting.is_empty();
+
+                        let note = if camera_restart_recommended {
+                            let section_names = camera_affecting.iter()
+                                .map(|s| s.as_str())
+                                .collect::<Vec<_>>()
+                                .join("/");
+                            format!(
+                                "Server restart required. Some cameras may also need restarting because global {} settings changed.",
+                                section_names
+                            )
+                        } else {
+                            "Server restart required to apply changes.".to_string()
+                        };
+
+                        info!("Server configuration updated successfully (changed: {:?})", changed_sections);
+                        Json(ApiResponse::success(serde_json::json!({
+                            "message": "Configuration updated successfully",
+                            "restart_required": true,
+                            "camera_restart_recommended": camera_restart_recommended,
+                            "changed_sections": changed_sections,
+                            "note": note
+                        }))).into_response()
+                    }
                 }
                 Err(e) => {
                     (axum::http::StatusCode::INTERNAL_SERVER_ERROR,

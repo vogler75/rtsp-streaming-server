@@ -162,11 +162,7 @@ function disableAdminMode() {
 function showAlert(message, type = 'info') {
     const alert = document.getElementById('alert');
     alert.className = `alert ${type} show`;
-    alert.textContent = message;
-    
-    setTimeout(() => {
-        alert.classList.remove('show');
-    }, 5000);
+    alert.innerHTML = `<span>${message}</span><span class="alert-close" onclick="this.parentElement.classList.remove('show')">&times;</span>`;
 }
 
 function toggleSection(element) {
@@ -519,7 +515,15 @@ async function saveServerConfig() {
             const data = await response.json();
             if (data.status === 'success') {
                 originalServerConfig = config; // Update original to new saved version
-                showAlert('Server configuration saved successfully! ' + (data.data.note || ''), 'success');
+                const result = data.data;
+                if (result.restart_required && result.camera_restart_recommended) {
+                    const sections = (result.changed_sections || []).join('/');
+                    showAlert(`Configuration saved. Server restart required. Cameras that inherit global ${sections} settings may also need restarting.`, 'warning');
+                } else if (result.restart_required) {
+                    showAlert('Configuration saved. Server restart required to apply changes.', 'warning');
+                } else {
+                    showAlert('Configuration saved (no changes detected).', 'success');
+                }
                 closeServerConfigModal();
             } else {
                 showAlert(`Failed to save: ${data.message}`, 'error');
@@ -605,7 +609,15 @@ async function saveServerConfigJson() {
             const data = await response.json();
             if (data.status === 'success') {
                 originalServerConfig = config; // Update original to new saved version
-                showAlert('Server configuration saved successfully! ' + (data.data.note || ''), 'success');
+                const result = data.data;
+                if (result.restart_required && result.camera_restart_recommended) {
+                    const sections = (result.changed_sections || []).join('/');
+                    showAlert(`Configuration saved. Server restart required. Cameras that inherit global ${sections} settings may also need restarting.`, 'warning');
+                } else if (result.restart_required) {
+                    showAlert('Configuration saved. Server restart required to apply changes.', 'warning');
+                } else {
+                    showAlert('Configuration saved (no changes detected).', 'success');
+                }
                 closeServerConfigModal();
             } else {
                 showAlert(`Failed to save: ${data.message}`, 'error');
@@ -803,7 +815,7 @@ document.getElementById('cameraForm').addEventListener('submit', async (e) => {
         const data = await response.json();
         
         if (data.status === 'success') {
-            showAlert(`Camera ${cameraId} ${isEditing ? 'updated' : 'created'} successfully`, 'success');
+            showAlert(`Camera ${cameraId} ${isEditing ? 'updated' : 'created'} successfully. Changes applied immediately.`, 'success');
             closeEditModal();
             refreshStatus();
         } else {
