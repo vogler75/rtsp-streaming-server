@@ -329,6 +329,8 @@ pub struct RecordingConfig {
     pub mp4_segment_minutes: u64, // Duration of each video segment in minutes
     #[serde(default)]
     pub mp4_filename_include_reason: bool, // Append sanitized recording reason to MP4 filename
+    #[serde(default = "default_true")]
+    pub mp4_filename_use_local_time: bool, // Use local time instead of UTC in MP4 filenames
 
     // HLS storage settings
     #[serde(default)]
@@ -352,6 +354,7 @@ fn default_mp4_segment_minutes() -> u64 { 5 }
 fn default_hls_storage_retention() -> String { "30d".to_string() }
 fn default_hls_segment_seconds() -> u64 { 6 }
 fn default_cleanup_interval_minutes() -> u64 { 60 }
+fn default_true() -> bool { true }
 
 impl MqttConfig {
     pub fn substitute_variables(&mut self) {
@@ -434,6 +437,7 @@ impl Default for Config {
                 mp4_storage_retention: default_mp4_storage_retention(),
                 mp4_segment_minutes: default_mp4_segment_minutes(),
                 mp4_filename_include_reason: false,
+                mp4_filename_use_local_time: true,
                 cleanup_interval_minutes: default_cleanup_interval_minutes(),
                 hls_storage_enabled: false,
                 hls_storage_retention: default_hls_storage_retention(),

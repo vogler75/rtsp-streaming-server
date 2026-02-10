@@ -825,10 +825,18 @@
                             <div class="form-group">
                                 <label>Include Reason in MP4 Filename</label>
                                 <select id="config_recording_mp4_filename_include_reason">
-                                    <option value="false">Disabled - Timestamp only (2025-08-19T10-54-00Z.mp4)</option>
-                                    <option value="true">Enabled - Append reason (2025-08-19T10-54-00Z_Motion-detected.mp4)</option>
+                                    <option value="false">Disabled - Timestamp only (2025-08-19T10-54-00.mp4)</option>
+                                    <option value="true">Enabled - Append reason (2025-08-19T10-54-00_Motion-detected.mp4)</option>
                                 </select>
                                 <span class="help-text">When enabled, the recording reason is appended to the MP4 filename</span>
+                            </div>
+                            <div class="form-group">
+                                <label>MP4 Filename Time Format</label>
+                                <select id="config_recording_mp4_filename_use_local_time">
+                                    <option value="true">Local Time (2025-08-19T10-54-00.mp4)</option>
+                                    <option value="false">UTC (2025-08-19T10-54-00Z.mp4)</option>
+                                </select>
+                                <span class="help-text">Choose whether MP4 filenames use local time or UTC timestamps</span>
                             </div>
                         </div>
 

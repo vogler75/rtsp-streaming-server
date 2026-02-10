@@ -1269,9 +1269,12 @@ impl RecordingManager {
             return Err(crate::errors::StreamError::Io { source: e });
         }
 
-        // Use local time for filename (filesystem-safe): 2025-08-19T10-54-00.mp4
-        let local_time = start_time.with_timezone(&Local);
-        let iso_timestamp = local_time.format("%Y-%m-%dT%H-%M-%S");
+        // Format timestamp for filename (filesystem-safe)
+        let iso_timestamp = if config.mp4_filename_use_local_time {
+            start_time.with_timezone(&Local).format("%Y-%m-%dT%H-%M-%S").to_string()
+        } else {
+            format!("{}Z", start_time.format("%Y-%m-%dT%H-%M-%S"))
+        };
 
         let filename_stem = if config.mp4_filename_include_reason {
             match database.get_session_reason(session_id).await {
