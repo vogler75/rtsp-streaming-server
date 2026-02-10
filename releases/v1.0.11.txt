@@ -1,0 +1,8 @@
+Release v1.0.11
+Built from commit: ee013b3
+Date: 2026-02-10 17:14:18
+
+Changes since v1.0.10:
+---
+ee013b3 Add configurable mp4_filename_use_local_time option
+4e90338 Use local time instead of UTC in MP4 recording filenames
