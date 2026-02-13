@@ -2,51 +2,51 @@
 
 A high-performance, low-latency video streaming server built in Rust that connects to RTSP cameras and streams video to web browsers via WebSockets.
 
-## Features
-
-- **Multi-Camera Support**: Stream from multiple RTSP cameras simultaneously
-- **RTSP Camera Support**: Connect to RTSP cameras and streams
-- **WebSocket Streaming**: Low-latency video streaming via WebSockets  
-- **HLS Video Streaming**: HTTP Live Streaming support for broader compatibility
-- **MJPEG Output**: Converts video to JPEG frames for browser compatibility
-- **Advanced Recording System**: Triple-format storage system:
-  - **Frame Storage**: Individual JPEG frames for precise seeking (short-term)
-  - **HLS Storage**: Pre-generated HLS segments for fast streaming (medium-term) 
-  - **MP4 Storage**: Efficient video segments for long-term archival
-- **Flexible Database Backends**: Choose between SQLite and PostgreSQL for recording storage
-- **Performance Optimized**: HLS storage eliminates conversion overhead for instant playback
-- **HTTPS/TLS Support**: Secure connections with configurable certificates
-- **Web Interface**: Comprehensive dashboard and control interfaces
-- **Real-time Stats**: FPS, frame count, latency monitoring, and storage analytics
-- **Auto-reconnection**: Automatic reconnection for both RTSP and WebSocket connections
-- **Per-Camera Debug**: Camera-specific logging with ID prefixes
-- **PTZ Control**: Pan/Tilt/Zoom support via ONVIF protocol
-
 ## Quick Start
 
-1. **Build and run the server**:
+1. **Install prerequisites**: Ensure [Rust](https://rustup.rs/) and [FFmpeg](https://ffmpeg.org/) are installed on your system.
+
+2. **Build and run the server**:
    ```bash
    cargo run
    ```
 
-2. **Open your web browser** and navigate to:
+3. **Open the Dashboard** in your web browser:
    ```
-   # Dashboard (overview of all cameras)
    http://localhost:8080/dashboard
-   
-   # Individual camera test pages
-   http://localhost:8080/cam1
-   http://localhost:8080/cam2
-   http://localhost:8080/cam3
    ```
-   
-   For HTTPS (if TLS is enabled):
-   ```
-   https://localhost:8080/dashboard
-   https://localhost:8080/cam1
-   ```
+   The **Dashboard** is your central control panel. From here you can:
+   - View all cameras and their live status
+   - Add, edit, and remove cameras (no need to edit JSON files manually)
+   - Configure server settings, recording, MQTT, and transcoding
+   - Start/stop recordings and monitor storage
+   - Access individual camera streams and control interfaces
 
-3. **Configure cameras** by creating JSON files in the `cameras` directory (see Configuration section)
+4. **Add cameras** via the Dashboard or by creating JSON files in the `cameras/` directory (see [Configuration](#configuration)).
+
+> **Tip**: For HTTPS (if TLS is enabled), use `https://localhost:8080/dashboard` instead.
+
+## Features
+
+- **Multi-Camera Support**: Stream from multiple RTSP cameras simultaneously
+- **RTSP Camera Support**: Connect to RTSP cameras and streams
+- **WebSocket Streaming**: Low-latency video streaming via WebSockets
+- **HLS Video Streaming**: HTTP Live Streaming support for broader compatibility
+- **MJPEG Output**: Converts video to JPEG frames for browser compatibility
+- **Advanced Recording System**: Triple-format storage system:
+  - **Frame Storage**: Individual JPEG frames for precise seeking (short-term)
+  - **HLS Storage**: Pre-generated HLS segments for fast streaming (medium-term)
+  - **MP4 Storage**: Efficient video segments for long-term archival
+- **Pre-Recording Buffer**: Configurable in-memory buffer to capture footage before recording starts
+- **Flexible Database Backends**: Choose between SQLite and PostgreSQL for recording storage
+- **Performance Optimized**: HLS storage eliminates conversion overhead for instant playback
+- **HTTPS/TLS Support**: Secure connections with configurable certificates
+- **Web Dashboard**: Comprehensive dashboard for camera management and server configuration
+- **Real-time Stats**: FPS, frame count, latency monitoring, and storage analytics
+- **Auto-reconnection**: Automatic reconnection for both RTSP and WebSocket connections
+- **Per-Camera Debug**: Camera-specific logging with ID prefixes
+- **PTZ Control**: Pan/Tilt/Zoom support via ONVIF protocol
+- **MP4 Export**: Export time ranges as MP4 files for download
 
 ## URL Structure
 
@@ -161,6 +161,9 @@ Here's a complete `config.json` file with all sections:
     "port": 8080,
     "cors_allow_origin": "*",
     "admin_token": "your-secure-admin-token",
+    "cameras_directory": "cameras",
+    "mp4_export_path": "exports",
+    "mp4_export_max_jobs": 100,
     "tls": {
       "enabled": false,
       "cert_path": "certs/server.crt",
@@ -180,10 +183,24 @@ Here's a complete `config.json` file with all sections:
     "max_packet_size": 268435456
   },
   "recording": {
-    "enabled": true,
+    "frame_storage_enabled": true,
+    "database_type": "sqlite",
     "database_path": "recordings",
     "max_frame_size": 10485760,
-    "max_recording_age": "7d",
+    "session_segment_minutes": 60,
+    "frame_storage_retention": "7d",
+    "pre_recording_enabled": true,
+    "pre_recording_buffer_minutes": 3,
+    "pre_recording_cleanup_interval_seconds": 1,
+    "mp4_storage_type": "filesystem",
+    "mp4_storage_path": "recordings/mp4",
+    "mp4_storage_retention": "30d",
+    "mp4_segment_minutes": 5,
+    "mp4_filename_include_reason": true,
+    "mp4_filename_use_local_time": true,
+    "hls_storage_enabled": true,
+    "hls_storage_retention": "30d",
+    "hls_segment_seconds": 6,
     "cleanup_interval_minutes": 60
   },
   "transcoding": {
@@ -206,6 +223,9 @@ Here's a complete `config.json` file with all sections:
     "port": 8080,
     "cors_allow_origin": "*",
     "admin_token": "your-secure-admin-token",
+    "cameras_directory": "cameras",
+    "mp4_export_path": "exports",
+    "mp4_export_max_jobs": 100,
     "tls": {
       "enabled": false,
       "cert_path": "certs/server.crt",
@@ -362,6 +382,7 @@ Create a JSON file for each camera in the `cameras/` directory:
 - **`extra_input_args`** (array|null): Additional FFmpeg input arguments
 - **`extra_output_args`** (array|null): Additional FFmpeg output arguments
 - **`log_stderr`** (string|null): FFmpeg stderr logging - `"file"`, `"console"`, `"both"`, or `null` to disable
+- **`data_timeout_secs`** (number|null): Timeout in seconds to restart FFmpeg if no data is received (default: 60)
 
 ##### MQTT Settings (`mqtt` object)
 Camera-specific MQTT settings (optional):
@@ -442,6 +463,10 @@ All changes are applied without server restart. WebSocket connections and FFmpeg
 - **server.host**: Server bind address (default: "0.0.0.0")
 - **server.port**: Server port (default: 8080)
 - **server.cors_allow_origin**: CORS allowed origin (default: "*")
+- **server.admin_token**: Token required for admin/dashboard operations
+- **server.cameras_directory**: Directory path for camera config files (default: "cameras")
+- **server.mp4_export_path**: Directory path for exported MP4 files (default: "exports")
+- **server.mp4_export_max_jobs**: Maximum number of export jobs to keep in memory (default: 100)
 - **server.tls.enabled**: Enable HTTPS/TLS (default: false)
 - **server.tls.cert_path**: Path to SSL certificate file
 - **server.tls.key_path**: Path to SSL private key file
@@ -658,37 +683,23 @@ openssl pkcs12 -in certificate.p12 -clcerts -nokeys -out server.crt
 openssl pkcs12 -in certificate.p12 -nocerts -nodes -out server.key
 ```
 
-## Admin Interface
+## Dashboard
 
-The server includes a web-based admin interface for managing camera configurations without editing JSON files directly.
-
-### Accessing the Admin Interface
-
-Navigate to:
-```
-http://localhost:8080/admin
-```
-
-### Features
+The server includes a web-based **Dashboard** at `/dashboard` that serves as the central management interface. It provides:
 
 - **Camera Management**: Add, edit, and delete camera configurations
+- **Server Configuration**: Modify server settings, recording, MQTT, and transcoding options
+- **Live Status**: Real-time overview of all camera connections, FPS, and storage
+- **Recording Controls**: Start/stop recordings and monitor storage usage
 - **Live Configuration**: All changes are applied immediately without server restart
-- **Visual Configuration**: User-friendly forms for all camera settings
 - **Configuration Groups**: Settings organized into logical sections:
   - Basic Settings (URL, path, transport)
+  - Recording Settings (storage types, retention, pre-recording)
   - MQTT Settings (publishing intervals, topics)
   - FFmpeg Settings (quality, scaling, performance)
   - Extended Options (advanced FFmpeg parameters)
 
-### Using the Admin Interface
-
-1. **View Cameras**: See all configured cameras with their status
-2. **Add Camera**: Click "Add Camera" and fill in the required fields
-3. **Edit Camera**: Click the edit icon next to any camera to modify settings
-4. **Delete Camera**: Click the delete icon to remove a camera
-5. **Save Changes**: Click "Save Camera" to apply configuration changes
-
-All changes made through the admin interface are saved to JSON files in the `cameras/` directory and are immediately applied by the server's file watcher.
+All changes made through the Dashboard are saved to JSON files in the `cameras/` directory and `config.json`, and are immediately applied by the server.
 
 ## Usage
 
@@ -772,16 +783,22 @@ The recording system supports three storage formats with independent configurati
 {
   "recording": {
     "frame_storage_enabled": true,
-    "mp4_storage_type": "database",
-    "hls_storage_enabled": true,
     "database_type": "sqlite",
     "database_path": "recordings",
     "database_url": null,
     "max_frame_size": 10485760,
-    "mp4_framerate": 5.0,
+    "session_segment_minutes": 60,
     "frame_storage_retention": "7d",
+    "pre_recording_enabled": true,
+    "pre_recording_buffer_minutes": 3,
+    "pre_recording_cleanup_interval_seconds": 1,
+    "mp4_storage_type": "filesystem",
+    "mp4_storage_path": "recordings/mp4",
     "mp4_storage_retention": "30d",
     "mp4_segment_minutes": 5,
+    "mp4_filename_include_reason": true,
+    "mp4_filename_use_local_time": true,
+    "hls_storage_enabled": true,
     "hls_storage_retention": "30d",
     "hls_segment_seconds": 6,
     "cleanup_interval_minutes": 60
@@ -916,12 +933,26 @@ Central WinCC System: Access all recordings from PostgreSQL database
 #### Recording Options
 
 ##### Core Settings
-- **frame_storage_enabled**: Enable/disable frame-by-frame SQLite storage
-- **mp4_storage_type**: MP4 storage mode: `"disabled"`, `"filesystem"`, or `"database"`  
-- **hls_storage_enabled**: Enable/disable HLS segment pre-generation
-- **database_path**: Base path for database files and video segments
-- **max_frame_size**: Maximum size for a single frame in bytes (SQLite storage)
-- **mp4_framerate**: Frame rate for MP4 recordings (default: 5.0 fps)
+- **frame_storage_enabled**: Enable/disable frame-by-frame storage (default: false)
+- **database_type**: Database backend - `"sqlite"` or `"postgresql"` (default: "sqlite")
+- **database_path**: Base path for database files and video segments (default: "recordings")
+- **database_url**: PostgreSQL connection URL (only for postgresql backend)
+- **max_frame_size**: Maximum size for a single frame in bytes (default: 10MB)
+- **session_segment_minutes**: Duration for automatic session segmentation in minutes (default: 60, 0=disabled)
+- **mp4_storage_type**: MP4 storage mode: `"disabled"`, `"filesystem"`, or `"database"` (default: "filesystem")
+- **mp4_storage_path**: Separate path for MP4 file storage (defaults to database_path if not set)
+- **hls_storage_enabled**: Enable/disable HLS segment pre-generation (default: false)
+
+##### Pre-Recording Buffer
+- **pre_recording_enabled**: Enable in-memory pre-recording buffer (default: false)
+- **pre_recording_buffer_minutes**: Duration of pre-recording buffer in minutes (default: 1)
+- **pre_recording_cleanup_interval_seconds**: How often to clean up expired buffer frames (default: 1)
+
+When enabled, the server keeps a rolling buffer of recent frames in memory. When recording starts, these buffered frames are included, capturing footage from *before* the recording was triggered.
+
+##### MP4 Filename Options
+- **mp4_filename_include_reason**: Append sanitized recording reason to MP4 filenames (default: false)
+- **mp4_filename_use_local_time**: Use local time instead of UTC in MP4 filenames (default: true)
 
 ##### Retention Policies
 - **frame_storage_retention**: Maximum age for frame recordings before deletion
@@ -954,6 +985,10 @@ You can override global recording settings for individual cameras in their confi
   "path": "/cam1",
   "url": "rtsp://...",
   "recording": {
+    "session_segment_minutes": 30,
+    "pre_recording_enabled": true,
+    "pre_recording_buffer_minutes": 5,
+    "pre_recording_cleanup_interval_seconds": 1,
     "frame_storage_enabled": true,
     "frame_storage_retention": "1d",
     "mp4_storage_type": "database",
