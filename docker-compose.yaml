@@ -6,7 +6,7 @@ services:
     container_name: rtsp-streaming-server
     restart: unless-stopped
     ports:
-      - "8081:8080" # Web Dashboard
+      - "8080:8080" # Web Dashboard
     volumes:
       # Configuration file
       - ./config.json:/app/config.json:ro

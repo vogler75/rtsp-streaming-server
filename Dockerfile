@@ -29,9 +29,6 @@ WORKDIR /app
 # Copy binary from builder stage
 COPY --from=builder /app/target/release/rtsp-streaming-server /app/rtsp-streaming-server
 
-# Create necessary directories for the app
-# RUN mkdir -p /app/cameras /app/recordings /app/certs /app/static
-
 # Copy static assets if they aren't embedded in the binary
 RUN mkdir /app/static
 COPY static/ /app/static/
