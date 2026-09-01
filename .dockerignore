@@ -1,0 +1,10 @@
+target/
+recordings/
+certs/
+.git
+.gitignore
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env

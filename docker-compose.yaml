@@ -16,7 +16,10 @@ services:
       
       # TLS Certificates for HTTPS
       - ./certs:/app/certs:ro
- 
+
+      # Persistent storage for recordings and SQLite database (Read/Write)
+      - ./recordings:/app/recordings
+
     environment:
       - RUST_LOG=info
       - TZ=UTC # Set to your local timezone, e.g., Europe/Paris

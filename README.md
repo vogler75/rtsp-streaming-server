@@ -714,6 +714,28 @@ cargo build --release
 ./target/release/rtsp-streaming-server
 ```
 
+### Running with Docker & Docker Compose
+
+1. **Prepare configuration**: Ensure you have a valid `config.json` file in the project root (e.g., copied from one of the example config files) before starting Docker:
+   ```bash
+   cp config-postgres-example.json config.json  # or create your custom config.json
+   ```
+
+2. **Start with Docker Compose**:
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. **Check logs**:
+   ```bash
+   docker compose logs -f
+   ```
+
+4. **Stop the server**:
+   ```bash
+   docker compose down
+   ```
+
 ### Testing with Real RTSP Streams
 
 1. Update `config.json` with your camera details (see Configuration section)
